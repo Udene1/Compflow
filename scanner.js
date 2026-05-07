@@ -79,6 +79,16 @@ window.Scanner = (() => {
             document.getElementById('scan-progress-fill').style.width = '100%';
 
             scannedResources.forEach((res, i) => {
+                // Get all mapped controls for this resource/issue
+                const controlKeys = Frameworks.getMapping(res.type, res.issue);
+                res.controlKeys = controlKeys; // Store for framework switching
+                
+                // Get the control ID for the CURRENT framework
+                const activeFW = Frameworks.getCurrent();
+                const activeControlKey = controlKeys.find(k => k.startsWith(Frameworks.getCurrentId ? Frameworks.getCurrentId() : 'soc2')) || controlKeys[0];
+                const controlDetail = Frameworks.getControlDetails(activeControlKey);
+                res.control = controlDetail ? controlDetail.id : 'N/A';
+
                 addResourceRow({ ...res, id: i }, i);
                 
                 // Log findings

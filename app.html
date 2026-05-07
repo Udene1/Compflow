@@ -18,6 +18,18 @@
                 ComplianceFlow<span>AI</span>
                 <small>Dashboard</small>
             </div>
+
+            <!-- ─── Framework Selector ─── -->
+            <div class="framework-selector">
+                <div class="fw-label">Global Focus</div>
+                <div class="framework-pill-grid">
+                    <button class="fw-pill active" onclick="setGlobalFramework('soc2')">SOC2</button>
+                    <button class="fw-pill" onclick="setGlobalFramework('gdpr')">GDPR</button>
+                    <button class="fw-pill" onclick="setGlobalFramework('hipaa')">HIPA</button>
+                    <button class="fw-pill" onclick="setGlobalFramework('iso27001')">ISO</button>
+                </div>
+            </div>
+
             <nav class="sidebar-nav">
                 <div class="nav-section-label">Infrastructure</div>
                 <a class="nav-item active" data-panel="connect" id="nav-connect">
@@ -61,7 +73,10 @@
         <!-- Main -->
         <main class="main-content">
             <div class="topbar">
-                <h2 id="page-title">Cloud Connect</h2>
+                <div class="header-main">
+                    <h2 id="page-title">Cloud Connect</h2>
+                    <div id="active-fw-badge" class="fw-status-badge">SOC2 Type II</div>
+                </div>
                 <div class="topbar-actions">
                     <div class="connection-chips" id="connection-chips"></div>
                     <a href="index.html" class="btn btn-secondary btn-sm">← Landing Page</a>
@@ -272,6 +287,7 @@
     </div>
 
     <script src="live-terminal.js"></script>
+    <script src="frameworks.js"></script>
     <script src="evidence.js"></script>
     <script src="cloud-connect.js"></script>
     <script src="scanner.js"></script>
@@ -293,7 +309,9 @@
 
         navItems.forEach(item => {
             item.addEventListener('click', () => {
+                if (item.classList.contains('fw-pill')) return; // ignore pills
                 const panel = item.dataset.panel;
+                if (!panel) return;
                 navItems.forEach(n => n.classList.remove('active'));
                 panels.forEach(p => p.classList.remove('active'));
                 item.classList.add('active');
@@ -301,6 +319,26 @@
                 pageTitle.textContent = titles[panel] || '';
             });
         });
+
+        function setGlobalFramework(id) {
+            Frameworks.setFramework(id);
+            const fw = Frameworks.getCurrent();
+            
+            // Update UI
+            document.querySelectorAll('.fw-pill').forEach(p => {
+                p.classList.toggle('active', p.textContent.toLowerCase().includes(id));
+            });
+            
+            const badge = document.getElementById('active-fw-badge');
+            badge.textContent = fw.name;
+            badge.className = 'fw-status-badge fw-' + id;
+
+            LiveTerminal.log('system', `Switching Governance Framework context to ${fw.name}...`);
+            
+            // Trigger UI refreshes
+            if (window.Scanner) Scanner.updateScore();
+            if (window.Evidence) Evidence.refreshView();
+        }
     </script>
 </body>
 </html>
