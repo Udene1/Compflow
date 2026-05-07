@@ -1,0 +1,96 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ComplianceFlow AI | SOC2 Outcome as a Service</title>
+    <link rel="stylesheet" href="styles.css">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;600;800&family=JetBrains+Mono:wght@300;500&display=swap" rel="stylesheet">
+</head>
+<body>
+    <div class="background-blobs">
+        <div class="blob blob-1"></div>
+        <div class="blob blob-2"></div>
+    </div>
+
+    <nav>
+        <div class="container nav-content">
+            <div class="logo">ComplianceFlow<span>AI</span></div>
+            <div class="nav-links">
+                <a href="#how-it-works">How it Works</a>
+                <a href="#pricing">Pricing</a>
+                <button class="btn-primary">Get Certified</button>
+            </div>
+        </div>
+    </nav>
+
+    <header class="hero container">
+        <div class="hero-content">
+            <span class="badge">Service-as-Software</span>
+            <h1>The SOC2 Outcome. <br><span class="gradient-text">No Dashboard Required.</span></h1>
+            <p>Traditional compliance software shows you what's broken. We actually fix it. Our AI agents remediate cloud misconfigurations and generate the evidence for you.</p>
+            <div class="hero-btns">
+                <button class="btn-primary btn-lg" onclick="window.location.href='app.html'">Go to Dashboard →</button>
+                <button class="btn-secondary btn-lg">Book Demo</button>
+            </div>
+        </div>
+    </header>
+
+    <section class="demo-section container" id="how-it-works">
+        <div class="glass-card demo-card">
+            <div class="demo-header">
+                <div class="demo-dots">
+                    <span></span><span></span><span></span>
+                </div>
+                <div class="demo-title">Autopilot Agent v1.0</div>
+            </div>
+            <div class="demo-body">
+                <div class="terminal" id="terminal-output">
+                    <div class="line">Ready for instruction...</div>
+                </div>
+                <div class="controls">
+                    <button id="run-autopilot" class="btn-action">Run AI Autopilot</button>
+                    <div class="status-indicator">
+                        <span class="pulse"></span>
+                        Agent Standby
+                    </div>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <section class="pricing-section container" id="pricing">
+        <div class="section-header">
+            <h2>Pricing by <span class="gradient-text">Outcome</span></h2>
+            <p>We don't charge per seat. We charge for the result.</p>
+        </div>
+        <div class="pricing-grid">
+            <div class="glass-card pricing-card">
+                <h3>Readiness Report</h3>
+                <div class="price">$500<span>/one-time</span></div>
+                <ul>
+                    <li>Full Cloud Scan</li>
+                    <li>Remediation Roadmap</li>
+                    <li>One-click Fixes</li>
+                </ul>
+                <button class="btn-secondary">Get Sample</button>
+            </div>
+            <div class="glass-card pricing-card featured">
+                <div class="price-badge">Most Popular</div>
+                <h3>SOC2 Certification</h3>
+                <div class="price">$5,000<span>/outcome</span></div>
+                <ul>
+                    <li>Full Remediation of all 104 controls</li>
+                    <li>Auto-evidence capture</li>
+                    <li>Guaranteed Audit Pass</li>
+                </ul>
+                <button class="btn-primary">Buy Certification</button>
+            </div>
+        </div>
+    </section>
+
+    <script src="service_demo.js"></script>
+</body>
+</html>
