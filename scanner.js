@@ -41,6 +41,16 @@ window.Scanner = (() => {
             return;
         }
 
+        const providers = CloudConnect.getProviders();
+        const provider = providers[0]; // Start with first connected
+        const credentials = CloudConnect.getCredentials(provider);
+
+        if (!credentials) {
+            LiveTerminal.log('insight', 'ERROR: Missing credentials for ' + provider);
+            CloudConnect.openSettings(provider);
+            return;
+        }
+
         const btn = document.getElementById('btn-start-scan');
         btn.disabled = true;
         btn.textContent = 'Scanning...';
@@ -51,49 +61,36 @@ window.Scanner = (() => {
         document.getElementById('resource-table').style.display = 'table';
         document.getElementById('scan-stats').style.display = 'grid';
         document.getElementById('scan-progress-wrap').style.display = 'block';
+        document.getElementById('scan-progress-fill').style.width = '10%';
 
-        LiveTerminal.log('system', `Starting infrastructure scan across ${CloudConnect.getProviders().map(p => p.toUpperCase()).join(', ')}...`);
-        LiveTerminal.log('agent', `Enumerating resources in ${RESOURCE_TEMPLATES.length} categories...`);
+        LiveTerminal.log('system', `Contacting real cloud APIs for ${provider.toUpperCase()}...`);
+        LiveTerminal.log('agent', `Requesting enumeration of S3 and IAM resources...`);
 
-        let idx = 0;
-        const total = RESOURCE_TEMPLATES.length;
+        fetch('/api/scan', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ provider, credentials })
+        })
+        .then(res => res.json())
+        .then(data => {
+            if (data.error) throw new Error(data.error);
 
-        const interval = setInterval(() => {
-            if (idx >= total) {
-                clearInterval(interval);
-                btn.disabled = false;
-                btn.textContent = 'Re-scan';
-                document.getElementById('scan-progress-fill').style.width = '100%';
+            scannedResources = data.resources || [];
+            document.getElementById('scan-progress-fill').style.width = '100%';
 
-                const issues = scannedResources.filter(r => r.severity !== 'pass');
-                LiveTerminal.log('output', `Scan complete: ${total} resources discovered. ${issues.length} issues found.`);
-
-                // Update issues badge
-                const badge = document.getElementById('issues-badge');
-                if (issues.length > 0) {
-                    badge.style.display = 'inline';
-                    badge.textContent = issues.length;
+            scannedResources.forEach((res, i) => {
+                addResourceRow({ ...res, id: i }, i);
+                
+                // Log findings
+                if (res.severity === 'critical') {
+                    LiveTerminal.log('insight', `CRITICAL: ${res.type} "${res.name}" — ${res.issue}`);
+                } else if (res.severity === 'warning') {
+                    LiveTerminal.log('agent', `Warning: ${res.type} "${res.name}" — ${res.issue}`);
                 }
+            });
 
-                updateScore();
-
-                // Capture evidence for all scanned resources
-                scannedResources.forEach(r => {
-                    if (window.Evidence) Evidence.captureFromScan(r);
-                });
-                updateEvidenceBadge();
-
-                // Trigger remediation panel build
-                Remediation.buildFromScan(scannedResources);
-                return;
-            }
-
-            const res = { ...RESOURCE_TEMPLATES[idx], id: idx };
-            scannedResources.push(res);
-            addResourceRow(res, idx);
-
-            const pct = Math.round(((idx + 1) / total) * 100);
-            document.getElementById('scan-progress-fill').style.width = pct + '%';
+            const issues = scannedResources.filter(r => r.severity !== 'pass');
+            LiveTerminal.log('output', `Scan complete: ${scannedResources.length} resources discovered. ${issues.length} issues found.`);
 
             // Stats
             const counts = getCounts();
@@ -102,15 +99,33 @@ window.Scanner = (() => {
             document.getElementById('stat-warn').textContent = counts.warn;
             document.getElementById('stat-crit').textContent = counts.crit;
 
-            // Terminal log for interesting findings
-            if (res.severity === 'critical') {
-                LiveTerminal.log('insight', `CRITICAL: ${res.type} "${res.name}" — ${res.issue}`);
-            } else if (res.severity === 'warning') {
-                LiveTerminal.log('agent', `Warning: ${res.type} "${res.name}" — ${res.issue}`);
+            // Badges
+            const badge = document.getElementById('issues-badge');
+            if (issues.length > 0) {
+                badge.style.display = 'inline';
+                badge.textContent = issues.length;
             }
 
-            idx++;
-        }, 200 + Math.random() * 150);
+            updateScore();
+
+            // Evidence
+            scannedResources.forEach(r => {
+                if (window.Evidence) Evidence.captureFromScan(r);
+            });
+            updateEvidenceBadge();
+
+            // Remediation
+            Remediation.buildFromScan(scannedResources);
+            
+            btn.disabled = false;
+            btn.textContent = 'Re-scan';
+        })
+        .catch(err => {
+            console.error(err);
+            LiveTerminal.log('insight', `SCAN FAILED: ${err.message}`);
+            btn.disabled = false;
+            btn.textContent = 'Retry Scan';
+        });
     }
 
     function addResourceRow(res, delay) {

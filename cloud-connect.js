@@ -2,15 +2,18 @@
 // Simulates OAuth connection to AWS, GCP, Azure
 
 window.CloudConnect = (() => {
-    const state = { providers: {} };
+    const state = { 
+        providers: {},
+        credentials: {} // Store keys in memory only
+    };
 
     const STEPS = [
-        'Initiating OAuth 2.0 handshake...',
-        'Redirecting to provider IAM console...',
-        'Validating permissions scope (read/write)...',
-        'Exchanging authorization code for token...',
-        'Syncing resource inventory metadata...',
-        'Connection established.'
+        'Initiating hand-off to cloud agent...',
+        'Validating API keys with provider...',
+        'Checking IAM permission scope (ReadOnlyAccess)...',
+        'Verifying S3/EC2 enumeration capabilities...',
+        'Establishing secure session...',
+        'Cloud environment connected.'
     ];
 
     function init() {
@@ -18,9 +21,52 @@ window.CloudConnect = (() => {
             card.addEventListener('click', () => {
                 const provider = card.dataset.provider;
                 if (state.providers[provider]) return; // already connected
+                
+                // If no creds, open settings first
+                if (!state.credentials[provider]) {
+                    openSettings(provider);
+                    return;
+                }
+
                 connect(provider, card);
             });
         });
+    }
+
+    function openSettings(provider = 'aws') {
+        const modal = document.getElementById('modal-settings');
+        const providerSelect = document.getElementById('setting-provider');
+        if (providerSelect) providerSelect.value = provider;
+        modal.classList.add('active');
+    }
+
+    function closeSettings() {
+        document.getElementById('modal-settings').classList.remove('active');
+    }
+
+    function saveSettings() {
+        const provider = document.getElementById('setting-provider').value;
+        const accessKey = document.getElementById('setting-access-key').value;
+        const secretKey = document.getElementById('setting-secret-key').value;
+        const region = document.getElementById('setting-region').value;
+
+        if (!accessKey || !secretKey) {
+            alert('Please provide both access key and secret key.');
+            return;
+        }
+
+        state.credentials[provider] = {
+            accessKeyId: accessKey,
+            secretAccessKey: secretKey,
+            region: region
+        };
+
+        closeSettings();
+        LiveTerminal.log('system', `Credentials saved for ${provider.toUpperCase()}. Ready to connect.`);
+        
+        // Find the card and trigger connect
+        const card = document.querySelector(`.provider-card[data-provider="${provider}"]`);
+        if (card) connect(provider, card);
     }
 
     function connect(provider, card) {
@@ -45,7 +91,7 @@ window.CloudConnect = (() => {
         });
 
         // Emit to terminal
-        LiveTerminal.log('system', `Initiating connection to ${provider.toUpperCase()}...`);
+        LiveTerminal.log('system', `Initiating real connection to ${provider.toUpperCase()}...`);
 
         let stepIndex = 0;
         const interval = setInterval(() => {
@@ -79,7 +125,7 @@ window.CloudConnect = (() => {
                 card.classList.add('connected');
 
                 state.providers[provider] = true;
-                LiveTerminal.log('output', `${provider.toUpperCase()} connected successfully. Resources synced.`);
+                LiveTerminal.log('output', `${provider.toUpperCase()} session active. Actual infrastructure access granted.`);
 
                 updateChips();
             }
@@ -105,7 +151,11 @@ window.CloudConnect = (() => {
         return Object.keys(state.providers);
     }
 
-    return { init, isConnected, getProviders };
+    function getCredentials(provider) {
+        return state.credentials[provider];
+    }
+
+    return { init, isConnected, getProviders, getCredentials, openSettings, closeSettings, saveSettings };
 })();
 
 document.addEventListener('DOMContentLoaded', CloudConnect.init);

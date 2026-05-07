@@ -23,6 +23,9 @@
                 <a class="nav-item active" data-panel="connect" id="nav-connect">
                     <span class="icon">🔌</span> Cloud Connect
                 </a>
+                <a class="nav-item" id="nav-settings" onclick="CloudConnect.openSettings()">
+                    <span class="icon">⚙️</span> Connection Settings
+                </a>
                 <a class="nav-item" data-panel="scan" id="nav-scan">
                     <span class="icon">🔍</span> Scan
                     <span class="badge-count" id="issues-badge" style="display:none">0</span>
@@ -222,6 +225,50 @@
 
             </div>
         </main>
+
+        <!-- ══════ Modal: Connection Settings ══════ -->
+        <div class="modal-overlay" id="modal-settings">
+            <div class="modal-card">
+                <div class="modal-header">
+                    <h3>Cloud Connection Settings</h3>
+                    <button class="modal-close" onclick="CloudConnect.closeSettings()">✕</button>
+                </div>
+                <div class="modal-body">
+                    <p style="font-size:0.85rem; color:var(--text-muted); margin-bottom:1.5rem;">
+                        Enter your cloud credentials. These are used only for the current session and are passed to the scanning engine via HTTPS.
+                    </p>
+                    
+                    <div class="input-group">
+                        <label>Provider</label>
+                        <select id="setting-provider">
+                            <option value="aws">Amazon Web Services (AWS)</option>
+                            <option value="gcp" disabled>Google Cloud Platform (Coming Soon)</option>
+                            <option value="azure" disabled>Microsoft Azure (Coming Soon)</option>
+                        </select>
+                    </div>
+
+                    <div class="input-group">
+                        <label>AWS Access Key ID</label>
+                        <input type="text" id="setting-access-key" placeholder="AKIA...">
+                    </div>
+
+                    <div class="input-group">
+                        <label>AWS Secret Access Key</label>
+                        <input type="password" id="setting-secret-key" placeholder="••••••••••••••••">
+                    </div>
+
+                    <div class="input-group">
+                        <label>Default Region</label>
+                        <input type="text" id="setting-region" placeholder="us-east-1" value="us-east-1">
+                    </div>
+
+                    <div class="modal-actions">
+                        <button class="btn btn-secondary" onclick="CloudConnect.closeSettings()">Cancel</button>
+                        <button class="btn btn-primary" onclick="CloudConnect.saveSettings()">Save Connection</button>
+                    </div>
+                </div>
+            </div>
+        </div>
     </div>
 
     <script src="live-terminal.js"></script>

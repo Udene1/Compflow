@@ -25,11 +25,12 @@ ComplianceFlow passes the **Structural Test**: If you remove the AI intelligence
 - **Premium Glassmorphic UI**: High-end enterprise aesthetic using vanilla CSS custom properties.
 - **Interactive Autopilot Demo**: A real-time terminal simulation in the hero section showing the AI sense-act loop.
 
-### 2. Autonomous Dashboard
-- **Cloud Connect**: Integrated OAuth flow simulation for AWS, GCP, and Azure.
-- **Resource Scanner**: Progressive enumeration of 24+ resource types (S3, IAM, RDS, EC2, Lambda) checking against SOC2 controls.
-- **AI Remediation Center**: LLM-driven auto-fixes with before/after configuration diffs. Includes bulk "Fix All" capability.
-- **Evidence Vault**: Automated evidence capture for every action, verified with SHA-256 cryptographic hashes for chain-of-custody.
+### 2. Full-Stack Autonomous Dashboard
+- **Real Cloud Connect**: Multi-tenant credential management. Users provide AWS/Azure/GCP keys via the UI which are passed to stateless API endpoints.
+- **Official SDK Integration**: Uses the official `@aws-sdk` to perform live enumeration of S3, IAM, and other resources.
+- **Stateless API Architecture**: Vercel Serverless Functions (`/api/scan`, `/api/remediate`) handle the backend logic without persisting sensitive keys.
+- **AI Remediation Center**: Real-world configuration fixes (e.g., S3 Public Access Block) applied via the API.
+- **Evidence Vault**: Automated evidence capture for every real-world action, verified with SHA-256 hashes.
 
 ### 3. Audit Engine (Phase 3)
 - **SOC2 TSC Mapping**: Evidence automatically mapped to Trust Service Criteria (CC1.0 - CC9.0).
@@ -103,14 +104,17 @@ npm run dev
 
 ```text
 compliance-flow/
+├── api/                # Vercel Serverless Functions (Node.js)
+│   ├── scan.js         # Real AWS SDK scanning logic
+│   └── remediate.js    # Real AWS SDK remediation logic
 ├── index.html          # Landing page
 ├── app.html            # Core Dashboard
 ├── styles.css          # Landing page styles
 ├── dashboard.css       # Dashboard design system
 ├── service_demo.js     # Landing page simulation
-├── cloud-connect.js    # Cloud OAuth simulation
-├── scanner.js          # Resource discovery logic
-├── remediation.js      # AI-driven fix engine
+├── cloud-connect.js    # Cloud credentials & session logic
+├── scanner.js          # API-driven resource discovery
+├── remediation.js      # API-driven fix engine
 ├── evidence.js         # Audit & Evidence engine
 ├── live-terminal.js    # Real-time event logging
 ├── vercel.json         # Vercel deployment config

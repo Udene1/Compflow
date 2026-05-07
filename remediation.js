@@ -261,13 +261,37 @@ RotationSchedule: "rate(30 days)"`
         const issue = issues.find(i => i.id === resourceId);
         if (!issue) return;
 
+        const providers = CloudConnect.getProviders();
+        const provider = providers[0];
+        const credentials = CloudConnect.getCredentials(provider);
+
+        if (!credentials) {
+            LiveTerminal.log('insight', 'ERROR: Missing credentials for ' + provider);
+            CloudConnect.openSettings(provider);
+            return;
+        }
+
         const btn = document.getElementById('fix-btn-' + resourceId);
         btn.disabled = true;
         btn.innerHTML = '<span class="spinner"></span>';
 
-        LiveTerminal.log('action', `AUTO-REMEDIATION: Fixing ${issue.type} "${issue.name}" — ${issue.issue}`);
+        LiveTerminal.log('action', `EXECUTING REAL FIX: ${issue.type} "${issue.name}" — ${issue.issue}`);
 
-        setTimeout(() => {
+        fetch('/api/remediate', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ 
+                provider, 
+                credentials, 
+                resourceType: issue.type, 
+                resourceName: issue.name, 
+                issue: issue.issue 
+            })
+        })
+        .then(res => res.json())
+        .then(data => {
+            if (data.error) throw new Error(data.error);
+
             btn.textContent = '✓ Fixed';
             btn.className = 'btn btn-success btn-sm';
             const card = document.getElementById('rem-card-' + resourceId);
@@ -278,6 +302,9 @@ RotationSchedule: "rate(30 days)"`
             badge.className = 'severity-badge pass';
             badge.textContent = '✓ pass';
 
+            Scanner.markFixed(resourceId);
+            LiveTerminal.log('output', `SUCCESS: ${issue.type} "${issue.name}" remediated via real-world API call.`);
+
             // Capture Evidence
             if (window.Evidence) {
                 const diff = getDiff(issue);
@@ -286,7 +313,13 @@ RotationSchedule: "rate(30 days)"`
             if (window.Scanner) Scanner.updateEvidenceBadge();
 
             checkAllFixed();
-        }, 1000 + Math.random() * 800);
+        })
+        .catch(err => {
+            console.error(err);
+            LiveTerminal.log('insight', `FIX FAILED: ${err.message}`);
+            btn.disabled = false;
+            btn.textContent = 'Retry Fix';
+        });
     }
 
     function fixAll() {

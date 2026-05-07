@@ -7,11 +7,22 @@
     "dev": "npx -y serve@latest -l 3000",
     "preview": "npx -y serve@latest -l 3000"
   },
-  "keywords": ["compliance", "soc2", "ai-native", "ains", "service-as-software"],
+  "keywords": [
+    "compliance",
+    "soc2",
+    "ai-native",
+    "ains",
+    "service-as-software"
+  ],
   "author": "udene1",
   "license": "MIT",
   "repository": {
     "type": "git",
     "url": "https://github.com/udene1/compflow.git"
+  },
+  "dependencies": {
+    "@aws-sdk/client-ec2": "^3.1044.0",
+    "@aws-sdk/client-iam": "^3.1044.0",
+    "@aws-sdk/client-s3": "^3.1044.0"
   }
 }
