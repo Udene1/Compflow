@@ -1,14 +1,8 @@
 {
   "version": 2,
-  "name": "complianceflow-ai",
-  "buildCommand": null,
-  "outputDirectory": ".",
-  "routes": [
-    { "src": "/dashboard", "dest": "/app.html" },
-    { "src": "/", "dest": "/index.html" },
-    { "src": "/(.*\\.html)", "dest": "/$1" },
-    { "src": "/(.*\\.css)", "dest": "/$1" },
-    { "src": "/(.*\\.js)", "dest": "/$1" }
+  "cleanUrls": true,
+  "rewrites": [
+    { "source": "/dashboard", "destination": "/app.html" }
   ],
   "headers": [
     {
