@@ -1,130 +1,123 @@
 # ComplianceFlow AI
 
-> **Service as Software** — An AI-Native Service (AINS) prototype inspired by Gustaf Alströmer's thesis on outcome-driven AI companies.
+> **Service as Software** — An AI-Native Service (AINS) platform that delivers outcomes, not just dashboards.
 
-Traditional compliance software shows you what's broken. **ComplianceFlow AI** actually fixes it.
-
----
-
-## 🧠 The Thesis
-
-ComplianceFlow demonstrates the **AI-Native Service (AINS)** model: instead of selling a **tool** (SaaS) that _helps_ you get compliant, we sell the **completed outcome** — a ready-to-sign SOC2 audit report.
-
-**The Structural Test:** If you remove the AI intelligence layer, the business collapses — you'd need a team of expensive human auditors to replace what the agents do in minutes.
+ComplianceFlow demonstrates the "Service-as-Software" thesis popularized by Gustaf Alströmer. Traditional compliance software (SaaS) provides tools to help you do the work. **ComplianceFlow AI** uses autonomous agents to **do the work for you**, delivering a completed SOC2 certification outcome.
 
 ---
 
-## ✅ What's Built (Current Capabilities)
+## 🦾 Core Thesis: The AINS Model
 
-### 1. Premium Landing Page
-- **Glassmorphic dark-mode** design system with animated background blobs
-- **Outfit** + **JetBrains Mono** typography (Google Fonts)
-- Hover effects, smooth transitions, and micro-animations
-- Fully responsive layout
+ComplianceFlow passes the **Structural Test**: If you remove the AI intelligence layer, the business would collapse or become economically unviable due to human labor costs.
 
-### 2. Interactive Autopilot Terminal Demo
-A simulated AI agent lifecycle showing the core value loop:
-
-| Phase | Example Log |
+| Traditional SaaS (SOC2) | ComplianceFlow AI (AINS) |
 |---|---|
-| **Detection** | `[Insight] Critical Failure: S3 bucket 'finance-records' is public.` |
-| **Remediation** | `[AI Agent] S3 Bucket Policy Updated. Status: Private.` |
-| **Evidence** | `[System] Capturing evidence for Audit Control CC1.1...` |
-| **Outcome** | `[Output] Outcome Delivered: Readiness score 100%.` |
-
-- Real-time typewriter animation with color-coded log levels
-- Single-click "Run AI Autopilot" to watch the full cycle
-
-### 3. Outcome-Based Pricing
-Two tiers reflecting value-based (not seat-based) pricing:
-
-| Plan | Price | Delivers |
-|---|---|---|
-| **Readiness Report** | $500 one-time | Full cloud scan, remediation roadmap, one-click fixes |
-| **SOC2 Certification** | $5,000 per outcome | Full 104-control remediation, auto-evidence, guaranteed audit pass |
-
-### 4. Tech Stack
-| Layer | Technology |
-|---|---|
-| Structure | Vanilla HTML5 (semantic) |
-| Styling | Vanilla CSS (custom properties, glassmorphism, keyframe animations) |
-| Logic | Vanilla JavaScript (event-driven terminal simulation) |
-| Fonts | Google Fonts (Outfit, JetBrains Mono) |
+| Sells access to a dashboard | Sells a completed Audit Report |
+| Charges per seat | Charges per Outcome |
+| Identifies what's broken | Remediates resources automatically |
+| Requires human "Evidence Collectors" | Autonomous agents capture and hash evidence |
 
 ---
 
-## 🗺️ Roadmap
+## ✨ Features & Capabilities
 
-### Phase 1 — Foundation ✅ _(Current)_
-- [x] Landing page with glassmorphic design system
-- [x] Interactive autopilot terminal demo
-- [x] Outcome-based pricing UI
-- [x] Responsive layout and micro-animations
+### 1. Proof-of-Trust Landing Page
+- **Premium Glassmorphic UI**: High-end enterprise aesthetic using vanilla CSS custom properties.
+- **Interactive Autopilot Demo**: A real-time terminal simulation in the hero section showing the AI sense-act loop.
 
-### Phase 2 — Live Agent Integration ✅
-- [x] Connect to real AWS/GCP/Azure APIs via OAuth
-- [x] Implement actual cloud resource scanning (IAM policies, S3 buckets, security groups)
-- [x] Build LLM-driven remediation engine (auto-close public buckets, enforce MFA, patch configs)
-- [x] Real-time WebSocket log streaming to replace simulated terminal
+### 2. Autonomous Dashboard
+- **Cloud Connect**: Integrated OAuth flow simulation for AWS, GCP, and Azure.
+- **Resource Scanner**: Progressive enumeration of 24+ resource types (S3, IAM, RDS, EC2, Lambda) checking against SOC2 controls.
+- **AI Remediation Center**: LLM-driven auto-fixes with before/after configuration diffs. Includes bulk "Fix All" capability.
+- **Evidence Vault**: Automated evidence capture for every action, verified with SHA-256 cryptographic hashes for chain-of-custody.
 
-### Phase 3 — Evidence & Audit Engine
-- [ ] Automated evidence capture (screenshots, config diffs, timestamped logs)
-- [ ] Map findings to SOC2 Trust Service Criteria (CC1–CC9)
-- [ ] Generate PDF audit-ready reports with control-by-control evidence
-- [ ] Digital signature and chain-of-custody tracking
+### 3. Audit Engine (Phase 3)
+- **SOC2 TSC Mapping**: Evidence automatically mapped to Trust Service Criteria (CC1.0 - CC9.0).
+- **Audit-Ready Reports**: Dynamic generation of comprehensive reports with summary stats and detailed evidence logs.
+- **One-Click Export**: Download reports as PDF (for auditors) or JSON (for technical review).
 
-### Phase 4 — Multi-Framework Compliance
-- [ ] Extend beyond SOC2: support **GDPR**, **HIPAA**, **ISO 27001**, **PCI-DSS**
-- [ ] Cross-framework control mapping (one remediation satisfies multiple standards)
-- [ ] Regulatory change monitoring — auto-update controls when rules change
+---
 
-### Phase 5 — Continuous Compliance Platform
-- [ ] Always-on monitoring with drift detection (alert when config regresses)
-- [ ] Scheduled re-certification runs (quarterly, annual)
-- [ ] Multi-tenant dashboard for MSPs managing multiple client environments
-- [ ] API for CI/CD pipeline integration (block deploys that break compliance)
+## 🗺️ Product Roadmap
 
-### Phase 6 — Marketplace & Ecosystem
-- [ ] Plugin marketplace for custom compliance controls
-- [ ] Third-party auditor portal (give auditors read-only access to evidence)
-- [ ] SOC2 readiness score as a public trust badge for customer websites
+### ✅ Completed: Phase 1 — Foundation
+- [x] Landing page design system.
+- [x] Autopilot terminal simulation.
+- [x] Outcome-based pricing model UI.
+
+### ✅ Completed: Phase 2 — Autonomous Core
+- [x] Dashboard application architecture.
+- [x] Cloud connection flow simulation.
+- [x] Resource inventory & multi-level scanner.
+- [x] Remediation engine with config diffs.
+
+### ✅ Completed: Phase 3 — Audit & Evidence
+- [x] Evidence Vault with cryptographic hashing.
+- [x] Trust Service Criteria (TSC) mapping logic.
+- [x] Dynamic Report Generator & PDF Export.
+- [x] Vercel-ready deployment configuration.
+
+### 🚀 Upcoming: The Path to v1.0
+- **Phase 4: Multi-Framework Governance**
+    - [ ] GDPR, HIPAA, and ISO 27001 mapping.
+    - [ ] Cross-framework control de-duplication.
+- **Phase 5: Continuous Monitoring**
+    - [ ] Real-time drift detection and auto-rollback for unauthorized changes.
+    - [ ] Slack/Teams alerting for critical remediations.
+- **Phase 6: Auditor Marketplace**
+    - [ ] Third-party auditor portal for asynchronous review.
+    - [ ] Public "Verified by ComplianceFlow" trust badges.
+
+---
+
+## 🛠️ Technology Stack
+
+- **Core**: Vanilla HTML5, Vanilla CSS3 (Custom Properties, Keyframes, Glassmorphism).
+- **Logic**: Vanilla JavaScript (ES6 Modules, Event-driven architecture).
+- **Design**: Google Fonts (Outfit & JetBrains Mono).
+- **Deployment**: Vercel (Configured for static hosting with security headers).
 
 ---
 
 ## 🚀 Getting Started
 
+### Local Development
 ```bash
-# Clone the repo
-git clone <repo-url>
+# Clone the repository
+git clone https://github.com/udene1/compflow.git
 cd compliance-flow
 
-# Open in browser
-# No build step required — it's a static site
-open index.html
+# Run a local server (optional)
+# No build step is required as it is 100% vanilla
+npm run dev
 ```
 
-Or simply open `index.html` in any modern browser and click **"Run AI Autopilot"** to see the demo.
+### Deployment to Vercel
+1. Push to your GitHub repository.
+2. Connect the repository to Vercel.
+3. The `vercel.json` will automatically handle routing and security headers.
 
 ---
 
 ## 📁 Project Structure
 
-```
+```text
 compliance-flow/
-├── index.html          # Landing page & autopilot terminal UI
-├── app.html            # Full dashboard application
-├── styles.css          # Landing page design system
+├── index.html          # Landing page
+├── app.html            # Core Dashboard
+├── styles.css          # Landing page styles
 ├── dashboard.css       # Dashboard design system
-├── service_demo.js     # Landing page terminal simulation
-├── cloud-connect.js    # Simulated OAuth cloud connection
-├── scanner.js          # Resource scanning engine
-├── remediation.js      # Auto-remediation with config diffs
-├── live-terminal.js    # Real-time filterable log stream
-└── README.md           # This file
+├── service_demo.js     # Landing page simulation
+├── cloud-connect.js    # Cloud OAuth simulation
+├── scanner.js          # Resource discovery logic
+├── remediation.js      # AI-driven fix engine
+├── evidence.js         # Audit & Evidence engine
+├── live-terminal.js    # Real-time event logging
+├── vercel.json         # Vercel deployment config
+└── package.json        # Dependencies & scripts
 ```
 
 ---
 
 ## 📄 License
-
-MIT
+MIT © 2026 udene1

@@ -36,6 +36,12 @@
                     <span class="icon">⚡</span> Live Terminal
                 </a>
 
+                <div class="nav-section-label">Evidence</div>
+                <a class="nav-item" data-panel="evidence" id="nav-evidence">
+                    <span class="icon">📸</span> Evidence
+                    <span class="badge-count" id="evidence-badge" style="display:none">0</span>
+                </a>
+
                 <div class="nav-section-label">Reports</div>
                 <a class="nav-item" data-panel="reports" id="nav-reports">
                     <span class="icon">📄</span> Audit Report
@@ -181,23 +187,48 @@
                     </div>
                 </div>
 
+                <!-- ══════ Panel: Evidence ══════ -->
+                <div class="panel" id="panel-evidence">
+                    <div class="evidence-header">
+                        <div>
+                            <h3>Evidence Vault</h3>
+                            <p style="color:var(--text-muted); font-size:0.85rem; margin-top:0.25rem;" id="evidence-subtitle">All captured evidence with cryptographic integrity hashes.</p>
+                        </div>
+                    </div>
+                    <div id="evidence-empty" class="empty-state">
+                        <div class="icon">📸</div>
+                        <h3>No evidence captured yet</h3>
+                        <p>Run a scan and remediate issues. Evidence is automatically captured for every action.</p>
+                    </div>
+                    <div id="evidence-list" class="evidence-list"></div>
+                </div>
+
                 <!-- ══════ Panel: Reports ══════ -->
                 <div class="panel" id="panel-reports">
-                    <div class="empty-state">
-                        <div class="icon">📄</div>
-                        <h3>Audit Report</h3>
-                        <p>Complete a full scan and remediation cycle to generate your SOC2 audit-ready report.</p>
+                    <div class="report-header-actions">
+                        <div>
+                            <h3>SOC2 Audit Report</h3>
+                            <p style="color:var(--text-muted); font-size:0.85rem; margin-top:0.25rem;">Generate a comprehensive, audit-ready report from captured evidence.</p>
+                        </div>
+                        <button class="btn btn-primary" id="btn-generate-report" onclick="Evidence.generateReport()">📊 Generate Report</button>
                     </div>
+                    <div id="report-empty" class="empty-state">
+                        <div class="icon">📄</div>
+                        <h3>No report generated yet</h3>
+                        <p>Complete the scan → remediation cycle, then click "Generate Report".</p>
+                    </div>
+                    <div id="report-content"></div>
                 </div>
 
             </div>
         </main>
     </div>
 
+    <script src="live-terminal.js"></script>
+    <script src="evidence.js"></script>
     <script src="cloud-connect.js"></script>
     <script src="scanner.js"></script>
     <script src="remediation.js"></script>
-    <script src="live-terminal.js"></script>
     <script>
         // ─── Navigation ───
         const navItems = document.querySelectorAll('.nav-item');
@@ -209,6 +240,7 @@
             scan: 'Resource Scanner',
             remediate: 'Remediation Center',
             terminal: 'Live Terminal',
+            evidence: 'Evidence Vault',
             reports: 'Audit Report'
         };
 

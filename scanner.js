@@ -77,6 +77,12 @@ window.Scanner = (() => {
 
                 updateScore();
 
+                // Capture evidence for all scanned resources
+                scannedResources.forEach(r => {
+                    if (window.Evidence) Evidence.captureFromScan(r);
+                });
+                updateEvidenceBadge();
+
                 // Trigger remediation panel build
                 Remediation.buildFromScan(scannedResources);
                 return;
@@ -171,9 +177,46 @@ window.Scanner = (() => {
         }
     }
 
+    function updateEvidenceBadge() {
+        if (!window.Evidence) return;
+        const log = Evidence.getEvidenceLog();
+        const badge = document.getElementById('evidence-badge');
+        if (badge && log.length > 0) {
+            badge.style.display = 'inline';
+            badge.textContent = log.length;
+        }
+        // Update evidence list panel
+        const listEl = document.getElementById('evidence-list');
+        const emptyEl = document.getElementById('evidence-empty');
+        if (listEl && log.length > 0) {
+            emptyEl.style.display = 'none';
+            document.getElementById('evidence-subtitle').textContent = 
+                `${log.length} evidence items captured with SHA-256 integrity hashes.`;
+            listEl.innerHTML = log.map(e => `
+                <div class="evidence-entry">
+                    <div class="evidence-entry-header">
+                        <code>${e.id}</code>
+                        <span class="rem-control-tag">${e.control}</span>
+                        <span class="severity-badge ${e.afterState === 'Compliant' ? 'pass' : 'critical'}">
+                            ${e.afterState === 'Compliant' ? '✓ Compliant' : '✕ Finding'}
+                        </span>
+                    </div>
+                    <div class="evidence-entry-body">
+                        <span>${e.resource} (${e.resourceType})</span>
+                        <span style="color:var(--text-dim); font-size:0.72rem;">${e.action}</span>
+                    </div>
+                    <div class="evidence-entry-hash">
+                        <code style="font-size:0.65rem; color:var(--text-dim);">SHA-256: ${e.hash.substring(0, 24)}...</code>
+                        <span style="font-size:0.7rem; color:var(--text-dim);">${new Date(e.timestamp).toLocaleTimeString()}</span>
+                    </div>
+                </div>
+            `).join('');
+        }
+    }
+
     function getResources() { return scannedResources; }
 
-    return { init, getResources, markFixed };
+    return { init, getResources, markFixed, updateEvidenceBadge };
 })();
 
 document.addEventListener('DOMContentLoaded', Scanner.init);

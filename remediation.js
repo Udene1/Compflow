@@ -278,9 +278,12 @@ RotationSchedule: "rate(30 days)"`
             badge.className = 'severity-badge pass';
             badge.textContent = '✓ pass';
 
-            Scanner.markFixed(resourceId);
-            LiveTerminal.log('output', `Remediated: ${issue.type} "${issue.name}" — ${issue.issue} → FIXED`);
-            LiveTerminal.log('system', `Evidence captured for ${issue.control}: ${CONTROL_NAMES[issue.control]}`);
+            // Capture Evidence
+            if (window.Evidence) {
+                const diff = getDiff(issue);
+                Evidence.captureFromRemediation(issue, diff?.before, diff?.after);
+            }
+            if (window.Scanner) Scanner.updateEvidenceBadge();
 
             checkAllFixed();
         }, 1000 + Math.random() * 800);
