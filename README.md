@@ -58,16 +58,25 @@ ComplianceFlow passes the **Structural Test**: If you remove the AI intelligence
 - [x] Dynamic Report Generator & PDF Export.
 - [x] Vercel-ready deployment configuration.
 
+### ✅ Completed: Phase 3.5 — Real Cloud Integration
+- [x] Full-stack architecture with Vercel API.
+- [x] Official AWS SDK integration for direct governance.
+- [x] Stateless session-based credential management.
+
+### ✅ Completed: Phase 4 — Multi-Framework Governance
+- [x] GDPR, HIPAA, and ISO 27001 mapping via `frameworks.js`.
+- [x] Global Focus Switcher for real-time mandate context.
+- [x] Multi-framework evidence tagging and reporting.
+
 ### 🚀 Upcoming: The Path to v1.0
-- **Phase 4: Multi-Framework Governance**
-    - [ ] GDPR, HIPAA, and ISO 27001 mapping.
-    - [ ] Cross-framework control de-duplication.
 - **Phase 5: Continuous Monitoring**
     - [ ] Real-time drift detection and auto-rollback for unauthorized changes.
     - [ ] Slack/Teams alerting for critical remediations.
 - **Phase 6: Auditor Marketplace**
     - [ ] Third-party auditor portal for asynchronous review.
     - [ ] Public "Verified by ComplianceFlow" trust badges.
+- **Phase 7: AI Questionnaire Automation**
+    - [ ] Autocomplete security questionnaires (SIG/CAIQ) based on live evidence.
 
 ---
 
