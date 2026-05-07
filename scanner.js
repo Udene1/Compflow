@@ -2,47 +2,21 @@
 // Generates a realistic cloud resource inventory and scans for compliance issues
 
 window.Scanner = (() => {
-    const RESOURCE_TEMPLATES = [
-        { name: 'finance-records', type: 'S3 Bucket', icon: '🪣', region: 'us-east-1', severity: 'critical', control: 'CC6.1', issue: 'Public access enabled' },
-        { name: 'user-uploads', type: 'S3 Bucket', icon: '🪣', region: 'us-east-1', severity: 'warning', control: 'CC6.6', issue: 'No versioning' },
-        { name: 'static-assets', type: 'S3 Bucket', icon: '🪣', region: 'us-west-2', severity: 'pass', control: 'CC6.1' },
-        { name: 'admin-root', type: 'IAM Role', icon: '🔑', region: 'global', severity: 'critical', control: 'CC6.3', issue: 'No MFA enforced' },
-        { name: 'deploy-bot', type: 'IAM Role', icon: '🔑', region: 'global', severity: 'critical', control: 'CC6.1', issue: 'Wildcard permissions (*)' },
-        { name: 'readonly-audit', type: 'IAM Role', icon: '🔑', region: 'global', severity: 'pass', control: 'CC6.3' },
-        { name: 'ci-runner', type: 'IAM Role', icon: '🔑', region: 'global', severity: 'warning', control: 'CC6.2', issue: 'Unused for 90 days' },
-        { name: 'prod-api-01', type: 'EC2 Instance', icon: '🖥️', region: 'us-east-1', severity: 'warning', control: 'CC7.1', issue: 'Unpatched (14d overdue)' },
-        { name: 'prod-api-02', type: 'EC2 Instance', icon: '🖥️', region: 'us-east-1', severity: 'pass', control: 'CC7.1' },
-        { name: 'staging-web', type: 'EC2 Instance', icon: '🖥️', region: 'eu-west-1', severity: 'pass', control: 'CC7.1' },
-        { name: 'prod-db-primary', type: 'RDS Database', icon: '💾', region: 'us-east-1', severity: 'critical', control: 'CC6.7', issue: 'Encryption at rest disabled' },
-        { name: 'prod-db-replica', type: 'RDS Database', icon: '💾', region: 'us-east-1', severity: 'pass', control: 'CC6.7' },
-        { name: 'analytics-db', type: 'RDS Database', icon: '💾', region: 'us-west-2', severity: 'warning', control: 'CC6.7', issue: 'Backup retention < 7 days' },
-        { name: 'process-invoices', type: 'Lambda', icon: '⚡', region: 'us-east-1', severity: 'pass', control: 'CC8.1' },
-        { name: 'email-sender', type: 'Lambda', icon: '⚡', region: 'us-east-1', severity: 'warning', control: 'CC8.1', issue: 'Deprecated runtime (Node 14)' },
-        { name: 'auth-handler', type: 'Lambda', icon: '⚡', region: 'us-east-1', severity: 'pass', control: 'CC8.1' },
-        { name: 'vpc-production', type: 'VPC', icon: '🌐', region: 'us-east-1', severity: 'pass', control: 'CC6.6' },
-        { name: 'sg-default', type: 'Security Group', icon: '🛡️', region: 'us-east-1', severity: 'critical', control: 'CC6.6', issue: 'Allows 0.0.0.0/0 on port 22' },
-        { name: 'sg-api', type: 'Security Group', icon: '🛡️', region: 'us-east-1', severity: 'pass', control: 'CC6.6' },
-        { name: 'sg-database', type: 'Security Group', icon: '🛡️', region: 'us-east-1', severity: 'warning', control: 'CC6.6', issue: 'Overly permissive egress rules' },
-        { name: 'cloudtrail-main', type: 'CloudTrail', icon: '📋', region: 'us-east-1', severity: 'pass', control: 'CC7.2' },
-        { name: 'kms-master', type: 'KMS Key', icon: '🔐', region: 'us-east-1', severity: 'pass', control: 'CC6.1' },
-        { name: 'secrets-prod', type: 'Secrets Manager', icon: '🗝️', region: 'us-east-1', severity: 'warning', control: 'CC6.1', issue: 'Rotation disabled (last: 120d ago)' },
-        { name: 'ecr-api-image', type: 'ECR Repository', icon: '📦', region: 'us-east-1', severity: 'pass', control: 'CC8.1' },
-    ];
-
     let scannedResources = [];
 
     function init() {
-        document.getElementById('btn-start-scan').addEventListener('click', startScan);
+        const btn = document.getElementById('btn-start-scan');
+        if (btn) btn.addEventListener('click', startScan);
     }
 
-    function startScan() {
+    async function startScan() {
         if (!CloudConnect.isConnected()) {
             LiveTerminal.log('insight', 'ERROR: No cloud provider connected. Go to Cloud Connect first.');
             return;
         }
 
         const providers = CloudConnect.getProviders();
-        const provider = providers[0]; // Start with first connected
+        const provider = providers[0];
         const credentials = CloudConnect.getCredentials(provider);
 
         if (!credentials) {
@@ -64,34 +38,32 @@ window.Scanner = (() => {
         document.getElementById('scan-progress-fill').style.width = '10%';
 
         LiveTerminal.log('system', `Contacting real cloud APIs for ${provider.toUpperCase()}...`);
-        LiveTerminal.log('agent', `Requesting enumeration of S3 and IAM resources...`);
+        LiveTerminal.log('agent', `Requesting enumeration of resources...`);
 
-        fetch('/api/scan', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ provider, credentials })
-        })
-        .then(res => res.json())
-        .then(data => {
+        try {
+            const res = await fetch('/api/scan', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ provider, credentials })
+            });
+            const data = await res.json();
+            
             if (data.error) throw new Error(data.error);
 
             scannedResources = data.resources || [];
             document.getElementById('scan-progress-fill').style.width = '100%';
 
             scannedResources.forEach((res, i) => {
-                // Get all mapped controls for this resource/issue
+                res.id = i;
                 const controlKeys = Frameworks.getMapping(res.type, res.issue);
-                res.controlKeys = controlKeys; // Store for framework switching
+                res.controlKeys = controlKeys;
                 
-                // Get the control ID for the CURRENT framework
-                const activeFW = Frameworks.getCurrent();
-                const activeControlKey = controlKeys.find(k => k.startsWith(Frameworks.getCurrentId ? Frameworks.getCurrentId() : 'soc2')) || controlKeys[0];
+                const activeControlKey = controlKeys.find(k => k.startsWith(Frameworks.getCurrentId())) || controlKeys[0];
                 const controlDetail = Frameworks.getControlDetails(activeControlKey);
                 res.control = controlDetail ? controlDetail.id : 'N/A';
 
-                addResourceRow({ ...res, id: i }, i);
+                addResourceRow(res);
                 
-                // Log findings
                 if (res.severity === 'critical') {
                     LiveTerminal.log('insight', `CRITICAL: ${res.type} "${res.name}" — ${res.issue}`);
                 } else if (res.severity === 'warning') {
@@ -99,24 +71,13 @@ window.Scanner = (() => {
                 }
             });
 
-            const issues = scannedResources.filter(r => r.severity !== 'pass');
-            LiveTerminal.log('output', `Scan complete: ${scannedResources.length} resources discovered. ${issues.length} issues found.`);
-
-            // Stats
-            const counts = getCounts();
-            document.getElementById('stat-total').textContent = counts.total;
-            document.getElementById('stat-pass').textContent = counts.pass;
-            document.getElementById('stat-warn').textContent = counts.warn;
-            document.getElementById('stat-crit').textContent = counts.crit;
-
-            // Badges
-            const badge = document.getElementById('issues-badge');
-            if (issues.length > 0) {
-                badge.style.display = 'inline';
-                badge.textContent = issues.length;
-            }
-
+            LiveTerminal.log('output', `Scan complete: ${scannedResources.length} resources found.`);
+            
+            updateStatsUI();
             updateScore();
+            
+            // Baseline for Drift Engine
+            if (window.DriftEngine) DriftEngine.setBaseline(scannedResources);
 
             // Evidence
             scannedResources.forEach(r => {
@@ -125,39 +86,70 @@ window.Scanner = (() => {
             updateEvidenceBadge();
 
             // Remediation
-            Remediation.buildFromScan(scannedResources);
+            if (window.Remediation) Remediation.buildFromScan(scannedResources);
             
             btn.disabled = false;
             btn.textContent = 'Re-scan';
-        })
-        .catch(err => {
+        } catch (err) {
             console.error(err);
             LiveTerminal.log('insight', `SCAN FAILED: ${err.message}`);
             btn.disabled = false;
             btn.textContent = 'Retry Scan';
-        });
+        }
     }
 
-    function addResourceRow(res, delay) {
+    async function runBackgroundScan() {
+        if (!CloudConnect.isConnected()) return null;
+        const providers = CloudConnect.getProviders();
+        const provider = providers[0];
+        const credentials = CloudConnect.getCredentials(provider);
+
+        try {
+            const res = await fetch('/api/scan', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ provider, credentials })
+            });
+            const data = await res.json();
+            return data.resources || [];
+        } catch (e) { return null; }
+    }
+
+    function addResourceRow(res) {
         const tbody = document.getElementById('resource-tbody');
         const tr = document.createElement('tr');
         tr.className = 'resource-row';
-        tr.style.animationDelay = '0s';
         tr.id = 'resource-row-' + res.id;
 
         const sevClass = res.severity === 'pass' ? 'pass' : res.severity === 'warning' ? 'warning' : 'critical';
         const sevLabel = res.severity === 'pass' ? '✓ Pass' : res.severity === 'warning' ? '⚠ Warning' : '✕ Critical';
-        const issueText = res.issue || 'No issues';
 
         tr.innerHTML = `
             <td><div class="resource-name">${res.icon} ${res.name}</div>
-                <div style="font-size:0.72rem; color:var(--text-dim); margin-top:2px;">${issueText}</div></td>
+                <div style="font-size:0.72rem; color:var(--text-dim); margin-top:2px;">${res.issue || 'No issues'}</div></td>
             <td><span class="resource-type">${res.type}</span></td>
             <td style="color:var(--text-muted); font-size:0.82rem;">${res.region}</td>
             <td><span class="severity-badge ${sevClass}">${sevLabel}</span></td>
             <td><span class="rem-control-tag">${res.control}</span></td>
         `;
         tbody.appendChild(tr);
+    }
+
+    function updateStatsUI() {
+        const counts = getCounts();
+        document.getElementById('stat-total').textContent = counts.total;
+        document.getElementById('stat-pass').textContent = counts.pass;
+        document.getElementById('stat-warn').textContent = counts.warn;
+        document.getElementById('stat-crit').textContent = counts.crit;
+        
+        const badge = document.getElementById('issues-badge');
+        const issues = scannedResources.filter(r => r.severity !== 'pass');
+        if (issues.length > 0) {
+            badge.style.display = 'inline';
+            badge.textContent = issues.length;
+        } else {
+            badge.style.display = 'none';
+        }
     }
 
     function getCounts() {
@@ -187,17 +179,7 @@ window.Scanner = (() => {
                 const issueDiv = row.querySelector('.resource-name').parentElement.querySelector('div:nth-child(2)');
                 if (issueDiv) issueDiv.textContent = 'Remediated';
             }
-            // Update stats
-            const counts = getCounts();
-            document.getElementById('stat-pass').textContent = counts.pass;
-            document.getElementById('stat-warn').textContent = counts.warn;
-            document.getElementById('stat-crit').textContent = counts.crit;
-
-            const issues = scannedResources.filter(r => r.severity !== 'pass');
-            const badge = document.getElementById('issues-badge');
-            badge.textContent = issues.length;
-            if (issues.length === 0) badge.style.display = 'none';
-
+            updateStatsUI();
             updateScore();
         }
     }
@@ -210,38 +192,34 @@ window.Scanner = (() => {
             badge.style.display = 'inline';
             badge.textContent = log.length;
         }
-        // Update evidence list panel
-        const listEl = document.getElementById('evidence-list');
-        const emptyEl = document.getElementById('evidence-empty');
-        if (listEl && log.length > 0) {
-            emptyEl.style.display = 'none';
-            document.getElementById('evidence-subtitle').textContent = 
-                `${log.length} evidence items captured with SHA-256 integrity hashes.`;
-            listEl.innerHTML = log.map(e => `
-                <div class="evidence-entry">
-                    <div class="evidence-entry-header">
-                        <code>${e.id}</code>
-                        <span class="rem-control-tag">${e.control}</span>
-                        <span class="severity-badge ${e.afterState === 'Compliant' ? 'pass' : 'critical'}">
-                            ${e.afterState === 'Compliant' ? '✓ Compliant' : '✕ Finding'}
-                        </span>
-                    </div>
-                    <div class="evidence-entry-body">
-                        <span>${e.resource} (${e.resourceType})</span>
-                        <span style="color:var(--text-dim); font-size:0.72rem;">${e.action}</span>
-                    </div>
-                    <div class="evidence-entry-hash">
-                        <code style="font-size:0.65rem; color:var(--text-dim);">SHA-256: ${e.hash.substring(0, 24)}...</code>
-                        <span style="font-size:0.7rem; color:var(--text-dim);">${new Date(e.timestamp).toLocaleTimeString()}</span>
-                    </div>
-                </div>
-            `).join('');
+    }
+
+    function simulateDrift() {
+        if (scannedResources.length === 0) return;
+        const passing = scannedResources.filter(r => r.severity === 'pass');
+        if (passing.length === 0) return;
+        
+        const target = passing[Math.floor(Math.random() * passing.length)];
+        target.severity = 'critical';
+        target.issue = 'S3 Public Access Block disabled (Drift Detected)';
+        
+        LiveTerminal.log('insight', `SIMULATED DRIFT: Resource "${target.name}" has been modified externally.`);
+        
+        const row = document.getElementById('resource-row-' + target.id);
+        if (row) {
+            const badge = row.querySelector('.severity-badge');
+            badge.className = 'severity-badge critical';
+            badge.textContent = '✕ Critical';
+            const issueDiv = row.querySelector('.resource-name').parentElement.querySelector('div:nth-child(2)');
+            if (issueDiv) issueDiv.textContent = target.issue;
         }
+        updateStatsUI();
+        updateScore();
     }
 
     function getResources() { return scannedResources; }
 
-    return { init, getResources, markFixed, updateEvidenceBadge };
+    return { init, getResources, markFixed, updateEvidenceBadge, updateScore, runBackgroundScan, simulateDrift };
 })();
 
 document.addEventListener('DOMContentLoaded', Scanner.init);

@@ -30,6 +30,18 @@
                 </div>
             </div>
 
+            <!-- ─── Autopilot Toggle ─── -->
+            <div class="framework-selector" style="margin-top: 0">
+                <div class="fw-label">Governance Autopilot</div>
+                <div style="display:flex; align-items:center; justify-content:space-between;">
+                    <span style="font-size:0.7rem; color:var(--text-muted);">Auto-fix drift</span>
+                    <label class="switch">
+                        <input type="checkbox" id="autopilot-toggle" onchange="DriftEngine.toggleAutopilot(this.checked)">
+                        <span class="slider"></span>
+                    </label>
+                </div>
+            </div>
+
             <nav class="sidebar-nav">
                 <div class="nav-section-label">Infrastructure</div>
                 <a class="nav-item active" data-panel="connect" id="nav-connect">
@@ -121,7 +133,10 @@
                 <div class="panel" id="panel-scan">
                     <div class="scan-header">
                         <h3>Resource Scanner</h3>
-                        <button class="btn btn-primary" id="btn-start-scan">Start Scan</button>
+                        <div style="display:flex; gap:0.5rem">
+                            <button class="btn btn-secondary btn-sm" onclick="Scanner.simulateDrift()">🧪 Simulate Drift</button>
+                            <button class="btn btn-primary" id="btn-start-scan">Start Scan</button>
+                        </div>
                     </div>
                     <div class="scan-progress-bar" id="scan-progress-wrap" style="display:none">
                         <div class="fill" id="scan-progress-fill"></div>
@@ -292,6 +307,7 @@
     <script src="cloud-connect.js"></script>
     <script src="scanner.js"></script>
     <script src="remediation.js"></script>
+    <script src="drift-engine.js"></script>
     <script>
         // ─── Navigation ───
         const navItems = document.querySelectorAll('.nav-item');
