@@ -151,8 +151,29 @@ window.CloudConnect = (() => {
         return Object.keys(state.providers);
     }
 
+    const XOR_KEY = 'CompFlow_Guard_2026';
+
+    function obfuscate(str) {
+        if (!str) return '';
+        // Simple XOR + Base64 to prevent plain-text sniffing
+        let out = "";
+        for (let i = 0; i < str.length; i++) {
+            out += String.fromCharCode(str.charCodeAt(i) ^ XOR_KEY.charCodeAt(i % XOR_KEY.length));
+        }
+        return btoa(out);
+    }
+
     function getCredentials(provider) {
-        return state.credentials[provider];
+        const creds = state.credentials[provider];
+        if (!creds) return null;
+        
+        // Return obfuscated creds for secure transit
+        return {
+            accessKeyId: obfuscate(creds.accessKeyId),
+            secretAccessKey: obfuscate(creds.secretAccessKey),
+            region: creds.region, // non-sensitive
+            isObfuscated: true
+        };
     }
 
     return { init, isConnected, getProviders, getCredentials, openSettings, closeSettings, saveSettings };
