@@ -30,6 +30,8 @@
     "@aws-sdk/client-macie2": "^3.1044.0",
     "@aws-sdk/client-lambda": "^3.1044.0",
     "@aws-sdk/client-wafv2": "^3.1044.0",
-    "@aws-sdk/client-shield": "^3.1044.0"
+    "@aws-sdk/client-shield": "^3.1044.0",
+    "@aws-sdk/client-secrets-manager": "^3.1044.0",
+    "@aws-sdk/client-sts": "^3.1044.0"
   }
 }

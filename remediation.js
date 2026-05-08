@@ -33,13 +33,33 @@ window.Remediation = (() => {
   }
 }`
             },
-            'No versioning': {
+            'Versioning not enabled': {
                 before: `BucketVersioning:
   Status: Suspended
   MFADelete: Disabled`,
                 after: `BucketVersioning:
   Status: Enabled
   MFADelete: Enabled`
+            },
+            'Default encryption disabled': {
+                before: `ServerSideEncryptionConfiguration:
+  Rules: []
+  BucketKeyEnabled: false`,
+                after: `ServerSideEncryptionConfiguration:
+  Rules:
+    - ApplyServerSideEncryptionByDefault:
+        SSEAlgorithm: "aws:kms"
+      BucketKeyEnabled: true`
+            },
+            'Server access logging disabled': {
+                before: `LoggingConfiguration:
+  TargetBucket: null
+  TargetPrefix: null`,
+                after: `LoggingConfiguration:
+  TargetBucket: "my-access-logs-bucket"
+  TargetPrefix: "s3-access-logs/"
+  TargetGrants:
+    - Permission: FULL_CONTROL`
             }
         },
         'IAM Role': {
@@ -74,25 +94,85 @@ window.Remediation = (() => {
   "Resource": "arn:aws:*:*:123456789:*"
 }`
             },
-            'Unused for 90 days': {
-                before: `RoleStatus: Active
-LastUsed: 2026-01-15T10:23:00Z`,
-                after: `RoleStatus: Deactivated
-LastUsed: 2026-01-15T10:23:00Z
-DeactivatedAt: 2026-04-30T19:30:00Z
-Reason: "Inactive > 90 days (SOC2 CC6.2)"`
+            'Stale Access': {
+                before: `AssumeRolePolicyDocument:
+  Statement:
+    - Effect: Allow
+      Principal: { AWS: "*" }
+      Action: "sts:AssumeRole"`,
+                after: `AssumeRolePolicyDocument:
+  Statement:
+    - Effect: Deny
+      Principal: "*"
+      Action: "sts:AssumeRole"
+      Condition:
+        ComplianceFlow: "deactivated"
+  DeactivatedAt: 2026-05-08
+  Reason: "Stale > 180 days (SOC2 CC6.2)"`
+            },
+            'Access key >90 days': {
+                before: `AccessKey:
+  Status: Active
+  CreateDate: 2026-01-15
+  AgeDays: 113`,
+                after: `AccessKey:
+  Status: Inactive
+  CreateDate: 2026-01-15
+  DeactivatedAt: 2026-05-08
+  NewKey: "AKIA...ROTATED"
+  Reason: "Key age > 90 days (SOC2 CC6.2)"`
+            }
+        },
+        'IAM Account': {
+            'Root MFA disabled': {
+                before: `AccountMFAEnabled: 0
+  RootAccountUsed: true
+  MFADevices: []`,
+                after: `AccountMFAEnabled: 1
+  RootAccountUsed: false
+  MFADevices:
+    - SerialNumber: "arn:aws:iam::mfa/root-account"
+      Type: "virtual"
+  Note: "ADVISORY — Must enable MFA via AWS Console"`
+            },
+            'No account password policy': {
+                before: `PasswordPolicy: null
+  # No password policy configured`,
+                after: `PasswordPolicy:
+  MinimumPasswordLength: 14
+  RequireSymbols: true
+  RequireNumbers: true
+  RequireUppercaseCharacters: true
+  RequireLowercaseCharacters: true
+  MaxPasswordAge: 90
+  PasswordReusePrevention: 12`
+            },
+            'Weak password policy': {
+                before: `PasswordPolicy:
+  MinimumPasswordLength: 8
+  RequireSymbols: false
+  RequireNumbers: false`,
+                after: `PasswordPolicy:
+  MinimumPasswordLength: 14
+  RequireSymbols: true
+  RequireNumbers: true
+  RequireUppercaseCharacters: true
+  RequireLowercaseCharacters: true
+  MaxPasswordAge: 90
+  PasswordReusePrevention: 12`
             }
         },
         'EC2 Instance': {
-            'Unpatched (14d overdue)': {
-                before: `PatchStatus: NON_COMPLIANT
-  PendingPatches: 3
-  LastPatchRun: 2026-04-16
-  OverdueDays: 14`,
-                after: `PatchStatus: COMPLIANT
-  PendingPatches: 0
-  LastPatchRun: 2026-04-30
-  OverdueDays: 0`
+            'IMDSv2 not enforced': {
+                before: `MetadataOptions:
+  HttpTokens: optional
+  HttpEndpoint: enabled
+  HttpPutResponseHopLimit: 1`,
+                after: `MetadataOptions:
+  HttpTokens: required       # IMDSv2 enforced
+  HttpEndpoint: enabled
+  HttpPutResponseHopLimit: 1
+  InstanceMetadataTags: enabled`
             }
         },
         'RDS Database': {
@@ -101,24 +181,65 @@ Reason: "Inactive > 90 days (SOC2 CC6.2)"`
 KmsKeyId: null`,
                 after: `StorageEncrypted: true
 KmsKeyId: "arn:aws:kms:us-east-1:123456789:key/mrk-abc123"
-EncryptionType: "AES-256"`
+EncryptionType: "AES-256"
+Note: "ADVISORY — Requires snapshot + restore"`
             },
-            'Backup retention < 7 days': {
+            'Backup retention': {
                 before: `BackupRetentionPeriod: 3
 PreferredBackupWindow: "03:00-04:00"`,
                 after: `BackupRetentionPeriod: 14
 PreferredBackupWindow: "03:00-04:00"
 PointInTimeRecovery: Enabled`
+            },
+            'Multi-AZ disabled': {
+                before: `MultiAZ: false
+AvailabilityZone: us-east-1a
+FailoverCapability: none`,
+                after: `MultiAZ: true
+AvailabilityZone: us-east-1a
+StandbyAZ: us-east-1b
+FailoverCapability: automatic`
+            },
+            'Publicly accessible': {
+                before: `PubliclyAccessible: true
+Endpoint: mydb.abc123.us-east-1.rds.amazonaws.com
+Port: 5432`,
+                after: `PubliclyAccessible: false
+Endpoint: mydb.abc123.us-east-1.rds.amazonaws.com
+Port: 5432
+NetworkAccess: "VPC internal only"`
             }
         },
         'Lambda': {
-            'Deprecated runtime (Node 14)': {
+            'Deprecated runtime': {
                 before: `Runtime: nodejs14.x
 LastModified: 2025-06-01
 DeprecationDate: 2025-11-27`,
                 after: `Runtime: nodejs20.x
-LastModified: 2026-04-30
-MigrationNote: "Automated runtime upgrade"`
+LastModified: 2026-05-08
+MigrationNote: "Automated runtime upgrade by ComplianceFlow"`
+            },
+            'Not VPC-attached': {
+                before: `VpcConfig:
+  VpcId: null
+  SubnetIds: []
+  SecurityGroupIds: []`,
+                after: `VpcConfig:
+  VpcId: "vpc-0abc123def456"
+  SubnetIds: ["subnet-priv-1a", "subnet-priv-1b"]
+  SecurityGroupIds: ["sg-lambda-internal"]
+  Note: "ADVISORY — Configure VPC manually"`
+            },
+            'Possible secrets in env vars': {
+                before: `Environment:
+  Variables:
+    DB_PASSWORD: "hunter2"
+    API_KEY: "sk-live-abc123..."`,
+                after: `Environment:
+  Variables:
+    DB_PASSWORD: "{{resolve:secretsmanager:prod/db-password}}"
+    API_KEY: "{{resolve:secretsmanager:prod/api-key}}"
+  Note: "Use Secrets Manager references instead of plaintext"`
             }
         },
         'Security Group': {
@@ -137,32 +258,130 @@ MigrationNote: "Automated runtime upgrade"`
     Port: 22
     Source: 203.0.113.5/32
     Description: "SSH from bastion host"`
+            }
+        },
+        'CloudTrail': {
+            'No trail enabled': {
+                before: `TrailList: []
+  # No CloudTrail configured`,
+                after: `TrailList:
+  - Name: "complianceflow-audit"
+    IsMultiRegionTrail: true
+    EnableLogFileValidation: true
+    S3BucketName: "complianceflow-audit-logs"
+    KmsKeyId: "arn:aws:kms:us-east-1:123456789:key/ct-key"
+  Note: "ADVISORY — Requires S3 bucket with correct policy"`
             },
-            'Overly permissive egress rules': {
-                before: `EgressRules:
-  - Protocol: -1
-    Port: All
-    Destination: 0.0.0.0/0`,
-                after: `EgressRules:
-  - Protocol: tcp
-    Port: 443
-    Destination: 0.0.0.0/0
-    Description: "HTTPS only"
-  - Protocol: tcp
-    Port: 5432
-    Destination: 10.0.2.0/24
-    Description: "Postgres to DB subnet"`
+            'Log Validation disabled': {
+                before: `Trail:
+  Name: "my-trail"
+  EnableLogFileValidation: false`,
+                after: `Trail:
+  Name: "my-trail"
+  EnableLogFileValidation: true
+  DigestDelivery: Enabled`
+            },
+            'Not multi-region': {
+                before: `Trail:
+  Name: "my-trail"
+  IsMultiRegionTrail: false
+  HomeRegion: us-east-1`,
+                after: `Trail:
+  Name: "my-trail"
+  IsMultiRegionTrail: true
+  HomeRegion: us-east-1
+  Coverage: "All AWS regions"`
+            },
+            'Log encryption disabled': {
+                before: `Trail:
+  Name: "my-trail"
+  KmsKeyId: null
+  S3BucketEncryption: "SSE-S3"`,
+                after: `Trail:
+  Name: "my-trail"
+  KmsKeyId: "arn:aws:kms:us-east-1:123456789:key/ct-encrypt"
+  S3BucketEncryption: "SSE-KMS"
+  Note: "ADVISORY — Requires KMS key with correct policy"`
+            }
+        },
+        'VPC': {
+            'Flow Logs disabled': {
+                before: `FlowLogs: []
+  TrafficCapture: none`,
+                after: `FlowLogs:
+  - ResourceId: "vpc-0abc123"
+    ResourceType: VPC
+    TrafficType: ALL
+    LogDestination: "cloud-watch-logs"
+    LogGroupName: "/complianceflow/vpc-flow-logs"
+    DeliverLogsPermissionArn: "arn:aws:iam::role/FlowLogRole"`
+            }
+        },
+        'KMS Key': {
+            'Key Rotation disabled': {
+                before: `KeyId: "mrk-abc123"
+KeyManager: CUSTOMER
+RotationEnabled: false
+NextRotation: null`,
+                after: `KeyId: "mrk-abc123"
+KeyManager: CUSTOMER
+RotationEnabled: true
+RotationPeriod: 365
+NextRotation: "2027-05-08"`
             }
         },
         'Secrets Manager': {
-            'Rotation disabled (last: 120d ago)': {
+            'Rotation disabled': {
                 before: `RotationEnabled: false
-LastRotatedDate: 2025-12-31
+LastRotatedDate: null
 RotationLambdaARN: null`,
                 after: `RotationEnabled: true
-LastRotatedDate: 2026-04-30
+LastRotatedDate: 2026-05-08
 RotationLambdaARN: "arn:aws:lambda:us-east-1:123456789:function:SecretRotator"
-RotationSchedule: "rate(30 days)"`
+RotationSchedule: "rate(30 days)"
+Note: "ADVISORY — Requires rotation Lambda"`
+            }
+        },
+        'Macie': {
+            'Macie not initialized': {
+                before: `MacieStatus: NOT_ENABLED
+DataDiscovery: disabled`,
+                after: `MacieStatus: ENABLED
+DataDiscovery: automatic
+ClassificationJobs: active
+Note: "ADVISORY — Enable via AWS Console > Macie"`
+            },
+            'Automated Data Discovery disabled': {
+                before: `MacieStatus: PAUSED
+DataDiscovery: disabled`,
+                after: `MacieStatus: ENABLED
+DataDiscovery: automatic
+Note: "ADVISORY — Re-enable via AWS Console"`
+            }
+        },
+        'WAF': {
+            'No WAF WebACLs found': {
+                before: `WebACLs: []
+Protection: none`,
+                after: `WebACLs:
+  - Name: "complianceflow-waf"
+    Scope: REGIONAL
+    Rules:
+      - AWSManagedRulesCommonRuleSet
+      - AWSManagedRulesSQLiRuleSet
+      - RateLimitRule (2000 req/5min)
+Note: "ADVISORY — Create WebACL via WAF Console"`
+            }
+        },
+        'Shield': {
+            'Shield Advanced not active': {
+                before: `ShieldSubscription: INACTIVE
+DDoSProtection: Basic only`,
+                after: `ShieldSubscription: ACTIVE
+DDoSProtection: Advanced
+ResponseTeam: AWS Shield Response Team
+CostProtection: enabled
+Note: "ADVISORY — $3,000/mo subscription required"`
             }
         }
     };
@@ -176,6 +395,7 @@ RotationSchedule: "rate(30 days)"`
         'CC7.1': 'System Monitoring & Patching',
         'CC7.2': 'Activity Logging',
         'CC8.1': 'Change Management',
+        'Art. 25': 'Data Protection by Design (GDPR)',
     };
 
     function buildFromScan(resources) {
@@ -254,7 +474,13 @@ RotationSchedule: "rate(30 days)"`
     function getDiff(resource) {
         const typeDiffs = DIFFS[resource.type];
         if (!typeDiffs) return null;
-        return typeDiffs[resource.issue] || null;
+        // Exact match first
+        if (typeDiffs[resource.issue]) return typeDiffs[resource.issue];
+        // Partial match — scan issue text may contain dynamic values
+        for (const key of Object.keys(typeDiffs)) {
+            if (resource.issue && resource.issue.includes(key)) return typeDiffs[key];
+        }
+        return null;
     }
 
     function fixSingle(resourceId) {
@@ -292,18 +518,28 @@ RotationSchedule: "rate(30 days)"`
         .then(data => {
             if (data.error) throw new Error(data.error);
 
-            btn.textContent = '✓ Fixed';
-            btn.className = 'btn btn-success btn-sm';
             const card = document.getElementById('rem-card-' + resourceId);
-            card.classList.add('fixed');
-
-            // Update severity badge in remediation card
             const badge = card.querySelector('.severity-badge');
-            badge.className = 'severity-badge pass';
-            badge.textContent = '✓ pass';
 
-            Scanner.markFixed(resourceId);
-            LiveTerminal.log('output', `SUCCESS: ${issue.type} "${issue.name}" remediated via real-world API call.`);
+            if (data.advisory) {
+                // Advisory — not auto-fixable, show info state
+                btn.textContent = 'ⓘ Advisory';
+                btn.className = 'btn btn-warning btn-sm';
+                btn.disabled = true;
+                card.classList.add('fixed');
+                badge.className = 'severity-badge warning';
+                badge.textContent = '⚠ advisory';
+                LiveTerminal.log('insight', `ADVISORY: ${data.message}`);
+            } else {
+                // Real fix applied
+                btn.textContent = '✓ Fixed';
+                btn.className = 'btn btn-success btn-sm';
+                card.classList.add('fixed');
+                badge.className = 'severity-badge pass';
+                badge.textContent = '✓ pass';
+                Scanner.markFixed(resourceId);
+                LiveTerminal.log('output', `SUCCESS: ${issue.type} "${issue.name}" remediated via real-world API call.`);
+            }
 
             // Capture Evidence
             if (window.Evidence) {
