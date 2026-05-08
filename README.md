@@ -68,15 +68,25 @@ ComplianceFlow passes the **Structural Test**: If you remove the AI intelligence
 - [x] Global Focus Switcher for real-time mandate context.
 - [x] Multi-framework evidence tagging and reporting.
 
+### ✅ Completed: Phase 5 — Continuous Monitoring & Deep Cloud Governance
+- [x] **Drift Detection Engine** (`drift-engine.js`): Real-time configuration drift monitoring with auto-rollback.
+- [x] **Governance Autopilot**: Toggle-driven autonomous enforcement loop (15s polling).
+- [x] **Deep Cloud Introspection**: Expanded scanner to 12+ AWS service categories:
+    - S3, EC2 Security Groups, VPCs, RDS, IAM (Root MFA + Stale Roles)
+    - KMS Key Rotation, CloudTrail Log Validation, Lambda Runtime Auditing
+    - Macie Data Discovery, WAF WebACL, Shield Advanced
+- [x] **Credential Obfuscation**: XOR + Base64 encoding for API key transit security.
+- [x] **Hardened Scanning**: Double-encryption checks, deprecated runtime detection, network perimeter audits.
+
 ### 🚀 Upcoming: The Path to v1.0
-- **Phase 5: Continuous Monitoring**
-    - [ ] Real-time drift detection and auto-rollback for unauthorized changes.
-    - [ ] Slack/Teams alerting for critical remediations.
 - **Phase 6: Auditor Marketplace**
     - [ ] Third-party auditor portal for asynchronous review.
     - [ ] Public "Verified by ComplianceFlow" trust badges.
 - **Phase 7: AI Questionnaire Automation**
     - [ ] Autocomplete security questionnaires (SIG/CAIQ) based on live evidence.
+- **Phase 8: Alerting & Integrations**
+    - [ ] Slack/Teams alerting for critical remediations.
+    - [ ] Webhook support for SIEM integration.
 
 ---
 
@@ -114,7 +124,7 @@ npm run dev
 ```text
 compliance-flow/
 ├── api/                # Vercel Serverless Functions (Node.js)
-│   ├── scan.js         # Real AWS SDK scanning logic
+│   ├── scan.js         # Real AWS SDK scanning logic (12+ services)
 │   └── remediate.js    # Real AWS SDK remediation logic
 ├── index.html          # Landing page
 ├── app.html            # Core Dashboard
@@ -124,6 +134,8 @@ compliance-flow/
 ├── cloud-connect.js    # Cloud credentials & session logic
 ├── scanner.js          # API-driven resource discovery
 ├── remediation.js      # API-driven fix engine
+├── drift-engine.js     # Real-time drift detection & autopilot
+├── frameworks.js       # Multi-framework governance mappings
 ├── evidence.js         # Audit & Evidence engine
 ├── live-terminal.js    # Real-time event logging
 ├── vercel.json         # Vercel deployment config
