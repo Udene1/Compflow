@@ -79,6 +79,22 @@ window.Frameworks = (() => {
             'No trail enabled': ['soc2:CC7.2', 'gdpr:Art. 33', 'iso27001:A.12.4.1'],
             'Log Validation disabled': ['soc2:CC7.2', 'iso27001:A.12.4.1'],
             default: ['soc2:CC7.2']
+        },
+        'Macie': {
+            'Data Discovery disabled': ['gdpr:Art. 25', 'hipaa:§164.312(c)(1)'],
+            default: ['gdpr:Art. 25']
+        },
+        'Lambda': {
+            'Deprecated runtime': ['soc2:CC7.1', 'iso27001:A.12.1.2'],
+            default: ['soc2:CC7.1']
+        },
+        'WAF': {
+            'No WAF WebACLs': ['soc2:CC6.7', 'iso27001:A.12.1.2'],
+            default: ['soc2:CC6.7']
+        },
+        'Shield': {
+            'Shield Advanced not active': ['soc2:CC6.7'],
+            default: ['soc2:CC6.7']
         }
     };
 

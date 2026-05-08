@@ -4,6 +4,10 @@ import { EC2Client, DescribeSecurityGroupsCommand, DescribeVpcsCommand } from "@
 import { RDSClient, DescribeDBInstancesCommand } from "@aws-sdk/client-rds";
 import { KMSClient, ListKeysCommand, DescribeKeyCommand, GetKeyRotationStatusCommand } from "@aws-sdk/client-kms";
 import { CloudTrailClient, DescribeTrailsCommand } from "@aws-sdk/client-cloudtrail";
+import { Macie2Client, GetMacieSessionCommand } from "@aws-sdk/client-macie2";
+import { LambdaClient, ListFunctionsCommand } from "@aws-sdk/client-lambda";
+import { WAFV2Client, ListWebACLsCommand } from "@aws-sdk/client-wafv2";
+import { ShieldClient, GetSubscriptionStatusCommand } from "@aws-sdk/client-shield";
 
 export default async function handler(req, res) {
     if (req.method !== 'POST') {
@@ -45,6 +49,10 @@ export default async function handler(req, res) {
             const rds = new RDSClient(config);
             const kms = new KMSClient(config);
             const cloudtrail = new CloudTrailClient(config);
+            const macie = new Macie2Client(config);
+            const lambda = new LambdaClient(config);
+            const waf = new WAFV2Client(config);
+            const shield = new ShieldClient(config);
 
             // 1. Scan S3 Buckets
             try {
@@ -107,7 +115,7 @@ export default async function handler(req, res) {
                 }
             } catch (e) { console.warn("RDS fail", e); }
 
-            // 4. Scan CloudTrail
+            // 4. Scan CloudTrail & Macie
             try {
                 const { TrailList } = await cloudtrail.send(new DescribeTrailsCommand({}));
                 if (!TrailList || TrailList.length === 0) {
@@ -127,10 +135,25 @@ export default async function handler(req, res) {
                 }
             } catch (e) { console.warn("CloudTrail fail", e); }
 
-            // 5. Scan KMS Keys
+            try {
+                const { status } = await macie.send(new GetMacieSessionCommand({}));
+                resources.push({
+                    name: 'Macie Service', type: 'Macie', icon: '🔍',
+                    region: 'Global', severity: status === 'ENABLED' ? 'pass' : 'warning',
+                    control: 'Art. 25', issue: status === 'ENABLED' ? null : 'Automated Data Discovery disabled'
+                });
+            } catch (e) { 
+                resources.push({
+                    name: 'Macie Service', type: 'Macie', icon: '🔍',
+                    region: 'Global', severity: 'warning', control: 'Art. 25',
+                    issue: 'Macie not initialized'
+                });
+            }
+
+            // 5. Scan KMS Keys & Lambda
             try {
                 const { Keys } = await kms.send(new ListKeysCommand({}));
-                for (const k of (Keys || []).slice(0, 5)) {
+                for (const k of (Keys || []).slice(0, 3)) {
                     const { KeyMetadata } = await kms.send(new DescribeKeyCommand({ KeyId: k.KeyId }));
                     if (KeyMetadata.KeyManager === 'CUSTOMER') {
                         const { RotationEnabled } = await kms.send(new GetKeyRotationStatusCommand({ KeyId: k.KeyId }));
@@ -143,10 +166,49 @@ export default async function handler(req, res) {
                 }
             } catch (e) { console.warn("KMS fail", e); }
 
-            // 6. Scan IAM Account & Roles
             try {
+                const { Functions } = await lambda.send(new ListFunctionsCommand({}));
+                for (const fn of Functions || []) {
+                    const isOld = fn.Runtime.includes('node12') || fn.Runtime.includes('node14') || fn.Runtime.includes('python3.7');
+                    resources.push({
+                        name: fn.FunctionName, type: 'Lambda', icon: '⚡',
+                        region: config.region, severity: isOld ? 'critical' : 'pass',
+                        control: 'CC7.1', issue: isOld ? `Deprecated runtime (${fn.Runtime})` : null
+                    });
+                }
+            } catch (e) { console.warn("Lambda fail", e); }
+
+            // 6. Scan WAF & Shield & IAM
+            try {
+                const { WebACLs } = await waf.send(new ListWebACLsCommand({ Scope: 'REGIONAL' }));
+                if (!WebACLs || WebACLs.length === 0) {
+                    resources.push({
+                        name: 'Web Perimeter', type: 'WAF', icon: '🧱',
+                        region: config.region, severity: 'warning', control: 'CC6.7', issue: 'No WAF WebACLs found'
+                    });
+                }
+            } catch (e) { console.warn("WAF fail", e); }
+
+            try {
+                const { Status } = await shield.send(new GetSubscriptionStatusCommand({}));
+                if (Status !== 'SUBSCRIBED') {
+                    resources.push({
+                        name: 'Shield Protection', type: 'Shield', icon: '🛡️',
+                        region: 'Global', severity: 'warning', control: 'CC6.7', issue: 'Shield Advanced not active'
+                    });
+                }
+            } catch (e) { console.warn("Shield fail", e); }
+
+            try {
+                const { SummaryMap } = await iam.send(new GetAccountSummaryCommand({}));
+                if (SummaryMap.AccountMFAEnabled === 0) {
+                    resources.push({
+                        name: 'Root Account', type: 'IAM Account', icon: '👤',
+                        region: 'Global', severity: 'critical', control: 'CC6.3', issue: 'Root MFA disabled'
+                    });
+                }
                 const { Roles } = await iam.send(new ListRolesCommand({}));
-                for (const role of Roles || []) {
+                for (const role of (Roles || []).slice(0, 10)) {
                     const isOld = (new Date() - new Date(role.CreateDate)) / (1000 * 60 * 60 * 24) > 180;
                     if (isOld) {
                         resources.push({
@@ -155,13 +217,6 @@ export default async function handler(req, res) {
                             control: 'CC6.2', issue: 'Stale Access (>180 days)'
                         });
                     }
-                }
-                const { SummaryMap } = await iam.send(new GetAccountSummaryCommand({}));
-                if (SummaryMap.AccountMFAEnabled === 0) {
-                    resources.push({
-                        name: 'Root Account', type: 'IAM Account', icon: '👤',
-                        region: 'Global', severity: 'critical', control: 'CC6.3', issue: 'Root MFA disabled'
-                    });
                 }
             } catch (e) { console.warn("IAM fail", e); }
         }
