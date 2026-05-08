@@ -9,8 +9,10 @@ window.Frameworks = (() => {
             controls: {
                 'CC6.1': { id: 'CC6.1', name: 'Logical Access Protection', desc: 'The entity restricts logical access to system components.' },
                 'CC6.2': { id: 'CC6.2', name: 'User Access Management', desc: 'The entity manages user access through authentication and authorization.' },
+                'CC6.3': { id: 'CC6.3', name: 'Security Policy Compliance', desc: 'The entity monitors and enforces compliance with its security policies.' },
                 'CC6.7': { id: 'CC6.7', name: 'Boundary Protection', desc: 'The entity restricts unauthorized traffic from entering the network.' },
-                'CC7.1': { id: 'CC7.1', name: 'System Monitoring', desc: 'The entity monitors the system to detect and address anomalies.' }
+                'CC7.1': { id: 'CC7.1', name: 'System Monitoring', desc: 'The entity monitors the system to detect and address anomalies.' },
+                'CC7.2': { id: 'CC7.2', name: 'Audit Logging', desc: 'The entity evaluates and responds to identified security incidents.' }
             }
         },
         gdpr: {
@@ -19,7 +21,7 @@ window.Frameworks = (() => {
             controls: {
                 'Art. 32': { id: 'Art. 32', name: 'Security of Processing', desc: 'Appropriate technical and organizational measures to ensure security.' },
                 'Art. 25': { id: 'Art. 25', name: 'Privacy by Design', desc: 'Implement appropriate technical measures to protect sensitive data.' },
-                'Art. 35': { id: 'Art. 35', name: 'DPIA', desc: 'Data Protection Impact Assessment for high-risk processing.' }
+                'Art. 33': { id: 'Art. 33', name: 'Breach Notification', desc: 'Ability to detect, report, and document personal data breaches.' }
             }
         },
         hipaa: {
@@ -36,6 +38,7 @@ window.Frameworks = (() => {
             type: 'Annex A Controls',
             controls: {
                 'A.9.1.1': { id: 'A.9.1.1', name: 'Access Control Policy', desc: 'Establish and document an access control policy.' },
+                'A.12.4.1': { id: 'A.12.4.1', name: 'Event Logging', desc: 'Event logs recording user activities and security events shall be produced.' },
                 'A.12.1.2': { id: 'A.12.1.2', name: 'Change Management', desc: 'Changes to facilities and systems shall be controlled.' },
                 'A.18.1.1': { id: 'A.18.1.1', name: 'Applicable Legislation', desc: 'Statutory, regulatory, and contractual requirements shall be identified.' }
             }
@@ -49,16 +52,33 @@ window.Frameworks = (() => {
             default: ['soc2:CC6.1']
         },
         'IAM Role': {
-            'Unused for 90 days': ['soc2:CC6.2', 'iso27001:A.9.1.1'],
+            'Stale Access': ['soc2:CC6.2', 'iso27001:A.9.1.1'],
             default: ['soc2:CC6.2']
         },
-        'VPC': {
-            'Overly permissive SG': ['soc2:CC6.7', 'gdpr:Art. 32', 'iso27001:A.12.1.2'],
+        'IAM Account': {
+            'Root MFA disabled': ['soc2:CC6.3', 'gdpr:Art. 32', 'iso27001:A.9.1.1'],
+            default: ['soc2:CC6.3']
+        },
+        'Security Group': {
+            'Allows 0.0.0.0/0': ['soc2:CC6.7', 'gdpr:Art. 32', 'iso27001:A.12.1.2'],
             default: ['soc2:CC6.7']
         },
-        'RDS Instance': {
-            'Not encrypted': ['soc2:CC6.1', 'gdpr:Art. 32', 'hipaa:§164.312(c)(1)'],
+        'VPC': {
+            'Flow Logs disabled': ['soc2:CC7.2', 'gdpr:Art. 33', 'iso27001:A.12.4.1'],
+            default: ['soc2:CC7.2']
+        },
+        'RDS Database': {
+            'Encryption at rest disabled': ['soc2:CC6.1', 'gdpr:Art. 32', 'hipaa:§164.312(c)(1)'],
             default: ['soc2:CC6.1']
+        },
+        'KMS Key': {
+            'Key Rotation disabled': ['soc2:CC6.7', 'iso27001:A.12.1.2'],
+            default: ['soc2:CC6.7']
+        },
+        'CloudTrail': {
+            'No trail enabled': ['soc2:CC7.2', 'gdpr:Art. 33', 'iso27001:A.12.4.1'],
+            'Log Validation disabled': ['soc2:CC7.2', 'iso27001:A.12.4.1'],
+            default: ['soc2:CC7.2']
         }
     };
 
