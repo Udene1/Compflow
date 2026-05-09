@@ -1,11 +1,15 @@
 import { S3Client, PutPublicAccessBlockCommand, PutBucketVersioningCommand, PutBucketEncryptionCommand } from "@aws-sdk/client-s3";
-import { EC2Client, RevokeSecurityGroupIngressCommand, AuthorizeSecurityGroupIngressCommand, DescribeSecurityGroupsCommand, CreateFlowLogsCommand } from "@aws-sdk/client-ec2";
-import { IAMClient, UpdateAssumeRolePolicyCommand, GetRoleCommand } from "@aws-sdk/client-iam";
+import { EC2Client, RevokeSecurityGroupIngressCommand, AuthorizeSecurityGroupIngressCommand, DescribeSecurityGroupsCommand, CreateFlowLogsCommand, ReleaseAddressCommand, DeleteSecurityGroupCommand, ModifyInstanceMetadataOptionsCommand } from "@aws-sdk/client-ec2";
+import { IAMClient, UpdateAssumeRolePolicyCommand, GetRoleCommand, UpdateAccessKeyCommand } from "@aws-sdk/client-iam";
 import { RDSClient, ModifyDBInstanceCommand } from "@aws-sdk/client-rds";
 import { KMSClient, EnableKeyRotationCommand } from "@aws-sdk/client-kms";
 import { LambdaClient, UpdateFunctionConfigurationCommand } from "@aws-sdk/client-lambda";
 import { CloudTrailClient, UpdateTrailCommand, CreateTrailCommand, StartLoggingCommand } from "@aws-sdk/client-cloudtrail";
 import { SecretsManagerClient, RotateSecretCommand } from "@aws-sdk/client-secrets-manager";
+import { ConfigServiceClient } from "@aws-sdk/client-config-service";
+import { GuardDutyClient, CreateDetectorCommand } from "@aws-sdk/client-guardduty";
+import { CloudWatchLogsClient, PutRetentionPolicyCommand } from "@aws-sdk/client-cloudwatch-logs";
+import { CloudWatchClient } from "@aws-sdk/client-cloudwatch";
 
 export default async function handler(req, res) {
     if (req.method !== 'POST') {
@@ -41,6 +45,7 @@ export default async function handler(req, res) {
         let result = { success: true, message: `Successfully remediated ${resourceName}` };
 
         if (provider === 'aws') {
+
 
             // ── S3 Bucket Remediations ──
             if (resourceType === 'S3 Bucket') {
@@ -80,95 +85,132 @@ export default async function handler(req, res) {
             else if (resourceType === 'Security Group') {
                 const ec2 = new EC2Client(config);
 
-                if (issue.includes('0.0.0.0/0')) {
-                    // First, find the offending ingress rule
-                    const { SecurityGroups } = await ec2.send(new DescribeSecurityGroupsCommand({
-                        GroupNames: [resourceName]
-                    }));
+                if (issue.includes('port 22')) {
+                    const { SecurityGroups } = await ec2.send(new DescribeSecurityGroupsCommand({ GroupNames: [resourceName] }));
                     const sg = SecurityGroups?.[0];
                     if (sg) {
-                        // Revoke the open SSH rule
-                        const openRules = sg.IpPermissions.filter(p =>
-                            (p.FromPort <= 22 && p.ToPort >= 22) &&
-                            p.IpRanges.some(r => r.CidrIp === '0.0.0.0/0')
-                        );
+                        const openRules = sg.IpPermissions.filter(p => (p.FromPort <= 22 && p.ToPort >= 22) && p.IpRanges.some(r => r.CidrIp === '0.0.0.0/0'));
                         for (const rule of openRules) {
                             await ec2.send(new RevokeSecurityGroupIngressCommand({
                                 GroupId: sg.GroupId,
-                                IpPermissions: [{
-                                    IpProtocol: rule.IpProtocol,
-                                    FromPort: rule.FromPort,
-                                    ToPort: rule.ToPort,
-                                    IpRanges: [{ CidrIp: '0.0.0.0/0' }]
-                                }]
+                                IpPermissions: [{ IpProtocol: rule.IpProtocol, FromPort: rule.FromPort, ToPort: rule.ToPort, IpRanges: [{ CidrIp: '0.0.0.0/0' }] }]
                             }));
                         }
-                        // Re-authorize restricted to VPC default CIDR
                         await ec2.send(new AuthorizeSecurityGroupIngressCommand({
                             GroupId: sg.GroupId,
-                            IpPermissions: [{
-                                IpProtocol: 'tcp',
-                                FromPort: 22,
-                                ToPort: 22,
-                                IpRanges: [{ CidrIp: '10.0.0.0/16', Description: 'SSH restricted to VPC CIDR (ComplianceFlow)' }]
-                            }]
+                            IpPermissions: [{ IpProtocol: 'tcp', FromPort: 22, ToPort: 22, IpRanges: [{ CidrIp: '10.0.0.0/16', Description: 'SSH restricted to VPC CIDR (ComplianceFlow)' }] }]
                         }));
+                    }
+                } else if (issue.includes('RDP') || issue.includes('3389')) {
+                    const { SecurityGroups } = await ec2.send(new DescribeSecurityGroupsCommand({ GroupNames: [resourceName] }));
+                    const sg = SecurityGroups?.[0];
+                    if (sg) {
+                        const rdpRules = sg.IpPermissions.filter(p => (p.FromPort <= 3389 && p.ToPort >= 3389) && p.IpRanges.some(r => r.CidrIp === '0.0.0.0/0'));
+                        for (const rule of rdpRules) {
+                            await ec2.send(new RevokeSecurityGroupIngressCommand({
+                                GroupId: sg.GroupId,
+                                IpPermissions: [{ IpProtocol: rule.IpProtocol, FromPort: rule.FromPort, ToPort: rule.ToPort, IpRanges: [{ CidrIp: '0.0.0.0/0' }] }]
+                            }));
+                        }
+                    }
+                } else if (issue.includes('HTTP') || issue.includes('port 80')) {
+                    const { SecurityGroups } = await ec2.send(new DescribeSecurityGroupsCommand({ GroupNames: [resourceName] }));
+                    const sg = SecurityGroups?.[0];
+                    if (sg) {
+                        const httpRules = sg.IpPermissions.filter(p => (p.FromPort <= 80 && p.ToPort >= 80) && p.IpRanges.some(r => r.CidrIp === '0.0.0.0/0'));
+                        for (const rule of httpRules) {
+                            await ec2.send(new RevokeSecurityGroupIngressCommand({
+                                GroupId: sg.GroupId,
+                                IpPermissions: [{ IpProtocol: rule.IpProtocol, FromPort: rule.FromPort, ToPort: rule.ToPort, IpRanges: [{ CidrIp: '0.0.0.0/0' }] }]
+                            }));
+                        }
+                    }
+                } else if (issue.includes('Unused Security Group')) {
+                    const { SecurityGroups } = await ec2.send(new DescribeSecurityGroupsCommand({ GroupNames: [resourceName] }));
+                    if (SecurityGroups?.[0]) {
+                        await ec2.send(new DeleteSecurityGroupCommand({ GroupId: SecurityGroups[0].GroupId }));
+                        result.message = `Deleted unused Security Group: ${resourceName}`;
                     }
                 }
             }
 
             // ── IAM Remediations ──
             else if (resourceType === 'IAM Account') {
-                // Root MFA cannot be enabled programmatically
-                result = {
-                    success: true,
-                    advisory: true,
-                    message: `ADVISORY: Root MFA must be enabled manually via the AWS Console. Navigate to IAM > Security credentials > Assign MFA device.`
-                };
+                if (issue.includes('Root access keys')) {
+                    result = {
+                        success: true,
+                        advisory: true,
+                        message: `ADVISORY: Root access keys detected. PLEASE DELETE MANUALLY via IAM > Security credentials.`
+                    };
+                } else {
+                    result = {
+                        success: true,
+                        advisory: true,
+                        message: `ADVISORY: Root MFA must be enabled manually via the AWS Console.`
+                    };
+                }
+            }
+            else if (resourceType === 'IAM User') {
+                if (issue.includes('MFA not enabled')) {
+                    result = {
+                        success: true,
+                        advisory: true,
+                        message: `ADVISORY: User "${resourceName}" must enable MFA.`
+                    };
+                } else if (issue.includes('Inactive user')) {
+                    result = {
+                        success: true,
+                        advisory: true,
+                        message: `ADVISORY: User "${resourceName}" is inactive (>90 days). Consider deactivating or deleting.`
+                    };
+                } else if (issue.includes('inline policies')) {
+                    result = {
+                        success: true,
+                        advisory: true,
+                        message: `ADVISORY: User "${resourceName}" has direct inline policies. Refactor into Managed Policies.`
+                    };
+                } else if (issue.includes('Access key') && issue.includes('90 days')) {
+                    result = {
+                        success: true,
+                        advisory: true,
+                        message: `ADVISORY: Access key for "${resourceName}" is >90 days old. Rotate manually.`
+                    };
+                }
+            }
+            else if (resourceType === 'IAM Group') {
+                if (issue.includes('Admin Sprawl')) {
+                    result = {
+                        success: true,
+                        advisory: true,
+                        message: `ADVISORY: Multiple users have AdministratorAccess. Review and apply Principle of Least Privilege.`
+                    };
+                }
             }
             else if (resourceType === 'IAM Role') {
                 const iam = new IAMClient(config);
-
                 if (issue.includes('Stale Access') || issue.includes('180 days')) {
-                    // Deny all assume-role by updating the trust policy
-                    const { Role } = await iam.send(new GetRoleCommand({ RoleName: resourceName }));
                     const denyPolicy = {
                         Version: "2012-10-17",
                         Statement: [{
-                            Effect: "Deny",
-                            Principal: "*",
-                            Action: "sts:AssumeRole",
-                            Condition: {
-                                StringEquals: {
-                                    "aws:PrincipalTag/ComplianceFlow": "deactivated"
-                                }
-                            }
+                            Effect: "Deny", Principal: "*", Action: "sts:AssumeRole",
+                            Condition: { StringEquals: { "aws:PrincipalTag/ComplianceFlow": "deactivated" } }
                         }]
                     };
                     await iam.send(new UpdateAssumeRolePolicyCommand({
                         RoleName: resourceName,
                         PolicyDocument: JSON.stringify(denyPolicy)
                     }));
-                } else if (issue.includes('Access key') && issue.includes('90 days')) {
-                    // Access key rotation is advisory — can't auto-rotate without breaking apps
-                    result = {
-                        success: true,
-                        advisory: true,
-                        message: `ADVISORY: Access key for "${resourceName}" is >90 days old. Rotate manually via IAM > Users > Security credentials to avoid service disruption.`
-                    };
                 }
             }
 
             // ── RDS Database Remediations ──
             else if (resourceType === 'RDS Database') {
                 const rds = new RDSClient(config);
-
                 if (issue.includes('Encryption at rest')) {
-                    // RDS encryption cannot be enabled in-place
                     result = {
                         success: true,
                         advisory: true,
-                        message: `ADVISORY: RDS encryption cannot be enabled in-place. Create an encrypted snapshot of "${resourceName}", then restore from it. See: https://docs.aws.amazon.com/AmazonRDS/latest/UserGuide/Overview.Encryption.html`
+                        message: `ADVISORY: RDS encryption cannot be enabled in-place. Create an encrypted snapshot, then restore.`
                     };
                 } else if (issue.includes('Backup retention')) {
                     await rds.send(new ModifyDBInstanceCommand({
@@ -180,9 +222,9 @@ export default async function handler(req, res) {
                     await rds.send(new ModifyDBInstanceCommand({
                         DBInstanceIdentifier: resourceName,
                         MultiAZ: true,
-                        ApplyImmediately: false // Requires maintenance window
+                        ApplyImmediately: false
                     }));
-                    result.message = `Multi-AZ enabled for "${resourceName}". Change will apply during the next maintenance window.`;
+                    result.message = `Multi-AZ enabled for "${resourceName}". applies next maintenance window.`;
                 } else if (issue.includes('Publicly accessible')) {
                     await rds.send(new ModifyDBInstanceCommand({
                         DBInstanceIdentifier: resourceName,
@@ -195,7 +237,6 @@ export default async function handler(req, res) {
             // ── KMS Key Remediations ──
             else if (resourceType === 'KMS Key') {
                 const kms = new KMSClient(config);
-
                 if (issue.includes('Rotation disabled')) {
                     await kms.send(new EnableKeyRotationCommand({ KeyId: resourceName }));
                 }
@@ -204,47 +245,18 @@ export default async function handler(req, res) {
             // ── Lambda Remediations ──
             else if (resourceType === 'Lambda') {
                 const lambda = new LambdaClient(config);
-
-                if (issue.includes('Deprecated runtime') || issue.includes('runtime')) {
-                    // Map deprecated runtimes to current equivalents
-                    const runtimeUpgrades = {
-                        'nodejs12.x': 'nodejs20.x',
-                        'nodejs14.x': 'nodejs20.x',
-                        'nodejs16.x': 'nodejs20.x',
-                        'python3.7': 'python3.12',
-                        'python3.8': 'python3.12',
-                    };
-                    // Extract current runtime from issue text
-                    const runtimeMatch = issue.match(/\(([^)]+)\)/);
-                    const currentRuntime = runtimeMatch ? runtimeMatch[1] : null;
-                    const newRuntime = currentRuntime ? (runtimeUpgrades[currentRuntime] || 'nodejs20.x') : 'nodejs20.x';
-
+                if (issue.includes('runtime')) {
                     await lambda.send(new UpdateFunctionConfigurationCommand({
                         FunctionName: resourceName,
-                        Runtime: newRuntime
+                        Runtime: 'nodejs20.x'
                     }));
-                    result.message = `Lambda "${resourceName}" runtime upgraded to ${newRuntime}.`;
-                } else if (issue.includes('Not VPC-attached')) {
-                    result = {
-                        success: true,
-                        advisory: true,
-                        message: `ADVISORY: Lambda "${resourceName}" is not VPC-attached. Configure VPC settings manually with appropriate subnets and security groups.`
-                    };
                 }
             }
 
             // ── CloudTrail Remediations ──
             else if (resourceType === 'CloudTrail') {
                 const cloudtrail = new CloudTrailClient(config);
-
-                if (issue.includes('No trail enabled')) {
-                    // Create a new multi-region trail
-                    result = {
-                        success: true,
-                        advisory: true,
-                        message: `ADVISORY: Creating a CloudTrail requires an S3 bucket with the correct bucket policy. Create a trail named "complianceflow-audit" via the AWS Console or CLI with an existing log bucket.`
-                    };
-                } else if (issue.includes('Log Validation disabled')) {
+                if (issue.includes('Log Validation disabled')) {
                     await cloudtrail.send(new UpdateTrailCommand({
                         Name: resourceName,
                         EnableLogFileValidation: true
@@ -254,19 +266,12 @@ export default async function handler(req, res) {
                         Name: resourceName,
                         IsMultiRegionTrail: true
                     }));
-                } else if (issue.includes('Log encryption disabled')) {
-                    result = {
-                        success: true,
-                        advisory: true,
-                        message: `ADVISORY: CloudTrail log encryption requires a KMS key with the correct key policy. Configure via: aws cloudtrail update-trail --name ${resourceName} --kms-key-id <KMS_KEY_ARN>`
-                    };
                 }
             }
 
-            // ── VPC Remediations ──
+            // ── VPC & Networking Remediations ──
             else if (resourceType === 'VPC') {
                 const ec2 = new EC2Client(config);
-
                 if (issue.includes('Flow Logs disabled')) {
                     try {
                         await ec2.send(new CreateFlowLogsCommand({
@@ -277,50 +282,29 @@ export default async function handler(req, res) {
                             LogGroupName: `/complianceflow/vpc-flow-logs/${resourceName}`,
                             DeliverLogsPermissionArn: `arn:aws:iam::role/ComplianceFlowVPCFlowLogRole`
                         }));
-                    } catch (flowErr) {
-                        // Flow logs require an IAM role — fallback to advisory
+                    } catch (e) {
                         result = {
                             success: true,
                             advisory: true,
-                            message: `ADVISORY: VPC Flow Logs require an IAM role with logs:CreateLogGroup and logs:PutLogEvents permissions. Create the role "ComplianceFlowVPCFlowLogRole" first, then re-run remediation.`
+                            message: `ADVISORY: VPC Flow Logs require an IAM role "ComplianceFlowVPCFlowLogRole".`
                         };
                     }
+                }
+            }
+            else if (resourceType === 'Elastic IP') {
+                const ec2 = new EC2Client(config);
+                if (issue.includes('Unassociated')) {
+                    await ec2.send(new ReleaseAddressCommand({ PublicIp: resourceName }));
+                    result.message = `Released unassociated Elastic IP: ${resourceName}`;
                 }
             }
 
             // ── Secrets Manager Remediations ──
             else if (resourceType === 'Secrets Manager') {
-                const sm = new SecretsManagerClient(config);
-
-                if (issue.includes('Rotation disabled') || issue.includes('rotation')) {
-                    result = {
-                        success: true,
-                        advisory: true,
-                        message: `ADVISORY: Secret "${resourceName}" requires a Lambda rotation function. Configure rotation via: aws secretsmanager rotate-secret --secret-id ${resourceName} --rotation-lambda-arn <LAMBDA_ARN>`
-                    };
-                }
-            }
-
-            // ── Macie / WAF / Shield — Advisory only ──
-            else if (resourceType === 'Macie') {
                 result = {
                     success: true,
                     advisory: true,
-                    message: `ADVISORY: Enable Amazon Macie via the AWS Console > Macie > Get Started. Macie requires explicit activation per account.`
-                };
-            }
-            else if (resourceType === 'WAF') {
-                result = {
-                    success: true,
-                    advisory: true,
-                    message: `ADVISORY: No WAF WebACLs found. Create a WebACL via AWS Console > WAF & Shield > Web ACLs to protect your endpoints.`
-                };
-            }
-            else if (resourceType === 'Shield') {
-                result = {
-                    success: true,
-                    advisory: true,
-                    message: `ADVISORY: AWS Shield Advanced requires a subscription ($3,000/mo). Enable via AWS Console > Shield > Subscribe to Advanced.`
+                    message: `ADVISORY: Secret "${resourceName}" rotation requires Lambda configuration.`
                 };
             }
 
@@ -328,7 +312,6 @@ export default async function handler(req, res) {
             else if (resourceType === 'EC2 Instance') {
                 if (issue.includes('IMDSv2')) {
                     const ec2 = new EC2Client(config);
-                    const { ModifyInstanceMetadataOptionsCommand } = await import("@aws-sdk/client-ec2");
                     await ec2.send(new ModifyInstanceMetadataOptionsCommand({
                         InstanceId: resourceName,
                         HttpTokens: 'required',
@@ -337,13 +320,55 @@ export default async function handler(req, res) {
                 }
             }
 
-            // ── Fallback for unknown types ──
-            else {
+            // ── Monitoring & Threat Detection Remediations ──
+            else if (resourceType === 'Threat Detection') {
+                const guardduty = new GuardDutyClient(config);
+                if (issue.includes('disabled')) {
+                    await guardduty.send(new CreateDetectorCommand({ Enable: true }));
+                    result.message = `Enabled GuardDuty threat detection.`;
+                }
+            }
+            else if (resourceType === 'Configuration') {
+                if (issue.includes('disabled')) {
+                    result = {
+                        success: true,
+                        advisory: true,
+                        message: `ADVISORY: AWS Config requires an IAM Role and an S3 bucket for configuration history. Configure via AWS Console > AWS Config.`
+                    };
+                }
+            }
+            else if (resourceType === 'Log Group') {
+                const cwLogs = new CloudWatchLogsClient(config);
+                if (issue.includes('retention') || issue.includes('< 365')) {
+                    await cwLogs.send(new PutRetentionPolicyCommand({
+                        logGroupName: resourceName,
+                        retentionInDays: 365
+                    }));
+                    result.message = `Set log retention to 365 days for ${resourceName}.`;
+                }
+            }
+            else if (resourceType === 'CloudWatch Alarms') {
                 result = {
                     success: true,
                     advisory: true,
-                    message: `No automated remediation available for ${resourceType}. Manual intervention required.`
+                    message: `ADVISORY: CloudWatch Alarms for SOC2 require metric filters on CloudTrail log groups. Set this manually via AWS Console.`
                 };
+            }
+
+            // ── Macie / WAF / Shield — Advisory only ──
+            else if (resourceType === 'Macie') {
+                result = { success: true, advisory: true, message: `ADVISORY: Enable Amazon Macie via the AWS Console.` };
+            }
+            else if (resourceType === 'WAF') {
+                result = { success: true, advisory: true, message: `ADVISORY: Create a WebACL via AWS Console > WAF & Shield.` };
+            }
+            else if (resourceType === 'Shield') {
+                result = { success: true, advisory: true, message: `ADVISORY: AWS Shield Advanced requires a subscription.` };
+            }
+
+            // ── Fallback ──
+            else {
+                result = { success: true, advisory: true, message: `No automated remediation available for ${resourceType}. Manual intervention required.` };
             }
         }
 

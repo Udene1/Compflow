@@ -1,6 +1,6 @@
 import { S3Client, ListBucketsCommand, GetPublicAccessBlockCommand, GetBucketVersioningCommand, GetBucketEncryptionCommand, GetBucketLoggingCommand } from "@aws-sdk/client-s3";
-import { IAMClient, ListRolesCommand, GetAccountSummaryCommand, GetAccountPasswordPolicyCommand, ListUsersCommand, ListAccessKeysCommand } from "@aws-sdk/client-iam";
-import { EC2Client, DescribeSecurityGroupsCommand, DescribeVpcsCommand, DescribeInstancesCommand, DescribeFlowLogsCommand } from "@aws-sdk/client-ec2";
+import { IAMClient, ListRolesCommand, GetAccountSummaryCommand, GetAccountPasswordPolicyCommand, ListUsersCommand, ListAccessKeysCommand, ListMFADevicesCommand, ListUserPoliciesCommand, ListAttachedUserPoliciesCommand, ListRolePoliciesCommand } from "@aws-sdk/client-iam";
+import { EC2Client, DescribeSecurityGroupsCommand, DescribeVpcsCommand, DescribeInstancesCommand, DescribeFlowLogsCommand, DescribeNetworkInterfacesCommand, DescribeAddressesCommand } from "@aws-sdk/client-ec2";
 import { RDSClient, DescribeDBInstancesCommand } from "@aws-sdk/client-rds";
 import { KMSClient, ListKeysCommand, DescribeKeyCommand, GetKeyRotationStatusCommand } from "@aws-sdk/client-kms";
 import { CloudTrailClient, DescribeTrailsCommand, GetTrailStatusCommand } from "@aws-sdk/client-cloudtrail";
@@ -9,6 +9,10 @@ import { LambdaClient, ListFunctionsCommand } from "@aws-sdk/client-lambda";
 import { WAFV2Client, ListWebACLsCommand } from "@aws-sdk/client-wafv2";
 import { ShieldClient, GetSubscriptionStatusCommand } from "@aws-sdk/client-shield";
 import { SecretsManagerClient, ListSecretsCommand } from "@aws-sdk/client-secrets-manager";
+import { CloudWatchClient, DescribeAlarmsCommand } from "@aws-sdk/client-cloudwatch";
+import { CloudWatchLogsClient, DescribeLogGroupsCommand } from "@aws-sdk/client-cloudwatch-logs";
+import { GuardDutyClient, ListDetectorsCommand } from "@aws-sdk/client-guardduty";
+import { ConfigServiceClient, DescribeConfigurationRecordersCommand } from "@aws-sdk/client-config-service";
 
 export default async function handler(req, res) {
     if (req.method !== 'POST') {
@@ -55,6 +59,10 @@ export default async function handler(req, res) {
             const waf = new WAFV2Client(config);
             const shield = new ShieldClient(config);
             const sm = new SecretsManagerClient(config);
+            const cloudwatch = new CloudWatchClient(config);
+            const cwLogs = new CloudWatchLogsClient(config);
+            const guardduty = new GuardDutyClient(config);
+            const configService = new ConfigServiceClient(config);
 
             // ═══════════════════════════════════════════
             // 1. S3 BUCKETS — Deep Scan
@@ -386,12 +394,21 @@ export default async function handler(req, res) {
             // ═══════════════════════════════════════════
             try {
                 const { SummaryMap } = await iam.send(new GetAccountSummaryCommand({}));
+                
+                // Root Account Security
                 if (SummaryMap.AccountMFAEnabled === 0) {
                     resources.push({
                         name: 'Root Account', type: 'IAM Account', icon: '👤',
                         region: 'Global', severity: 'critical', control: 'CC6.3', issue: 'Root MFA disabled'
                     });
                 }
+                if (SummaryMap.AccountAccessKeysPresent > 0) {
+                    resources.push({
+                        name: 'Root Account', type: 'IAM Account', icon: '👤',
+                        region: 'Global', severity: 'critical', control: 'CC6.1', issue: 'Root access keys present'
+                    });
+                }
+
                 // Password policy
                 try {
                     const policy = await iam.send(new GetAccountPasswordPolicyCommand({}));
@@ -400,11 +417,10 @@ export default async function handler(req, res) {
                         resources.push({
                             name: 'Password Policy', type: 'IAM Account', icon: '👤',
                             region: 'Global', severity: 'warning', control: 'CC6.3',
-                            issue: `Weak password policy (min length: ${pp.MinimumPasswordLength}, symbols: ${pp.RequireSymbols ? 'yes':'no'})`
+                            issue: `Weak password policy (length: ${pp.MinimumPasswordLength})`
                         });
                     }
                 } catch (e) {
-                    // No password policy set at all
                     resources.push({
                         name: 'Password Policy', type: 'IAM Account', icon: '👤',
                         region: 'Global', severity: 'critical', control: 'CC6.3',
@@ -412,63 +428,225 @@ export default async function handler(req, res) {
                     });
                 }
 
+                const { Users } = await iam.send(new ListUsersCommand({}));
+                let adminCount = 0;
+
+                for (const user of Users || []) {
+                    // Check individual MFA
+                    const { MFADevices } = await iam.send(new ListMFADevicesCommand({ UserName: user.UserName }));
+                    if (MFADevices.length === 0) {
+                        resources.push({
+                            name: user.UserName, type: 'IAM User', icon: '👤',
+                            region: 'Global', severity: 'critical', control: 'CC6.3', issue: 'MFA not enabled for user'
+                        });
+                    }
+
+                    // Check Unused User (>90 days)
+                    const lastUsed = user.PasswordLastUsed ? new Date(user.PasswordLastUsed) : null;
+                    const daysUnused = lastUsed ? (new Date() - lastUsed) / (1000 * 60 * 60 * 24) : 999;
+                    if (daysUnused > 90) {
+                        resources.push({
+                            name: user.UserName, type: 'IAM User', icon: '👤',
+                            region: 'Global', severity: 'warning', control: 'CC6.2', issue: `Inactive user (>90 days: ${Math.round(daysUnused)}d)`
+                        });
+                    }
+
+                    // Check Access Key Age & Root-like power
+                    const { AccessKeyMetadata } = await iam.send(new ListAccessKeysCommand({ UserName: user.UserName }));
+                    for (const key of AccessKeyMetadata || []) {
+                        const keyAge = (new Date() - new Date(key.CreateDate)) / (1000 * 60 * 60 * 24);
+                        if (keyAge > 90 && key.Status === 'Active') {
+                            resources.push({
+                                name: `${user.UserName}/${key.AccessKeyId.substring(0, 8)}`, type: 'IAM User', icon: '🔑',
+                                region: 'Global', severity: 'warning', control: 'CC6.1', issue: `Access key >90 days old (${Math.round(keyAge)}d)`
+                            });
+                        }
+                    }
+
+                    // Check for Inline Policies (Anti-pattern)
+                    const { PolicyNames } = await iam.send(new ListUserPoliciesCommand({ UserName: user.UserName }));
+                    if (PolicyNames.length > 0) {
+                        resources.push({
+                            name: user.UserName, type: 'IAM User', icon: '👤',
+                            region: 'Global', severity: 'warning', control: 'CC8.1', issue: 'Direct inline policies attached'
+                        });
+                    }
+
+                    // Count Admin Sprawl
+                    const { AttachedPolicies } = await iam.send(new ListAttachedUserPoliciesCommand({ UserName: user.UserName }));
+                    if (AttachedPolicies.some(p => p.PolicyName === 'AdministratorAccess')) adminCount++;
+                }
+
+                if (adminCount > 3) {
+                    resources.push({
+                        name: 'Admin Group', type: 'IAM Group', icon: '👥',
+                        region: 'Global', severity: 'warning', control: 'CC6.2', issue: `Admin Sprawl: ${adminCount} users have AdministratorAccess`
+                    });
+                }
+
                 // Stale IAM Roles
                 const { Roles } = await iam.send(new ListRolesCommand({}));
-                for (const role of (Roles || []).slice(0, 10)) {
+                for (const role of (Roles || []).slice(0, 15)) {
                     const ageDays = (new Date() - new Date(role.CreateDate)) / (1000 * 60 * 60 * 24);
                     if (ageDays > 180) {
                         resources.push({
                             name: role.RoleName, type: 'IAM Role', icon: '🔑',
                             region: 'global', severity: 'warning',
-                            control: 'CC6.2', issue: `Stale Access (${Math.round(ageDays)} days old)`
+                            control: 'CC6.2', issue: `Stale access role (>180 days: ${Math.round(ageDays)}d)`
+                        });
+                    }
+                    // Check for Inline Policies on Roles
+                    const { PolicyNames } = await iam.send(new ListRolePoliciesCommand({ RoleName: role.RoleName }));
+                    if (PolicyNames.length > 0) {
+                        resources.push({
+                            name: role.RoleName, type: 'IAM Role', icon: '🔑',
+                            region: 'global', severity: 'warning', control: 'CC8.1', issue: 'Inline policy attached to role'
                         });
                     }
                 }
-
-                // Access Key Age
-                try {
-                    const { Users } = await iam.send(new ListUsersCommand({}));
-                    for (const user of (Users || []).slice(0, 10)) {
-                        const { AccessKeyMetadata } = await iam.send(new ListAccessKeysCommand({ UserName: user.UserName }));
-                        for (const key of AccessKeyMetadata || []) {
-                            if (key.Status === 'Active') {
-                                const keyAgeDays = (new Date() - new Date(key.CreateDate)) / (1000 * 60 * 60 * 24);
-                                if (keyAgeDays > 90) {
-                                    resources.push({
-                                        name: `${user.UserName} / ${key.AccessKeyId.substring(0, 8)}...`, type: 'IAM Role', icon: '🔑',
-                                        region: 'Global', severity: 'warning', control: 'CC6.2',
-                                        issue: `Access key >90 days old (${Math.round(keyAgeDays)}d)`
-                                    });
-                                }
-                            }
-                        }
-                    }
-                } catch (e) { console.warn("IAM access keys fail", e); }
             } catch (e) { console.warn("IAM fail", e); }
 
             // ═══════════════════════════════════════════
-            // 10. Secrets Manager
+            // 10. Secrets Manager & Networking Cleanup
             // ═══════════════════════════════════════════
             try {
                 const { SecretList } = await sm.send(new ListSecretsCommand({}));
                 for (const secret of SecretList || []) {
                     if (!secret.RotationEnabled) {
-                        const lastRotated = secret.LastRotatedDate 
-                            ? Math.round((new Date() - new Date(secret.LastRotatedDate)) / (1000 * 60 * 60 * 24))
-                            : 'never';
                         resources.push({
                             name: secret.Name, type: 'Secrets Manager', icon: '🔒',
                             region: config.region, severity: 'warning', control: 'CC6.2',
-                            issue: `Rotation disabled (last: ${lastRotated === 'never' ? 'never' : lastRotated + 'd ago'})`
-                        });
-                    } else {
-                        resources.push({
-                            name: secret.Name, type: 'Secrets Manager', icon: '🔒',
-                            region: config.region, severity: 'pass', control: 'CC6.2', issue: null
+                            issue: 'Rotation disabled'
                         });
                     }
                 }
             } catch (e) { console.warn("Secrets Manager fail", e); }
+
+            try {
+                // Check for Broad Ports (RDP, HTTP) in Security Groups
+                const { SecurityGroups } = await ec2.send(new DescribeSecurityGroupsCommand({}));
+                for (const sg of SecurityGroups || []) {
+                    const isRDP = sg.IpPermissions.some(p => 
+                        (p.FromPort <= 3389 && p.ToPort >= 3389) && p.IpRanges.some(r => r.CidrIp === '0.0.0.0/0')
+                    );
+                    const isHTTP = sg.IpPermissions.some(p => 
+                        (p.FromPort <= 80 && p.ToPort >= 80) && p.IpRanges.some(r => r.CidrIp === '0.0.0.0/0')
+                    );
+                    if (isRDP) {
+                        resources.push({
+                            name: sg.GroupName, type: 'Security Group', icon: '🛡️',
+                            region: config.region, severity: 'critical', control: 'CC6.6', issue: 'RDP port (3389) open to world'
+                        });
+                    }
+                    if (isHTTP) {
+                        resources.push({
+                            name: sg.GroupName, type: 'Security Group', icon: '🛡️',
+                            region: config.region, severity: 'warning', control: 'CC6.6', issue: 'Unencrypted HTTP (80) open to world'
+                        });
+                    }
+
+                    // Check for Unused Security Groups
+                    try {
+                        const { NetworkInterfaces } = await ec2.send(new DescribeNetworkInterfacesCommand({
+                            Filters: [{ Name: 'group-id', Values: [sg.GroupId] }]
+                        }));
+                        if (NetworkInterfaces.length === 0 && sg.GroupName !== 'default') {
+                            resources.push({
+                                name: sg.GroupName, type: 'Security Group', icon: '🛡️',
+                                region: config.region, severity: 'warning', control: 'CC8.1', issue: 'Unused Security Group'
+                            });
+                        }
+                    } catch (e) { /* skip */ }
+                }
+
+                // Check for Unassociated Elastic IPs
+                const { Addresses } = await ec2.send(new DescribeAddressesCommand({}));
+                const unassociated = (Addresses || []).filter(a => !a.AssociationId);
+                for (const addr of unassociated) {
+                    resources.push({
+                        name: addr.PublicIp, type: 'Elastic IP', icon: '📍',
+                        region: config.region, severity: 'warning', control: 'CC8.1', issue: 'Unassociated Elastic IP'
+                    });
+                }
+
+                // Check for Default VPC usage
+                const { Vpcs } = await ec2.send(new DescribeVpcsCommand({}));
+                const defaultVpc = Vpcs.find(v => v.IsDefault);
+                if (defaultVpc) {
+                    resources.push({
+                        name: defaultVpc.VpcId, type: 'VPC', icon: '🌐',
+                        region: config.region, severity: 'warning', control: 'CC6.6', issue: 'Default VPC in use (Compliance Risk)'
+                    });
+                }
+            } catch (e) { console.warn("Net cleanup fail", e); }
+
+            // ═══════════════════════════════════════════
+            // 11. Monitoring & Threat Detection
+            // ═══════════════════════════════════════════
+            try {
+                // GuardDuty Focus
+                const { DetectorIds } = await guardduty.send(new ListDetectorsCommand({}));
+                if (!DetectorIds || DetectorIds.length === 0) {
+                    resources.push({
+                        name: 'GuardDuty', type: 'Threat Detection', icon: '🚨',
+                        region: config.region, severity: 'critical', control: 'CC6.6', issue: 'GuardDuty disabled'
+                    });
+                } else {
+                    resources.push({
+                        name: 'GuardDuty', type: 'Threat Detection', icon: '🚨',
+                        region: config.region, severity: 'pass', control: 'CC6.6', issue: null
+                    });
+                }
+            } catch(e) { console.warn("GuardDuty fail", e); }
+
+            try {
+                // AWS Config Focus
+                const { ConfigurationRecorders } = await configService.send(new DescribeConfigurationRecordersCommand({}));
+                if (!ConfigurationRecorders || ConfigurationRecorders.length === 0) {
+                    resources.push({
+                        name: 'AWS Config', type: 'Configuration', icon: '⚙️',
+                        region: config.region, severity: 'warning', control: 'CC7.1', issue: 'AWS Config disabled'
+                    });
+                } else {
+                    resources.push({
+                        name: 'AWS Config', type: 'Configuration', icon: '⚙️',
+                        region: config.region, severity: 'pass', control: 'CC7.1', issue: null
+                    });
+                }
+            } catch(e) { console.warn("AWS Config fail", e); }
+
+            try {
+                // CloudWatch Logs Retention Check
+                const { logGroups } = await cwLogs.send(new DescribeLogGroupsCommand({ limit: 20 }));
+                for (const lg of logGroups || []) {
+                    if (lg.retentionInDays && lg.retentionInDays < 365) {
+                        resources.push({
+                            name: lg.logGroupName, type: 'Log Group', icon: '📜',
+                            region: config.region, severity: 'warning', control: 'CC7.2', issue: `Log retention < 365 days (currently ${lg.retentionInDays}d)`
+                        });
+                    }
+                }
+            } catch(e) { console.warn("CW Logs fail", e); }
+
+            try {
+                // CloudWatch Alarms for Root/IAM/CloudTrail
+                const { MetricAlarms } = await cloudwatch.send(new DescribeAlarmsCommand({}));
+                const alarmNames = (MetricAlarms || []).map(a => a.AlarmName.toLowerCase());
+                
+                const hasRootAlarm = alarmNames.some(n => n.includes('root'));
+                const hasIAMAlarm = alarmNames.some(n => n.includes('iam') || n.includes('policy'));
+                const hasTrailAlarm = alarmNames.some(n => n.includes('cloudtrail') || n.includes('trail'));
+
+                if (!hasRootAlarm) {
+                    resources.push({ name: 'Root Login Alarm', type: 'CloudWatch Alarms', icon: '🔔', region: 'Global', severity: 'critical', control: 'CC6.1', issue: 'No CloudWatch alarm for root user login' });
+                }
+                if (!hasIAMAlarm) {
+                    resources.push({ name: 'IAM Change Alarm', type: 'CloudWatch Alarms', icon: '🔔', region: 'Global', severity: 'warning', control: 'CC6.1', issue: 'No CloudWatch alarm for IAM policy changes' });
+                }
+                if (!hasTrailAlarm) {
+                    resources.push({ name: 'CloudTrail Change Alarm', type: 'CloudWatch Alarms', icon: '🔔', region: 'Global', severity: 'warning', control: 'CC7.2', issue: 'No CloudWatch alarm for CloudTrail configuration changes' });
+                }
+            } catch(e) { console.warn("CW Alarms fail", e); }
         }
 
         res.status(200).json({ resources });
