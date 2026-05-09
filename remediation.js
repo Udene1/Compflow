@@ -383,6 +383,36 @@ ResponseTeam: AWS Shield Response Team
 CostProtection: enabled
 Note: "ADVISORY — $3,000/mo subscription required"`
             }
+        },
+        'DynamoDB Table': {
+            'PITR (Continuous Backups) disabled': {
+                before: `ContinuousBackups:
+  PointInTimeRecoveryStatus: DISABLED`,
+                after: `ContinuousBackups:
+  PointInTimeRecoveryStatus: ENABLED
+  Note: "Automated PITR enablement applied"`
+            }
+        },
+        'API Gateway': {
+            'Default execute-api endpoint enabled': {
+                before: `RestApi:
+  disableExecuteApiEndpoint: false
+  EndpointConfiguration: EDGE`,
+                after: `RestApi:
+  disableExecuteApiEndpoint: true
+  EndpointConfiguration: EDGE
+  Note: "Forces clients to use custom domain routing"`
+            }
+        },
+        'API Gateway Stage': {
+            'X-Ray Tracing disabled': {
+                before: `Stage:
+  tracingEnabled: false
+  metricsEnabled: true`,
+                after: `Stage:
+  tracingEnabled: true
+  metricsEnabled: true`
+            }
         }
     };
 
@@ -544,9 +574,12 @@ Note: "ADVISORY — $3,000/mo subscription required"`
             // Capture Evidence
             if (window.Evidence) {
                 const diff = getDiff(issue);
-                Evidence.captureFromRemediation(issue, diff?.before, diff?.after);
+                Evidence.captureFromRemediation(issue, diff?.before, diff?.after).then(() => {
+                    if (window.Scanner) Scanner.updateEvidenceBadge();
+                });
+            } else {
+                if (window.Scanner) Scanner.updateEvidenceBadge();
             }
-            if (window.Scanner) Scanner.updateEvidenceBadge();
 
             checkAllFixed();
         })

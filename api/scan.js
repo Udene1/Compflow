@@ -13,6 +13,13 @@ import { CloudWatchClient, DescribeAlarmsCommand } from "@aws-sdk/client-cloudwa
 import { CloudWatchLogsClient, DescribeLogGroupsCommand } from "@aws-sdk/client-cloudwatch-logs";
 import { GuardDutyClient, ListDetectorsCommand } from "@aws-sdk/client-guardduty";
 import { ConfigServiceClient, DescribeConfigurationRecordersCommand } from "@aws-sdk/client-config-service";
+import { DynamoDBClient, ListTablesCommand, DescribeTableCommand, DescribeContinuousBackupsCommand } from "@aws-sdk/client-dynamodb";
+import { EKSClient, ListClustersCommand, DescribeClusterCommand } from "@aws-sdk/client-eks";
+import { RedshiftClient, DescribeClustersCommand } from "@aws-sdk/client-redshift";
+import { APIGatewayClient, GetRestApisCommand, GetStagesCommand } from "@aws-sdk/client-apigateway";
+import { CloudFrontClient, ListDistributionsCommand, GetDistributionConfigCommand } from "@aws-sdk/client-cloudfront";
+import { SQSClient, ListQueuesCommand, GetQueueAttributesCommand } from "@aws-sdk/client-sqs";
+import { SNSClient, ListTopicsCommand, GetTopicAttributesCommand } from "@aws-sdk/client-sns";
 
 export default async function handler(req, res) {
     if (req.method !== 'POST') {
@@ -63,6 +70,13 @@ export default async function handler(req, res) {
             const cwLogs = new CloudWatchLogsClient(config);
             const guardduty = new GuardDutyClient(config);
             const configService = new ConfigServiceClient(config);
+            const dynamodb = new DynamoDBClient(config);
+            const eks = new EKSClient(config);
+            const redshift = new RedshiftClient(config);
+            const apigw = new APIGatewayClient(config);
+            const cloudfront = new CloudFrontClient(config);
+            const sqs = new SQSClient(config);
+            const sns = new SNSClient(config);
 
             // ═══════════════════════════════════════════
             // 1. S3 BUCKETS — Deep Scan
@@ -696,6 +710,137 @@ export default async function handler(req, res) {
                     resources.push({ name: 'CloudTrail Change Alarm', type: 'CloudWatch Alarms', icon: '🔔', region: 'Global', severity: 'warning', control: 'CC7.2', issue: 'No CloudWatch alarm for CloudTrail configuration changes' });
                 }
             } catch(e) { console.warn("CW Alarms fail", e); }
+
+            // ═══════════════════════════════════════════
+            // 12. Database & Compute Advanced (DynamoDB, Redshift, EKS)
+            // ═══════════════════════════════════════════
+            const checkDataCompute = async () => {
+                // DynamoDB
+                try {
+                    const { TableNames } = await dynamodb.send(new ListTablesCommand({}));
+                    for (const table of TableNames || []) {
+                        const { Table } = await dynamodb.send(new DescribeTableCommand({ TableName: table }));
+                        const pDesc = await dynamodb.send(new DescribeContinuousBackupsCommand({ TableName: table })).catch(()=>({}));
+                        const pitr = pDesc?.ContinuousBackupsDescription?.PointInTimeRecoveryDescription?.PointInTimeRecoveryStatus === 'ENABLED';
+
+                        if (!pitr) {
+                            resources.push({ name: table, type: 'DynamoDB Table', icon: '🗄️', region: config.region, severity: 'critical', control: 'CC7.2', issue: 'PITR (Continuous Backups) disabled' });
+                        }
+                        if (Table.SSEDescription?.Status !== 'ENABLED') {
+                            resources.push({ name: table, type: 'DynamoDB Table', icon: '🗄️', region: config.region, severity: 'warning', control: 'CC6.7', issue: 'KMS Encryption disabled (using AWS owned)' });
+                        }
+                    }
+                } catch(e) { console.warn("DDB fail", e); }
+
+                // Redshift
+                try {
+                    const { Clusters } = await redshift.send(new DescribeClustersCommand({}));
+                    for (const cluster of Clusters || []) {
+                        if (!cluster.Encrypted) {
+                            resources.push({ name: cluster.ClusterIdentifier, type: 'Redshift Cluster', icon: '📊', region: config.region, severity: 'critical', control: 'CC6.7', issue: 'Cluster encryption disabled' });
+                        }
+                        if (cluster.AutomatedSnapshotRetentionPeriod < 7) {
+                            resources.push({ name: cluster.ClusterIdentifier, type: 'Redshift Cluster', icon: '📊', region: config.region, severity: 'warning', control: 'CC7.2', issue: `Automated snapshots < 7 days (${cluster.AutomatedSnapshotRetentionPeriod}d)` });
+                        }
+                        if (cluster.PubliclyAccessible) {
+                            resources.push({ name: cluster.ClusterIdentifier, type: 'Redshift Cluster', icon: '📊', region: config.region, severity: 'critical', control: 'CC6.6', issue: 'Publicly Accessible' });
+                        }
+                    }
+                } catch(e) { console.warn("Redshift fail", e); }
+
+                // EKS
+                try {
+                    const { clusters } = await eks.send(new ListClustersCommand({}));
+                    for (const c of clusters || []) {
+                        const { cluster } = await eks.send(new DescribeClusterCommand({ name: c }));
+                        
+                        const logTypes = cluster.logging?.clusterLogging?.[0]?.types || [];
+                        const hasAuditLog = logTypes.includes('audit') && logTypes.includes('api');
+                        if (!hasAuditLog) {
+                            resources.push({ name: c, type: 'EKS Cluster', icon: '☸️', region: config.region, severity: 'warning', control: 'CC7.2', issue: 'Control Plane Logging (Audit/API) incomplete or disabled' });
+                        }
+
+                        if (cluster.resourcesVpcConfig?.endpointPublicAccess) {
+                            resources.push({ name: c, type: 'EKS Cluster', icon: '☸️', region: config.region, severity: 'critical', control: 'CC6.6', issue: 'Cluster Endpoint publicly accessible' });
+                        }
+
+                        if (!cluster.encryptionConfig || cluster.encryptionConfig.length === 0) {
+                            resources.push({ name: c, type: 'EKS Cluster', icon: '☸️', region: config.region, severity: 'critical', control: 'CC6.7', issue: 'Secrets encryption disabled' });
+                        }
+                    }
+                } catch(e) { console.warn("EKS fail", e); }
+            };
+
+            // ═══════════════════════════════════════════
+            // 13. Application & Edge Advanced (API GW, CloudFront, SQS, SNS)
+            // ═══════════════════════════════════════════
+            const checkAppEdge = async () => {
+                // API Gateway
+                try {
+                    const { items } = await apigw.send(new GetRestApisCommand({}));
+                    for (const api of items || []) {
+                        if (!api.disableExecuteApiEndpoint) {
+                            resources.push({ name: api.name, type: 'API Gateway', icon: '🚪', region: config.region, severity: 'warning', control: 'CC6.6', issue: 'Default execute-api endpoint enabled' });
+                        }
+                        try {
+                            const { item: stages } = await apigw.send(new GetStagesCommand({ restApiId: api.id }));
+                            for (const stage of stages || []) {
+                                if (!stage.webAclArn) {
+                                    resources.push({ name: \`\${api.name}/\${stage.stageName}\`, type: 'API Gateway Stage', icon: '🚪', region: config.region, severity: 'warning', control: 'CC6.6', issue: 'No WAF WebACL associated' });
+                                }
+                                if (!stage.tracingEnabled) {
+                                    resources.push({ name: \`\${api.name}/\${stage.stageName}\`, type: 'API Gateway Stage', icon: '🚪', region: config.region, severity: 'warning', control: 'CC7.2', issue: 'X-Ray Tracing disabled' });
+                                }
+                            }
+                        } catch(e) {}
+                    }
+                } catch(e) { console.warn("APIGW fail", e); }
+
+                // CloudFront
+                try {
+                    const { DistributionList } = await cloudfront.send(new ListDistributionsCommand({}));
+                    for (const dist of DistributionList?.Items || []) {
+                        if (!dist.WebACLId) {
+                            resources.push({ name: dist.Id, type: 'CloudFront Distribution', icon: '🌍', region: 'Global', severity: 'warning', control: 'CC6.6', issue: 'No WAF Integration' });
+                        }
+                        if (!dist.DefaultRootObject) {
+                            resources.push({ name: dist.Id, type: 'CloudFront Distribution', icon: '🌍', region: 'Global', severity: 'warning', control: 'CC6.1', issue: 'No Default Root Object configured' });
+                        }
+                        if (dist.DefaultCacheBehavior?.ViewerProtocolPolicy === 'allow-all') {
+                            resources.push({ name: dist.Id, type: 'CloudFront Distribution', icon: '🌍', region: 'Global', severity: 'critical', control: 'CC6.7', issue: 'HTTP traffic allowed (Viewer Protocol Policy)' });
+                        }
+                    }
+                } catch(e) { console.warn("CloudFront fail", e); }
+
+                // SQS
+                try {
+                    const { QueueUrls } = await sqs.send(new ListQueuesCommand({}));
+                    for (const url of QueueUrls || []) {
+                        const qName = url.split('/').pop();
+                        const { Attributes } = await sqs.send(new GetQueueAttributesCommand({ QueueUrl: url, AttributeNames: ['All'] }));
+                        if (!Attributes.KmsMasterKeyId && Attributes.SqsManagedSseEnabled !== 'true') {
+                            resources.push({ name: qName, type: 'SQS Queue', icon: '📨', region: config.region, severity: 'warning', control: 'CC6.7', issue: 'Server-Side Encryption disabled' });
+                        }
+                        if (!Attributes.RedrivePolicy) {
+                            resources.push({ name: qName, type: 'SQS Queue', icon: '📨', region: config.region, severity: 'warning', control: 'CC7.2', issue: 'No Dead Letter Queue (DLQ) configured' });
+                        }
+                    }
+                } catch(e) { console.warn("SQS fail", e); }
+
+                // SNS
+                try {
+                    const { Topics } = await sns.send(new ListTopicsCommand({}));
+                    for (const t of Topics || []) {
+                        const tName = t.TopicArn.split(':').pop();
+                        const { Attributes } = await sns.send(new GetTopicAttributesCommand({ TopicArn: t.TopicArn }));
+                        if (!Attributes.KmsMasterKeyId) {
+                            resources.push({ name: tName, type: 'SNS Topic', icon: '📟', region: config.region, severity: 'warning', control: 'CC6.7', issue: 'Server-Side Encryption disabled' });
+                        }
+                    }
+                } catch(e) { console.warn("SNS fail", e); }
+            };
+
+            await Promise.allSettled([checkDataCompute(), checkAppEdge()]);
         }
 
         res.status(200).json({ resources });

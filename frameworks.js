@@ -49,6 +49,9 @@ window.Frameworks = (() => {
     const MAPPING = {
         'S3 Bucket': {
             'Public access enabled': ['soc2:CC6.1', 'gdpr:Art. 32', 'hipaa:§164.312(a)(1)', 'iso27001:A.9.1.1'],
+            'Versioning not enabled': ['soc2:CC7.2', 'iso27001:A.12.1.2'],
+            'MFA Delete disabled': ['soc2:CC6.3', 'hipaa:§164.312(a)(1)'],
+            'Server access logging disabled': ['soc2:CC7.2', 'gdpr:Art. 33'],
             default: ['soc2:CC6.1']
         },
         'IAM Role': {
@@ -95,6 +98,56 @@ window.Frameworks = (() => {
         'Shield': {
             'Shield Advanced not active': ['soc2:CC6.7'],
             default: ['soc2:CC6.7']
+        },
+        'DynamoDB Table': {
+            'PITR': ['soc2:CC7.2', 'hipaa:§164.312(c)(1)', 'gdpr:Art. 32'],
+            'KMS Encryption': ['soc2:CC6.7', 'iso27001:A.12.1.2', 'gdpr:Art. 25'],
+            default: ['soc2:CC6.1']
+        },
+        'Redshift Cluster': {
+            'Cluster encryption disabled': ['soc2:CC6.7', 'gdpr:Art. 32', 'hipaa:§164.312(e)(1)'],
+            'Publicly Accessible': ['soc2:CC6.6', 'iso27001:A.9.1.1'],
+            default: ['soc2:CC6.1']
+        },
+        'EKS Cluster': {
+            'Control Plane Logging': ['soc2:CC7.2', 'gdpr:Art. 33'],
+            'Cluster Endpoint publicly accessible': ['soc2:CC6.6', 'iso27001:A.9.1.1'],
+            'Secrets encryption disabled': ['soc2:CC6.7', 'hipaa:§164.312(c)(1)'],
+            default: ['soc2:CC6.1']
+        },
+        'API Gateway': {
+            'execute-api endpoint': ['soc2:CC6.6', 'iso27001:A.9.1.1'],
+            default: ['soc2:CC6.1']
+        },
+        'API Gateway Stage': {
+            'X-Ray Tracing disabled': ['soc2:CC7.2', 'gdpr:Art. 33'],
+            'No WAF WebACL': ['soc2:CC6.6', 'gdpr:Art. 32'],
+            default: ['soc2:CC6.1']
+        },
+        'CloudFront Distribution': {
+            'No WAF Integration': ['soc2:CC6.6', 'iso27001:A.12.1.2'],
+            'HTTP traffic allowed': ['soc2:CC6.7', 'hipaa:§164.312(e)(1)'],
+            default: ['soc2:CC6.1']
+        },
+        'SQS Queue': {
+            'Server-Side Encryption disabled': ['soc2:CC6.7', 'gdpr:Art. 25'],
+            default: ['soc2:CC6.1']
+        },
+        'SNS Topic': {
+            'Server-Side Encryption disabled': ['soc2:CC6.7'],
+            default: ['soc2:CC6.1']
+        },
+        'Threat Detection': {
+            default: ['soc2:CC7.1', 'gdpr:Art. 32', 'iso27001:A.12.4.1']
+        },
+        'Configuration': {
+            default: ['soc2:CC8.1', 'iso27001:A.12.1.2']
+        },
+        'Log Group': {
+            default: ['soc2:CC7.2', 'gdpr:Art. 33', 'hipaa:§164.312(c)(1)']
+        },
+        'CloudWatch Alarms': {
+            default: ['soc2:CC7.2', 'iso27001:A.12.4.1']
         }
     };
 

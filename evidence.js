@@ -5,20 +5,19 @@ window.Evidence = (() => {
     let evidenceData = [];
     let reportGenerated = false;
 
-    function SHA256(str) {
-        // Simple mock hash for demo; in real app, use crypto library
-        let hash = 0;
-        for (let i = 0; i < str.length; i++) {
-            const char = str.charCodeAt(i);
-            hash = ((hash << 5) - hash) + char;
-            hash |= 0;
+    async function SHA256(str) {
+        if (!window.crypto || !window.crypto.subtle) {
+            // Unlikely in modern browser context over localhost/HTTPS, but fallback
+            return 'SHA256-FALLBACK-' + Date.now();
         }
-        return 'SHA256-' + Math.abs(hash).toString(16).padStart(16, '0').toUpperCase();
+        const buf = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(str));
+        return 'SHA256-' + Array.from(new Uint8Array(buf)).map(b => b.toString(16).padStart(2,'0')).join('').toUpperCase();
     }
 
-    function captureFromScan(resource) {
+    async function captureFromScan(resource) {
         // Tag with all mapped controls
         const controls = resource.controlKeys || ['soc2:CC6.1'];
+        const hash = await SHA256(resource.name + resource.type + Date.now());
         
         const item = {
             id: 'EVD-' + Math.random().toString(36).substr(2, 9).toUpperCase(),
@@ -28,7 +27,7 @@ window.Evidence = (() => {
             resourceType: resource.type,
             provider: 'AWS',
             controls: controls, 
-            hash: SHA256(resource.name + resource.type + Date.now()),
+            hash: hash,
             data: resource
         };
         evidenceData.push(item);
@@ -38,8 +37,9 @@ window.Evidence = (() => {
         }
     }
 
-    function captureFromRemediation(resource, before, after) {
+    async function captureFromRemediation(resource, before, after) {
         const controls = resource.controlKeys || ['soc2:CC6.1'];
+        const hash = await SHA256(resource.name + JSON.stringify(after) + Date.now());
         
         const item = {
             id: 'REM-' + Math.random().toString(36).substr(2, 9).toUpperCase(),
@@ -49,7 +49,7 @@ window.Evidence = (() => {
             resourceType: resource.type,
             provider: 'AWS',
             controls: controls,
-            hash: SHA256(resource.name + JSON.stringify(after) + Date.now()),
+            hash: hash,
             data: { before, after }
         };
         evidenceData.push(item);

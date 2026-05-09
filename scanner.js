@@ -80,9 +80,11 @@ window.Scanner = (() => {
             if (window.DriftEngine) DriftEngine.setBaseline(scannedResources);
 
             // Evidence
-            scannedResources.forEach(r => {
-                if (window.Evidence) Evidence.captureFromScan(r);
-            });
+            if (window.Evidence) {
+                for (const r of scannedResources) {
+                    await Evidence.captureFromScan(r);
+                }
+            }
             updateEvidenceBadge();
 
             // Remediation

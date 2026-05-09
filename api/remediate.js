@@ -3,13 +3,15 @@ import { EC2Client, RevokeSecurityGroupIngressCommand, AuthorizeSecurityGroupIng
 import { IAMClient, UpdateAssumeRolePolicyCommand, GetRoleCommand, UpdateAccessKeyCommand } from "@aws-sdk/client-iam";
 import { RDSClient, ModifyDBInstanceCommand } from "@aws-sdk/client-rds";
 import { KMSClient, EnableKeyRotationCommand } from "@aws-sdk/client-kms";
-import { LambdaClient, UpdateFunctionConfigurationCommand } from "@aws-sdk/client-lambda";
-import { CloudTrailClient, UpdateTrailCommand, CreateTrailCommand, StartLoggingCommand } from "@aws-sdk/client-cloudtrail";
-import { SecretsManagerClient, RotateSecretCommand } from "@aws-sdk/client-secrets-manager";
 import { ConfigServiceClient } from "@aws-sdk/client-config-service";
 import { GuardDutyClient, CreateDetectorCommand } from "@aws-sdk/client-guardduty";
 import { CloudWatchLogsClient, PutRetentionPolicyCommand } from "@aws-sdk/client-cloudwatch-logs";
 import { CloudWatchClient } from "@aws-sdk/client-cloudwatch";
+import { DynamoDBClient, UpdateContinuousBackupsCommand } from "@aws-sdk/client-dynamodb";
+import { APIGatewayClient, UpdateRestApiCommand, UpdateStageCommand } from "@aws-sdk/client-apigateway";
+import { CloudFrontClient, UpdateDistributionCommand, GetDistributionConfigCommand } from "@aws-sdk/client-cloudfront";
+import { SQSClient, SetQueueAttributesCommand } from "@aws-sdk/client-sqs";
+import { SNSClient, SetTopicAttributesCommand } from "@aws-sdk/client-sns";
 
 export default async function handler(req, res) {
     if (req.method !== 'POST') {
@@ -395,6 +397,63 @@ export default async function handler(req, res) {
                     advisory: true,
                     message: `ADVISORY: CloudWatch Alarms for SOC2 require metric filters on CloudTrail log groups. Set this manually via AWS Console.`
                 };
+            }
+
+            // ── Phase 6. Advanced Remediations ──
+            else if (resourceType === 'DynamoDB Table') {
+                if (issue.includes('PITR')) {
+                    const dynamodb = new DynamoDBClient(config);
+                    await dynamodb.send(new UpdateContinuousBackupsCommand({
+                        TableName: resourceName,
+                        PointInTimeRecoverySpecification: { PointInTimeRecoveryEnabled: true }
+                    }));
+                    result.message = `Enabled Point-In-Time Recovery (PITR) for DynamoDB Table ${resourceName}.`;
+                } else {
+                    result = { success: true, advisory: true, message: `ADVISORY: KMS encryption configuration for DynamoDB cannot be modified in-place.` };
+                }
+            }
+            else if (resourceType === 'Redshift Cluster') {
+                result = { success: true, advisory: true, message: `ADVISORY: Redshift Cluster configuration changes (Encryption, Network Access, Snapshots) require review to avoid data downtime.` };
+            }
+            else if (resourceType === 'EKS Cluster') {
+                result = { success: true, advisory: true, message: `ADVISORY: EKS cluster modifications (Secrets Encryption, Control Plane Logging) can cause node rotations. Validate safely via console.` };
+            }
+            else if (resourceType === 'API Gateway') {
+                if (issue.includes('execute-api')) {
+                    const apigw = new APIGatewayClient(config);
+                    await apigw.send(new UpdateRestApiCommand({
+                        restApiId: resourceName,
+                        patchOperations: [{ op: 'replace', path: '/disableExecuteApiEndpoint', value: 'true' }]
+                    }));
+                    result.message = `Disabled default execute-api endpoint for API ${resourceName}.`;
+                }
+            }
+            else if (resourceType === 'API Gateway Stage') {
+                if (issue.includes('X-Ray')) {
+                    const apigw = new APIGatewayClient(config);
+                    const [apiId, stageName] = resourceName.split('/');
+                    await apigw.send(new UpdateStageCommand({
+                        restApiId: apiId,
+                        stageName: stageName,
+                        patchOperations: [{ op: 'replace', path: '/*/*/tracingEnabled', value: 'true' }]
+                    }));
+                    result.message = `Enabled X-Ray tracing for API Stage ${resourceName}.`;
+                } else if (issue.includes('WAF')) {
+                    result = { success: true, advisory: true, message: `ADVISORY: Attach a WebACL via APIGW Console > Stages.` };
+                }
+            }
+            else if (resourceType === 'CloudFront Distribution') {
+                result = { success: true, advisory: true, message: `ADVISORY: CloudFront distribution updates require specific XML/ETag configurations. Configure via the AWS Console.` };
+            }
+            else if (resourceType === 'SQS Queue') {
+                if (issue.includes('Encryption')) {
+                    result = { success: true, advisory: true, message: `ADVISORY: Navigate to SQS > Queue > Edit to enable SqsManagedSseEncryption.` };
+                } else if (issue.includes('DLQ')) {
+                    result = { success: true, advisory: true, message: `ADVISORY: DLQ configuration requires the ARN of a secondary queue.` };
+                }
+            }
+            else if (resourceType === 'SNS Topic') {
+                result = { success: true, advisory: true, message: `ADVISORY: Navigate to SNS > Topic > Edit to enable Server-Side Encryption.` };
             }
 
             // ── Macie / WAF / Shield — Advisory only ──
