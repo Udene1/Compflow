@@ -1,5 +1,5 @@
-import { S3Client, PutPublicAccessBlockCommand, PutBucketVersioningCommand, PutBucketEncryptionCommand } from "@aws-sdk/client-s3";
-import { EC2Client, RevokeSecurityGroupIngressCommand, AuthorizeSecurityGroupIngressCommand, DescribeSecurityGroupsCommand, CreateFlowLogsCommand, ReleaseAddressCommand, DeleteSecurityGroupCommand, ModifyInstanceMetadataOptionsCommand } from "@aws-sdk/client-ec2";
+import { S3Client, PutPublicAccessBlockCommand, PutBucketVersioningCommand, PutBucketEncryptionCommand, PutBucketLifecycleConfigurationCommand } from "@aws-sdk/client-s3";
+import { EC2Client, RevokeSecurityGroupIngressCommand, AuthorizeSecurityGroupIngressCommand, DescribeSecurityGroupsCommand, CreateFlowLogsCommand, ReleaseAddressCommand, DeleteSecurityGroupCommand, ModifyInstanceMetadataOptionsCommand, ModifySnapshotAttributeCommand } from "@aws-sdk/client-ec2";
 import { IAMClient, UpdateAssumeRolePolicyCommand, GetRoleCommand, UpdateAccessKeyCommand } from "@aws-sdk/client-iam";
 import { RDSClient, ModifyDBInstanceCommand } from "@aws-sdk/client-rds";
 import { KMSClient, EnableKeyRotationCommand } from "@aws-sdk/client-kms";
@@ -78,6 +78,27 @@ export default async function handler(req, res) {
                             }]
                         }
                     }));
+                } else if (issue.includes('MFA Delete')) {
+                    result = {
+                        success: true,
+                        advisory: true,
+                        message: `ADVISORY: MFA Delete can only be enabled by the root account user via the AWS CLI or SDK.`
+                    };
+                } else if (issue.includes('Lifecycle')) {
+                    await s3.send(new PutBucketLifecycleConfigurationCommand({
+                        Bucket: resourceName,
+                        LifecycleConfiguration: {
+                            Rules: [
+                                {
+                                    Status: "Enabled",
+                                    Filter: { Prefix: "" },
+                                    AbortIncompleteMultipartUpload: { DaysAfterInitiation: 7 },
+                                    ID: "ComplianceFlow-Auto-Abort-Incomplete-Multipart"
+                                }
+                            ]
+                        }
+                    }));
+                    result.message = `Applied base Lifecycle policy (abort incomplete multipart uploads after 7 days) to ${resourceName}.`;
                 }
             }
 
@@ -308,7 +329,7 @@ export default async function handler(req, res) {
                 };
             }
 
-            // ── EC2 Instance Remediations ──
+            // ── EC2 Instance & EBS Remediations ──
             else if (resourceType === 'EC2 Instance') {
                 if (issue.includes('IMDSv2')) {
                     const ec2 = new EC2Client(config);
@@ -317,6 +338,27 @@ export default async function handler(req, res) {
                         HttpTokens: 'required',
                         HttpEndpoint: 'enabled'
                     }));
+                }
+            }
+            else if (resourceType === 'EBS Volume') {
+                if (issue.includes('encryption')) {
+                    result = {
+                        success: true,
+                        advisory: true,
+                        message: `ADVISORY: EBS volume encryption cannot be enabled in-place. Create a snapshot, encrypt a copy of the snapshot, and restore to a new volume.`
+                    };
+                }
+            }
+            else if (resourceType === 'EBS Snapshot') {
+                if (issue.includes('Publicly Restorable')) {
+                    const ec2 = new EC2Client(config);
+                    await ec2.send(new ModifySnapshotAttributeCommand({
+                        SnapshotId: resourceName,
+                        Attribute: "createVolumePermission",
+                        OperationType: "remove",
+                        GroupNames: ["all"]
+                    }));
+                    result.message = `Removed public restore permissions from EBS Snapshot ${resourceName}.`;
                 }
             }
 

@@ -1,6 +1,6 @@
-import { S3Client, ListBucketsCommand, GetPublicAccessBlockCommand, GetBucketVersioningCommand, GetBucketEncryptionCommand, GetBucketLoggingCommand } from "@aws-sdk/client-s3";
+import { S3Client, ListBucketsCommand, GetPublicAccessBlockCommand, GetBucketVersioningCommand, GetBucketEncryptionCommand, GetBucketLoggingCommand, GetBucketLifecycleConfigurationCommand } from "@aws-sdk/client-s3";
 import { IAMClient, ListRolesCommand, GetAccountSummaryCommand, GetAccountPasswordPolicyCommand, ListUsersCommand, ListAccessKeysCommand, ListMFADevicesCommand, ListUserPoliciesCommand, ListAttachedUserPoliciesCommand, ListRolePoliciesCommand } from "@aws-sdk/client-iam";
-import { EC2Client, DescribeSecurityGroupsCommand, DescribeVpcsCommand, DescribeInstancesCommand, DescribeFlowLogsCommand, DescribeNetworkInterfacesCommand, DescribeAddressesCommand } from "@aws-sdk/client-ec2";
+import { EC2Client, DescribeSecurityGroupsCommand, DescribeVpcsCommand, DescribeInstancesCommand, DescribeFlowLogsCommand, DescribeNetworkInterfacesCommand, DescribeAddressesCommand, DescribeVolumesCommand, DescribeSnapshotsCommand, DescribeSnapshotAttributeCommand } from "@aws-sdk/client-ec2";
 import { RDSClient, DescribeDBInstancesCommand } from "@aws-sdk/client-rds";
 import { KMSClient, ListKeysCommand, DescribeKeyCommand, GetKeyRotationStatusCommand } from "@aws-sdk/client-kms";
 import { CloudTrailClient, DescribeTrailsCommand, GetTrailStatusCommand } from "@aws-sdk/client-cloudtrail";
@@ -84,7 +84,7 @@ export default async function handler(req, res) {
                         region: config.region, severity, control: 'CC6.1', issue
                     });
 
-                    // Check: Versioning
+                    // Check: Versioning & MFA Delete
                     try {
                         const vRes = await s3.send(new GetBucketVersioningCommand({ Bucket: bucket.Name }));
                         if (vRes.Status !== 'Enabled') {
@@ -92,6 +92,13 @@ export default async function handler(req, res) {
                                 name: bucket.Name, type: 'S3 Bucket', icon: '🪣',
                                 region: config.region, severity: 'warning', control: 'CC7.2',
                                 issue: 'Versioning not enabled'
+                            });
+                        }
+                        if (vRes.MFADelete !== 'Enabled') {
+                            resources.push({
+                                name: bucket.Name, type: 'S3 Bucket', icon: '🪣',
+                                region: config.region, severity: 'warning', control: 'CC6.3',
+                                issue: 'MFA Delete disabled'
                             });
                         }
                     } catch (e) { /* skip */ }
@@ -118,6 +125,17 @@ export default async function handler(req, res) {
                             });
                         }
                     } catch (e) { /* skip */ }
+
+                    // Check: Lifecycle Policy
+                    try {
+                        await s3.send(new GetBucketLifecycleConfigurationCommand({ Bucket: bucket.Name }));
+                    } catch (e) {
+                        resources.push({
+                            name: bucket.Name, type: 'S3 Bucket', icon: '🪣',
+                            region: config.region, severity: 'warning', control: 'CC7.2',
+                            issue: 'Lifecycle policy not configured'
+                        });
+                    }
                 }
             } catch (e) { console.warn("S3 fail", e); }
 
@@ -179,6 +197,37 @@ export default async function handler(req, res) {
                         }
                     }
                 } catch (e) { console.warn("EC2 instances fail", e); }
+
+                // EBS Volumes Check
+                try {
+                    const { Volumes } = await ec2.send(new DescribeVolumesCommand({}));
+                    for (const vol of Volumes || []) {
+                        if (!vol.Encrypted) {
+                            resources.push({
+                                name: vol.VolumeId, type: 'EBS Volume', icon: '💾',
+                                region: config.region, severity: 'critical', control: 'CC6.7',
+                                issue: 'Volume encryption disabled'
+                            });
+                        }
+                    }
+                } catch(e) { console.warn("EBS fail", e); }
+
+                // EBS Snapshots Check
+                try {
+                    const { Snapshots } = await ec2.send(new DescribeSnapshotsCommand({ OwnerIds: ['self'] }));
+                    for (const snap of (Snapshots || []).slice(0, 10)) {
+                        const { CreateVolumePermissions } = await ec2.send(new DescribeSnapshotAttributeCommand({
+                            Attribute: 'createVolumePermission', SnapshotId: snap.SnapshotId
+                        }));
+                        if (CreateVolumePermissions && CreateVolumePermissions.some(p => p.Group === 'all')) {
+                            resources.push({
+                                name: snap.SnapshotId, type: 'EBS Snapshot', icon: '📸',
+                                region: config.region, severity: 'critical', control: 'CC6.6',
+                                issue: 'Publicly Restorable'
+                            });
+                        }
+                    }
+                } catch(e) { console.warn("EBS snapshots fail", e); }
             } catch (e) { console.warn("EC2/VPC fail", e); }
 
             // ═══════════════════════════════════════════
