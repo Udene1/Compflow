@@ -16,7 +16,7 @@ import { ConfigServiceClient, DescribeConfigurationRecordersCommand } from "@aws
 import { DynamoDBClient, ListTablesCommand, DescribeTableCommand, DescribeContinuousBackupsCommand } from "@aws-sdk/client-dynamodb";
 import { EKSClient, ListClustersCommand, DescribeClusterCommand } from "@aws-sdk/client-eks";
 import { RedshiftClient, DescribeClustersCommand } from "@aws-sdk/client-redshift";
-import { APIGatewayClient, GetRestApisCommand, GetStagesCommand } from "@aws-sdk/client-apigateway";
+import { APIGatewayClient, GetRestApisCommand, GetStagesCommand } from "@aws-sdk/client-api-gateway";
 import { CloudFrontClient, ListDistributionsCommand, GetDistributionConfigCommand } from "@aws-sdk/client-cloudfront";
 import { SQSClient, ListQueuesCommand, GetQueueAttributesCommand } from "@aws-sdk/client-sqs";
 import { SNSClient, ListTopicsCommand, GetTopicAttributesCommand } from "@aws-sdk/client-sns";

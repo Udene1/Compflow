@@ -8,7 +8,7 @@ import { GuardDutyClient, CreateDetectorCommand } from "@aws-sdk/client-guarddut
 import { CloudWatchLogsClient, PutRetentionPolicyCommand } from "@aws-sdk/client-cloudwatch-logs";
 import { CloudWatchClient } from "@aws-sdk/client-cloudwatch";
 import { DynamoDBClient, UpdateContinuousBackupsCommand } from "@aws-sdk/client-dynamodb";
-import { APIGatewayClient, UpdateRestApiCommand, UpdateStageCommand } from "@aws-sdk/client-apigateway";
+import { APIGatewayClient, UpdateRestApiCommand, UpdateStageCommand } from "@aws-sdk/client-api-gateway";
 import { CloudFrontClient, UpdateDistributionCommand, GetDistributionConfigCommand } from "@aws-sdk/client-cloudfront";
 import { SQSClient, SetQueueAttributesCommand } from "@aws-sdk/client-sqs";
 import { SNSClient, SetTopicAttributesCommand } from "@aws-sdk/client-sns";
