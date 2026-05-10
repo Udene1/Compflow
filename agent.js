@@ -1,102 +1,108 @@
 import { runScan } from './core/scanner.js';
 import { runRemediation } from './core/remediator.js';
+import { evaluateWithGemini } from './core/gemini.js';
+import { getClientCredentials, validatePlatformEnv } from './core/credentials.js';
+import { getAllClients } from './core/client-vault.js';
+import { generateReport, sendReport } from './core/reporter.js';
 
-// Mock DB of clients
-const CLIENT_DB = [
-    {
-        id: 'client_001',
-        name: 'Acme Corp',
-        provider: 'aws',
-        // In a real app, this is an IAM AssumeRole ARN or Encrypted Secret.
-        credentials: {
-            accessKeyId: 'AKI...MOCK',
-            secretAccessKey: 'V2tN...MOCK',
-            sessionToken: ''
-        }
-    }
-];
-
-// Mock LLM Reasoning Engine (The "AI" in AINS)
-async function evaluateFinding(finding) {
-    console.log(`[LLM SUPERVISOR] Analyzing: ${finding.type} - ${finding.issue}...`);
-    
-    // Simulate LLM latency
-    await new Promise(resolve => setTimeout(resolve, 800));
-
-    // Hardcode some safe versus dangerous fixes exactly how an LLM would structure it
-    const safeToFix = [
-        'Public access enabled',
-        'PITR (Continuous Backups) disabled',
-        'Root MFA disabled',
-        'Default execute-api endpoint enabled',
-        'X-Ray Tracing disabled',
-        'Log Retention < 365 days',
-        'Automated Data Discovery disabled'
-    ];
-
-    const isSafe = safeToFix.some(i => finding.issue.includes(i));
-
-    if (isSafe) {
-        return { action: 'AUTO_FIX', confidence: 0.98, reason: 'Low blast radius structural fix.' };
-    } else {
-        return { action: 'ESCALATE', confidence: 0.85, reason: 'High risk of workload disruption.' };
-    }
-}
+// Validate platform environment on startup
+validatePlatformEnv();
 
 async function orchestratorLoop() {
     console.log(`\n========================================`);
     console.log(`🤖 COMPLIANCEFLOW AGENT INITIALIZING...`);
     console.log(`========================================`);
 
-    for (const client of CLIENT_DB) {
+    const clients = getAllClients();
+
+    if (clients.length === 0) {
+        console.warn('[AGENT] No clients found in vault. Nothing to process.');
+        return;
+    }
+
+    for (const client of clients) {
         console.log(`\n➤ Processing Client: ${client.name} (${client.id})`);
         
         try {
-            // Step 1: Scan
-            console.log(`[SCANNER] Executing deep cloud scan...`);
-            const { resources } = await runScan(client.provider, client.credentials);
-            const anomalies = resources.filter(r => r.severity !== 'pass');
-            console.log(`[SCANNER] Found ${anomalies.length} compliance anomalies.`);
+            // Step 1: Assume client's IAM role for temporary credentials
+            console.log(`[CREDENTIALS] Assuming role ${client.roleArn}...`);
+            let credentials;
+            try {
+                credentials = await getClientCredentials(client.roleArn, client.id);
+                console.log(`[CREDENTIALS] ✓ Temporary session established (1h TTL).`);
+            } catch (e) {
+                console.error(`[CREDENTIALS] ❌ Failed to assume role for ${client.name}: ${e.message}`);
+                console.log(`[AGENT] Skipping client ${client.name} due to credential failure.`);
+                continue;
+            }
 
-            // Step 2: Reason & Remediate
+            // Step 2: Scan with temporary credentials
+            console.log(`[SCANNER] Executing deep cloud scan...`);
+            const { resources } = await runScan('aws', credentials);
+            const anomalies = resources.filter(r => r.severity !== 'pass');
+            console.log(`[SCANNER] Found ${anomalies.length} compliance anomalies out of ${resources.length} controls.`);
+
+            // Step 3: Reason & Remediate
             let resolvedCount = 0;
             let escalatedCount = 0;
+            const remediationDetails = [];
 
             for (const anomaly of anomalies) {
-                const llmDecision = await evaluateFinding(anomaly);
-                
-                if (llmDecision.action === 'AUTO_FIX') {
+                console.log(`[AGENT] Consulting Gemini for ${anomaly.name}...`);
+                const llmDecision = await evaluateWithGemini(anomaly);
+
+                // Respect client's autoRemediate preference
+                if (llmDecision.action === 'AUTO_FIX' && client.autoRemediate) {
                     console.log(`[AGENT] ⚡ Executing auto-fix for ${anomaly.name} (${llmDecision.reason})`);
                     
                     try {
                         const result = await runRemediation(
-                            client.provider, 
-                            client.credentials, 
+                            'aws', 
+                            credentials, 
                             anomaly.type, 
                             anomaly.name, 
                             anomaly.issue
                         );
                         if (result.advisory) {
-                            console.log(`[AGENT] ⚠️ Fix resulted in purely advisory message: ${result.message}`);
+                            console.log(`[AGENT] ⚠️ Advisory: ${result.message}`);
                             escalatedCount++;
+                            remediationDetails.push({ name: anomaly.name, issue: anomaly.issue, status: 'escalated' });
                         } else {
-                            console.log(`[AGENT] ✓ Successfully remediated: ${anomaly.name}.`);
+                            console.log(`[AGENT] ✓ Remediated: ${anomaly.name}.`);
                             resolvedCount++;
+                            remediationDetails.push({ name: anomaly.name, issue: anomaly.issue, status: 'fixed' });
                         }
                     } catch (e) {
                         console.error(`[AGENT] ❌ Fix failed: ${e.message}`);
                         escalatedCount++;
+                        remediationDetails.push({ name: anomaly.name, issue: anomaly.issue, status: 'failed' });
                     }
                 } else {
-                    console.log(`[AGENT] ⏸ Escalating to client Jira/CISO: ${anomaly.name} (${llmDecision.reason})`);
+                    const reason = !client.autoRemediate 
+                        ? 'Auto-remediation disabled for this client' 
+                        : llmDecision.reason;
+                    console.log(`[AGENT] ⏸ Escalating: ${anomaly.name} (${reason})`);
                     escalatedCount++;
+                    remediationDetails.push({ name: anomaly.name, issue: anomaly.issue, status: 'escalated' });
                 }
             }
 
-            // Step 3: Reporting (Mock)
-            console.log(`\n[REPORTER] Generating Weekly Posture Report...`);
-            console.log(`Summary: ${resolvedCount} autonomously resolved | ${escalatedCount} escalated for review.`);
-            console.log(`[REPORTER] Email sent to ${client.name} Leadership.`);
+            // Step 4: Generate & Send Report
+            console.log(`\n[REPORTER] Generating compliance posture report...`);
+            const remediationSummary = {
+                resolved: resolvedCount,
+                escalated: escalatedCount,
+                details: remediationDetails,
+            };
+            
+            const reportHtml = generateReport(client.name, resources, remediationSummary);
+            console.log(`[REPORTER] Report generated. Summary: ${resolvedCount} resolved | ${escalatedCount} escalated.`);
+
+            if (client.email) {
+                await sendReport(client.email, client.name, reportHtml);
+            } else {
+                console.warn(`[REPORTER] No email configured for ${client.name} — skipping delivery.`);
+            }
             
         } catch (e) {
             console.error(`❌ Critical error processing client ${client.id}:`, e);

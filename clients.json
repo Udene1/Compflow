@@ -1,0 +1,18 @@
+[
+    {
+        "id": "client_001",
+        "name": "Acme Corp",
+        "email": "ciso@acme.com",
+        "roleArn": "arn:aws:iam::123456789012:role/ComplianceFlowAudit",
+        "frameworks": ["soc2", "hipaa"],
+        "autoRemediate": true
+    },
+    {
+        "id": "client_002",
+        "name": "Globex Industries",
+        "email": "security@globex.io",
+        "roleArn": "arn:aws:iam::987654321098:role/ComplianceFlowAudit",
+        "frameworks": ["soc2", "gdpr", "iso27001"],
+        "autoRemediate": false
+    }
+]

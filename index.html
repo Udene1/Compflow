@@ -3,55 +3,132 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>ComplianceFlow AI | SOC2 Outcome as a Service</title>
+    <title>ComplianceFlow AI — Autonomous Cloud Compliance, Delivered as Outcome</title>
+    <meta name="description" content="ComplianceFlow AI is the autonomous compliance engine that scans, remediates, and certifies your cloud infrastructure. SOC2, HIPAA, GDPR — we do the work, you get the certification.">
+    <meta property="og:title" content="ComplianceFlow AI — SOC2 Outcome as a Service">
+    <meta property="og:description" content="We don't give you a dashboard. We give you the certification. AI agents that fix your cloud and generate the evidence.">
+    <meta property="og:type" content="website">
     <link rel="stylesheet" href="styles.css">
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;600;800&family=JetBrains+Mono:wght@300;500&display=swap" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&family=JetBrains+Mono:wght@300;400;500&display=swap" rel="stylesheet">
 </head>
 <body>
-    <div class="background-blobs">
-        <div class="blob blob-1"></div>
-        <div class="blob blob-2"></div>
+
+    <!-- Animated Mesh Background -->
+    <div class="mesh-bg">
+        <div class="orb orb-1"></div>
+        <div class="orb orb-2"></div>
+        <div class="orb orb-3"></div>
+        <div class="grid-overlay"></div>
     </div>
 
-    <nav>
+    <!-- Navigation -->
+    <nav id="main-nav">
         <div class="container nav-content">
             <div class="logo">ComplianceFlow<span>AI</span></div>
             <div class="nav-links">
                 <a href="#how-it-works">How it Works</a>
+                <a href="#demo">Live Demo</a>
                 <a href="#pricing">Pricing</a>
-                <button class="btn-primary">Get Certified</button>
+                <button class="btn-primary" onclick="window.location.href='app.html'">Go to Dashboard →</button>
             </div>
         </div>
     </nav>
 
-    <header class="hero container">
-        <div class="hero-content">
-            <span class="badge">Service-as-Software</span>
-            <h1>The SOC2 Outcome. <br><span class="gradient-text">No Dashboard Required.</span></h1>
-            <p>Traditional compliance software shows you what's broken. We actually fix it. Our AI agents remediate cloud misconfigurations and generate the evidence for you.</p>
-            <div class="hero-btns">
-                <button class="btn-primary btn-lg" onclick="window.location.href='app.html'">Go to Dashboard →</button>
-                <button class="btn-secondary btn-lg">Book Demo</button>
-            </div>
+    <!-- Hero Section -->
+    <header class="hero container" id="hero">
+        <div class="hero-badge">
+            <span class="badge-dot"></span>
+            AI-Native Compliance Firm
+        </div>
+        <h1>We Do the Work.<br><span class="gradient-text">You Get the Certification.</span></h1>
+        <p>Traditional compliance software shows you what's broken. We actually fix it. Our AI agents autonomously scan, remediate, and certify your cloud — SOC2, HIPAA, GDPR, ISO 27001.</p>
+        <div class="hero-btns">
+            <button class="btn-primary btn-lg" onclick="window.location.href='app.html'">Start Compliance Audit →</button>
+            <button class="btn-secondary btn-lg" onclick="document.getElementById('demo').scrollIntoView({behavior:'smooth'})">Watch AI in Action</button>
         </div>
     </header>
 
-    <section class="demo-section container" id="how-it-works">
-        <div class="glass-card demo-card">
+    <!-- Metrics Bar -->
+    <section class="metrics-bar container reveal">
+        <div class="metrics-grid">
+            <div class="metric-item">
+                <div class="metric-value" data-target="104">0</div>
+                <div class="metric-label">Compliance Controls</div>
+            </div>
+            <div class="metric-item">
+                <div class="metric-value" data-target="4" data-suffix="">0</div>
+                <div class="metric-label">Frameworks Mapped</div>
+            </div>
+            <div class="metric-item">
+                <div class="metric-value" data-target="24" data-prefix="<" data-suffix="h">0</div>
+                <div class="metric-label">Avg. Remediation Time</div>
+            </div>
+            <div class="metric-item">
+                <div class="metric-value" data-target="100" data-suffix="%">0</div>
+                <div class="metric-label">Audit Pass Guarantee</div>
+            </div>
+        </div>
+    </section>
+
+    <!-- Framework Chips -->
+    <section class="frameworks-section container reveal">
+        <div class="frameworks-row">
+            <div class="framework-chip"><span class="chip-icon">🛡️</span> SOC 2 Type II</div>
+            <div class="framework-chip"><span class="chip-icon">🏥</span> HIPAA</div>
+            <div class="framework-chip"><span class="chip-icon">🇪🇺</span> GDPR</div>
+            <div class="framework-chip"><span class="chip-icon">📋</span> ISO 27001</div>
+        </div>
+    </section>
+
+    <!-- How It Works -->
+    <section class="how-section container" id="how-it-works">
+        <div class="section-header reveal">
+            <h2>Three Steps to <span class="gradient-text">Certified</span></h2>
+            <p>No consultants. No 6-month timelines. Connect your cloud and our AI handles the rest.</p>
+        </div>
+        <div class="steps-grid">
+            <div class="step-card reveal">
+                <div class="step-number">1</div>
+                <div class="step-icon">🔗</div>
+                <h3>Connect Your Cloud</h3>
+                <p>Grant read-only access via a cross-account IAM Role. No credentials stored — we use temporary STS sessions.</p>
+            </div>
+            <div class="step-card reveal">
+                <div class="step-number">2</div>
+                <div class="step-icon">🤖</div>
+                <h3>AI Scans & Fixes</h3>
+                <p>Our Gemini-powered agent runs 100+ checks across IAM, encryption, networking, and logging — then auto-remediates safe findings.</p>
+            </div>
+            <div class="step-card reveal">
+                <div class="step-number">3</div>
+                <div class="step-icon">✅</div>
+                <h3>Get Certified</h3>
+                <p>We generate cryptographically signed evidence, map it to your target framework, and hand you the audit-ready package.</p>
+            </div>
+        </div>
+    </section>
+
+    <!-- Live Agent Demo -->
+    <section class="demo-section container" id="demo">
+        <div class="section-header reveal">
+            <h2>See the <span class="gradient-text">Agent</span> in Action</h2>
+            <p>A live simulation of our autonomous compliance engine scanning and remediating infrastructure.</p>
+        </div>
+        <div class="demo-card reveal">
             <div class="demo-header">
                 <div class="demo-dots">
                     <span></span><span></span><span></span>
                 </div>
-                <div class="demo-title">Autopilot Agent v1.0</div>
+                <div class="demo-title">complianceflow-agent v2.0 — autonomous-mode</div>
             </div>
             <div class="demo-body">
                 <div class="terminal" id="terminal-output">
-                    <div class="line">Ready for instruction...</div>
+                    <div class="line" style="color: var(--text-muted)">Awaiting instruction...</div>
                 </div>
                 <div class="controls">
-                    <button id="run-autopilot" class="btn-action">Run AI Autopilot</button>
+                    <button id="run-autopilot" class="btn-action">▶ Run AI Autopilot</button>
                     <div class="status-indicator">
                         <span class="pulse"></span>
                         Agent Standby
@@ -61,35 +138,79 @@
         </div>
     </section>
 
+    <!-- Pricing -->
     <section class="pricing-section container" id="pricing">
-        <div class="section-header">
+        <div class="section-header reveal">
             <h2>Pricing by <span class="gradient-text">Outcome</span></h2>
             <p>We don't charge per seat. We charge for the result.</p>
         </div>
         <div class="pricing-grid">
-            <div class="glass-card pricing-card">
-                <h3>Readiness Report</h3>
-                <div class="price">$500<span>/one-time</span></div>
+            <div class="pricing-card reveal">
+                <div class="tier-name">Readiness Report</div>
+                <div class="tier-desc">See where you stand</div>
+                <div class="price">$500</div>
+                <div class="price-suffix">one-time</div>
                 <ul>
-                    <li>Full Cloud Scan</li>
-                    <li>Remediation Roadmap</li>
-                    <li>One-click Fixes</li>
+                    <li>Full 100+ control cloud scan</li>
+                    <li>Prioritized remediation roadmap</li>
+                    <li>Framework gap analysis</li>
+                    <li>Executive summary PDF</li>
                 </ul>
-                <button class="btn-secondary">Get Sample</button>
+                <button class="btn-secondary">Get Sample Report</button>
             </div>
-            <div class="glass-card pricing-card featured">
+            <div class="pricing-card featured reveal">
                 <div class="price-badge">Most Popular</div>
-                <h3>SOC2 Certification</h3>
-                <div class="price">$5,000<span>/outcome</span></div>
+                <div class="tier-name">SOC2 Certification</div>
+                <div class="tier-desc">The full outcome, delivered</div>
+                <div class="price">$5,000</div>
+                <div class="price-suffix">per certification</div>
                 <ul>
-                    <li>Full Remediation of all 104 controls</li>
-                    <li>Auto-evidence capture</li>
-                    <li>Guaranteed Audit Pass</li>
+                    <li>Everything in Readiness Report</li>
+                    <li>Autonomous remediation of all findings</li>
+                    <li>Cryptographically signed evidence vault</li>
+                    <li>Multi-framework mapping (SOC2 + HIPAA + GDPR)</li>
+                    <li>Guaranteed audit pass</li>
                 </ul>
-                <button class="btn-primary">Buy Certification</button>
+                <button class="btn-primary">Buy Certification →</button>
+            </div>
+            <div class="pricing-card reveal">
+                <div class="tier-name">Continuous Governance</div>
+                <div class="tier-desc">Stay compliant forever</div>
+                <div class="price">$2,000</div>
+                <div class="price-suffix">per month</div>
+                <ul>
+                    <li>Everything in SOC2 Certification</li>
+                    <li>Daily automated drift detection</li>
+                    <li>Instant auto-remediation</li>
+                    <li>Weekly posture reports via email</li>
+                    <li>Dedicated AI compliance agent</li>
+                </ul>
+                <button class="btn-secondary">Contact Sales</button>
             </div>
         </div>
     </section>
+
+    <!-- CTA -->
+    <section class="cta-section container">
+        <div class="cta-card reveal">
+            <h2>Stop Managing Compliance.<br><span class="gradient-text">Let AI Deliver It.</span></h2>
+            <p>Join the companies replacing 6-month audit timelines with autonomous AI governance.</p>
+            <button class="btn-primary btn-lg" onclick="window.location.href='app.html'">Start Your Free Audit →</button>
+        </div>
+    </section>
+
+    <!-- Footer -->
+    <footer>
+        <div class="container footer-content">
+            <div class="footer-left">© 2026 ComplianceFlow AI. All rights reserved.</div>
+            <div class="footer-links">
+                <a href="#">Privacy</a>
+                <a href="#">Terms</a>
+                <a href="#">Contact</a>
+                <a href="https://github.com/udene1/compflow" target="_blank" rel="noopener">GitHub</a>
+            </div>
+        </div>
+    </footer>
 
     <script src="service_demo.js"></script>
 </body>

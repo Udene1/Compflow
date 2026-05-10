@@ -256,6 +256,31 @@
             </div>
         </main>
 
+        <!-- ══════ AI Chat Drawer (Floating) ══════ -->
+        <div class="chat-toggle" id="chat-toggle" onclick="ChatEngine.toggle()">
+            <span class="icon">💬</span>
+            <span class="label">Ask AI</span>
+        </div>
+
+        <div class="chat-drawer" id="chat-drawer">
+            <div class="chat-header">
+                <div class="title">
+                    ComplianceFlow <span>Brain</span>
+                </div>
+                <button class="chat-close" onclick="ChatEngine.toggle()">✕</button>
+            </div>
+            <div class="chat-messages" id="chat-messages">
+                <div class="chat-msg ai">
+                    Hello! I'm your AI Compliance Auditor. Ask me anything about your current infrastructure or security posture.
+                </div>
+            </div>
+            <div class="chat-input-area">
+                <input type="text" id="chat-input" placeholder="e.g. Which S3 buckets are public?" onkeydown="if(event.key === 'Enter') ChatEngine.send()">
+                <button class="chat-send" onclick="ChatEngine.send()">⚡</button>
+            </div>
+        </div>
+
+
         <!-- ══════ Modal: Connection Settings ══════ -->
         <div class="modal-overlay" id="modal-settings">
             <div class="modal-card">
@@ -308,6 +333,7 @@
     <script src="scanner.js"></script>
     <script src="remediation.js"></script>
     <script src="drift-engine.js"></script>
+    <script src="chat-engine.js"></script>
     <script>
         // ─── Navigation ───
         const navItems = document.querySelectorAll('.nav-item');
