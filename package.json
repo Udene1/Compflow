@@ -1,6 +1,7 @@
 {
   "name": "complianceflow-ai",
   "version": "2.0.0",
+  "type": "module",
   "description": "AI-Native Compliance Service — SOC2 outcome as a service, not another dashboard.",
   "private": true,
   "scripts": {
