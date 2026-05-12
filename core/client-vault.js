@@ -1,10 +1,8 @@
 import { readFileSync } from 'fs';
-import { fileURLToPath } from 'url';
-import { dirname, join } from 'path';
+import { join } from 'path';
 
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = dirname(__filename);
-const VAULT_PATH = join(__dirname, '..', 'clients.json');
+// Use process.cwd() which works correctly in Vercel Serverless Functions
+const VAULT_PATH = join(process.cwd(), 'clients.json');
 
 /**
  * Client Vault — In-memory registry backed by clients.json.
