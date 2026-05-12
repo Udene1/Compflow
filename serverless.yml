@@ -1,0 +1,35 @@
+service: complianceflow-ains
+
+frameworkVersion: '3'
+
+provider:
+  name: aws
+  runtime: nodejs20.x
+  region: us-east-1
+  timeout: 900 # 15 minutes max
+  memorySize: 1024
+  environment:
+    # Set these in your AWS Lambda environment variables later, or securely via SSM
+    GEMINI_API_KEY: ${env:GEMINI_API_KEY, ""}
+    AWS_SES_FROM_EMAIL: ${env:AWS_SES_FROM_EMAIL, ""}
+    # Note: PLATFORM_AWS_ACCESS_KEY_ID is no longer needed in .env! 
+    # AWS Lambda uses the IAM Role below natively.
+
+  iam:
+    role:
+      statements:
+        - Effect: "Allow"
+          Action:
+            - "sts:AssumeRole"
+          Resource: "*" # The cross-account client roles
+        - Effect: "Allow"
+          Action:
+            - "ses:SendEmail"
+            - "ses:SendRawEmail"
+          Resource: "*"
+
+functions:
+  orchestrator:
+    handler: agent.handler
+    events:
+      - schedule: cron(0 12 ? * MON-FRI *) # Every weekday at 12:00 UTC (8:00 AM EST)

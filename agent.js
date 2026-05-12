@@ -110,11 +110,25 @@ async function orchestratorLoop() {
     }
     
     console.log(`\n========================================`);
-    console.log(`💤 ORCHESTRATOR SLEEPING UNTIL NEXT CRON.`);
+    console.log(`💤 ORCHESTRATOR SLEEPING UNTIL NEXT RUN.`);
     console.log(`========================================`);
 }
 
-// Start daemon
-orchestratorLoop();
+// Support running locally via `node agent.js`
+if (process.argv[1] && process.argv[1].endsWith('agent.js')) {
+    orchestratorLoop();
+}
+
+// AWS Lambda Handler
+export const handler = async (event, context) => {
+    console.log("[LAMBDA] Invoked by EventBridge:", JSON.stringify(event));
+    try {
+        await orchestratorLoop();
+        return { statusCode: 200, body: 'Run complete.' };
+    } catch (e) {
+        console.error('[LAMBDA] Execution failed:', e);
+        throw e;
+    }
+};
 
 export { orchestratorLoop };
