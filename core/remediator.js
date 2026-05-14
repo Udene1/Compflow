@@ -12,6 +12,7 @@ import { APIGatewayClient, UpdateRestApiCommand, UpdateStageCommand } from "@aws
 import { CloudFrontClient, UpdateDistributionCommand, GetDistributionConfigCommand } from "@aws-sdk/client-cloudfront";
 import { SQSClient, SetQueueAttributesCommand } from "@aws-sdk/client-sqs";
 import { SNSClient, SetTopicAttributesCommand } from "@aws-sdk/client-sns";
+import { log } from './logger.js';
 
 export async function runRemediation(provider, credentials, resourceType, resourceName, issue) {
 
@@ -411,6 +412,7 @@ export async function runRemediation(provider, credentials, resourceType, resour
                 result = { success: true, advisory: true, message: `ADVISORY: Redshift Cluster configuration changes (Encryption, Network Access, Snapshots) require review to avoid data downtime.` };
             }
             else if (resourceType === 'EKS Cluster') {
+                log.info(`ADVISORY: EKS cluster modifications (Secrets Encryption, Control Plane Logging) can cause node rotations. Validate safely via console.`);
                 result = { success: true, advisory: true, message: `ADVISORY: EKS cluster modifications (Secrets Encryption, Control Plane Logging) can cause node rotations. Validate safely via console.` };
             }
             else if (resourceType === 'API Gateway') {
@@ -470,7 +472,7 @@ export async function runRemediation(provider, credentials, resourceType, resour
 
         return result;
     } catch (error) {
-        console.error('Remediation Error:', error);
+        log.error('Remediation Error:', error);
         throw error;
     }
 }

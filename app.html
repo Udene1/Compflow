@@ -47,6 +47,9 @@
                 <a class="nav-item active" data-panel="connect" id="nav-connect">
                     <span class="icon">🔌</span> Cloud Connect
                 </a>
+                <a class="nav-item" data-panel="tenants" id="nav-tenants">
+                    <span class="icon">👥</span> Governance Registry
+                </a>
                 <a class="nav-item" id="nav-settings" onclick="CloudConnect.openSettings()">
                     <span class="icon">⚙️</span> Connection Settings
                 </a>
@@ -127,6 +130,27 @@
                         </div>
                     </div>
                     <div class="connect-steps" id="connect-steps"></div>
+                </div>
+
+                <!-- ══════ Panel: Tenants (Multi-Tenancy) ══════ -->
+                <div class="panel" id="panel-tenants">
+                    <div class="panel-header-actions">
+                        <div>
+                            <h3>Governance Registry</h3>
+                            <p style="color:var(--text-muted); font-size:0.85rem;">Manage multi-tenant cloud environments and auto-remediation policies.</p>
+                        </div>
+                        <button class="btn btn-primary" onclick="TenantManager.openOnboarding()">➕ Onboard Tenant</button>
+                    </div>
+                    
+                    <div class="tenant-grid" id="tenant-list">
+                        <!-- Tenants will be injected here -->
+                    </div>
+
+                    <div id="tenants-empty" class="empty-state">
+                        <div class="icon">👥</div>
+                        <h3>No tenants registered</h3>
+                        <p>Start by onboarding your first cloud environment to the registry.</p>
+                    </div>
                 </div>
 
                 <!-- ══════ Panel: Scan ══════ -->
@@ -280,6 +304,37 @@
             </div>
         </div>
 
+        <!-- ══════ Modal: Tenant Onboarding ══════ -->
+        <div class="modal-overlay" id="modal-onboarding">
+            <div class="modal-card">
+                <div class="modal-header">
+                    <h3>Onboard New Tenant</h3>
+                    <button class="modal-close" onclick="TenantManager.closeOnboarding()">✕</button>
+                </div>
+                <div class="modal-body">
+                    <div class="input-group">
+                        <label>Tenant Name</label>
+                        <input type="text" id="onboard-name" placeholder="e.g. Production AWS">
+                    </div>
+                    <div class="input-group">
+                        <label>AWS Role ARN</label>
+                        <input type="text" id="onboard-role" placeholder="arn:aws:iam::...:role/ComplianceRole">
+                    </div>
+                    <div class="input-group">
+                        <label>Contact Email</label>
+                        <input type="email" id="onboard-email" placeholder="compliance@company.com">
+                    </div>
+                    <div style="display:flex; align-items:center; gap:0.5rem; margin-top:1rem;">
+                        <input type="checkbox" id="onboard-auto" checked>
+                        <label style="margin:0; font-size:0.85rem;">Enable Auto-Remediation (Recommended)</label>
+                    </div>
+                    <div class="modal-actions">
+                        <button class="btn btn-secondary" onclick="TenantManager.closeOnboarding()">Cancel</button>
+                        <button class="btn btn-primary" onclick="TenantManager.saveTenant()">Authorize & Save</button>
+                    </div>
+                </div>
+            </div>
+        </div>
 
         <!-- ══════ Modal: Connection Settings ══════ -->
         <div class="modal-overlay" id="modal-settings">
@@ -327,6 +382,7 @@
     </div>
 
     <script src="live-terminal.js"></script>
+    <script src="tenant-manager.js"></script>
     <script src="frameworks.js"></script>
     <script src="evidence.js"></script>
     <script src="cloud-connect.js"></script>

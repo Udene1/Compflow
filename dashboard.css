@@ -997,11 +997,66 @@ body {
 .empty-state h3 { color: var(--text-muted); margin-bottom: 0.5rem; }
 .empty-state p { font-size: 0.85rem; max-width: 400px; margin: 0 auto; }
 
-/* ─── Scrollbars ─── */
-::-webkit-scrollbar { width: 6px; }
-::-webkit-scrollbar-track { background: transparent; }
-::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.1); border-radius: 3px; }
-::-webkit-scrollbar-thumb:hover { background: rgba(255,255,255,0.2); }
+
+/* ─── Tenant Grid ─── */
+.tenant-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+    gap: 1.5rem;
+    margin-top: 1.5rem;
+}
+
+.tenant-card {
+    background: var(--card-bg);
+    border: 1px solid var(--border-color);
+    border-radius: 12px;
+    padding: 1.5rem;
+    display: flex;
+    flex-direction: column;
+    gap: 1rem;
+    transition: transform 0.2s;
+}
+
+.tenant-card:hover {
+    transform: translateY(-2px);
+    border-color: var(--primary);
+}
+
+.tenant-info h4 {
+    margin: 0;
+    font-size: 1.1rem;
+    color: var(--text-bright);
+}
+
+.tenant-info code {
+    display: block;
+    margin-top: 0.5rem;
+    font-size: 0.7rem;
+    color: var(--text-muted);
+    background: rgba(0,0,0,0.2);
+    padding: 4px 8px;
+    border-radius: 4px;
+    word-break: break-all;
+}
+
+.tenant-controls {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    border-top: 1px solid var(--border-color);
+    padding-top: 1rem;
+}
+
+.toggle-group {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+}
+
+.toggle-group span {
+    font-size: 0.8rem;
+    color: var(--text-muted);
+}
 
 /* ─── Switch Toggle (Phase 5) ─── */
 .switch {

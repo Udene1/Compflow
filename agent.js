@@ -2,7 +2,7 @@ import { runScan } from './core/scanner.js';
 import { runRemediation } from './core/remediator.js';
 import { evaluateWithGemini } from './core/gemini.js';
 import { getClientCredentials, validatePlatformEnv } from './core/credentials.js';
-import { getAllClients } from './core/client-vault.js';
+import { loadClients } from './core/registry.js';
 import { generateReport, sendReport } from './core/reporter.js';
 
 // Validate platform environment on startup
@@ -13,7 +13,7 @@ async function orchestratorLoop() {
     console.log(`🤖 COMPLIANCEFLOW AGENT INITIALIZING...`);
     console.log(`========================================`);
 
-    const clients = getAllClients();
+    const clients = await loadClients();
 
     if (clients.length === 0) {
         console.warn('[AGENT] No clients found in vault. Nothing to process.');

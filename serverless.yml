@@ -25,6 +25,74 @@ provider:
             - "ses:SendEmail"
             - "ses:SendRawEmail"
           Resource: "*"
+        - Effect: "Allow"
+          Action:
+            - "dynamodb:Query"
+            - "dynamodb:Scan"
+            - "dynamodb:GetItem"
+            - "dynamodb:PutItem"
+            - "dynamodb:UpdateItem"
+          Resource:
+            - "arn:aws:dynamodb:${opt:region, 'us-east-1'}:*:table/ComplianceFlowClients"
+
+resources:
+  Resources:
+    ClientsTable:
+      Type: AWS::DynamoDB::Table
+      Properties:
+        TableName: ComplianceFlowClients
+        AttributeDefinitions:
+          - AttributeName: id
+            AttributeType: S
+        KeySchema:
+          - AttributeName: id
+            KeyType: HASH
+        BillingMode: PAY_PER_REQUEST
+
+        - Effect: "Allow"
+          Action:
+            - "sqs:SendMessage"
+            - "sqs:ReceiveMessage"
+            - "sqs:DeleteMessage"
+            - "sqs:GetQueueAttributes"
+          Resource:
+            - !GetAtt ScanQueue.Arn
+
+resources:
+  Resources:
+    ClientsTable:
+      Type: AWS::DynamoDB::Table
+      Properties:
+        TableName: ComplianceFlowClients
+        AttributeDefinitions:
+          - AttributeName: id
+            AttributeType: S
+        KeySchema:
+          - AttributeName: id
+            KeyType: HASH
+        BillingMode: PAY_PER_REQUEST
+
+    AuditTable:
+      Type: AWS::DynamoDB::Table
+      Properties:
+        TableName: ComplianceFlowAudit
+        AttributeDefinitions:
+          - AttributeName: clientId
+            AttributeType: S
+          - AttributeName: timestamp
+            AttributeType: S
+        KeySchema:
+          - AttributeName: clientId
+            KeyType: HASH
+          - AttributeName: timestamp
+            KeyType: RANGE
+        BillingMode: PAY_PER_REQUEST
+
+    ScanQueue:
+      Type: AWS::SQS::Queue
+      Properties:
+        QueueName: ComplianceFlowScanQueue
+        VisibilityTimeout: 900 # Matches Lambda timeout
 
 package:
   patterns:
@@ -34,7 +102,33 @@ package:
     - "!.env"
 
 functions:
-  orchestrator:
-    handler: agent.handler
+  scheduler:
+    handler: scheduler.handler
+    environment:
+      SCAN_QUEUE_URL: !Ref ScanQueue
     events:
-      - schedule: cron(0 12 ? * MON-FRI *) # Every weekday at 12:00 UTC (8:00 AM EST)
+      - schedule: cron(0 12 ? * MON-FRI *) # Every weekday at 12:00 UTC
+      - http:
+          path: /api/trigger
+          method: post
+
+  tenants:
+    handler: api/tenants.handler
+    events:
+      - http:
+          path: /api/tenants
+          method: get
+      - http:
+          path: /api/tenants
+          method: post
+      - http:
+          path: /api/tenants/toggle
+          method: post
+
+  worker:
+    handler: worker.handler
+    timeout: 900
+    events:
+      - sqs:
+          arn: !GetAtt ScanQueue.Arn
+          batchSize: 1

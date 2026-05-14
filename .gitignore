@@ -4,3 +4,12 @@ node_modules
 dist
 build
 *.log
+clients.json
+.serverless/
+debug_*.js
+test_*.js
+real_scan_report.js
+setup_ses.js
+trigger_test.js
+.test_resources
+scan_logs.txt

@@ -20,6 +20,7 @@ import { APIGatewayClient, GetRestApisCommand, GetStagesCommand } from "@aws-sdk
 import { CloudFrontClient, ListDistributionsCommand, GetDistributionConfigCommand } from "@aws-sdk/client-cloudfront";
 import { SQSClient, ListQueuesCommand, GetQueueAttributesCommand } from "@aws-sdk/client-sqs";
 import { SNSClient, ListTopicsCommand, GetTopicAttributesCommand } from "@aws-sdk/client-sns";
+import { log } from './logger.js';
 
 export async function runScan(provider, credentials) {
 
@@ -147,7 +148,7 @@ export async function runScan(provider, credentials) {
                         });
                     }
                 }
-            } catch (e) { console.warn("S3 fail", e); }
+            } catch (e) { log.warn("S3 fail", e); }
 
             // ═══════════════════════════════════════════
             // 2. EC2 — Security Groups, VPCs, Instances
@@ -206,7 +207,7 @@ export async function runScan(provider, credentials) {
                             }
                         }
                     }
-                } catch (e) { console.warn("EC2 instances fail", e); }
+                } catch (e) { log.warn("EC2 instances fail", e); }
 
                 // EBS Volumes Check
                 try {
@@ -220,7 +221,7 @@ export async function runScan(provider, credentials) {
                             });
                         }
                     }
-                } catch(e) { console.warn("EBS fail", e); }
+                } catch(e) { log.warn("EBS fail", e); }
 
                 // EBS Snapshots Check
                 try {
@@ -237,8 +238,8 @@ export async function runScan(provider, credentials) {
                             });
                         }
                     }
-                } catch(e) { console.warn("EBS snapshots fail", e); }
-            } catch (e) { console.warn("EC2/VPC fail", e); }
+                } catch(e) { log.warn("EBS snapshots fail", e); }
+            } catch (e) { log.warn("EC2/VPC fail", e); }
 
             // ═══════════════════════════════════════════
             // 3. RDS — Deep Scan
@@ -286,7 +287,7 @@ export async function runScan(provider, credentials) {
                         });
                     }
                 }
-            } catch (e) { console.warn("RDS fail", e); }
+            } catch (e) { log.warn("RDS fail", e); }
 
             // ═══════════════════════════════════════════
             // 4. CloudTrail — Deep Scan
@@ -333,7 +334,7 @@ export async function runScan(provider, credentials) {
                         }
                     }
                 }
-            } catch (e) { console.warn("CloudTrail fail", e); }
+            } catch (e) { log.warn("CloudTrail fail", e); }
 
             // ═══════════════════════════════════════════
             // 5. Macie
@@ -369,7 +370,7 @@ export async function runScan(provider, credentials) {
                         });
                     }
                 }
-            } catch (e) { console.warn("KMS fail", e); }
+            } catch (e) { log.warn("KMS fail", e); }
 
             // ═══════════════════════════════════════════
             // 7. Lambda — Deep Scan
@@ -417,7 +418,7 @@ export async function runScan(provider, credentials) {
                         });
                     }
                 }
-            } catch (e) { console.warn("Lambda fail", e); }
+            } catch (e) { log.warn("Lambda fail", e); }
 
             // ═══════════════════════════════════════════
             // 8. WAF & Shield
@@ -435,7 +436,7 @@ export async function runScan(provider, credentials) {
                         region: config.region, severity: 'pass', control: 'CC6.7', issue: null
                     });
                 }
-            } catch (e) { console.warn("WAF fail", e); }
+            } catch (e) { log.warn("WAF fail", e); }
 
             try {
                 const { SubscriptionState } = await shield.send(new GetSubscriptionStateCommand({}));
@@ -447,7 +448,7 @@ export async function runScan(provider, credentials) {
                     control: 'CC6.7',
                     issue: isSubscribed ? null : 'Shield Advanced not active'
                 });
-            } catch (e) { console.warn("Shield fail", e); }
+            } catch (e) { log.warn("Shield fail", e); }
 
             // ═══════════════════════════════════════════
             // 9. IAM — Deep Scan
@@ -564,7 +565,7 @@ export async function runScan(provider, credentials) {
                         });
                     }
                 }
-            } catch (e) { console.warn("IAM fail", e); }
+            } catch (e) { log.warn("IAM fail", e); }
 
             // ═══════════════════════════════════════════
             // 10. Secrets Manager & Networking Cleanup
@@ -580,7 +581,7 @@ export async function runScan(provider, credentials) {
                         });
                     }
                 }
-            } catch (e) { console.warn("Secrets Manager fail", e); }
+            } catch (e) { log.warn("Secrets Manager fail", e); }
 
             try {
                 // Check for Broad Ports (RDP, HTTP) in Security Groups
@@ -638,7 +639,7 @@ export async function runScan(provider, credentials) {
                         region: config.region, severity: 'warning', control: 'CC6.6', issue: 'Default VPC in use (Compliance Risk)'
                     });
                 }
-            } catch (e) { console.warn("Net cleanup fail", e); }
+            } catch (e) { log.warn("Net cleanup fail", e); }
 
             // ═══════════════════════════════════════════
             // 11. Monitoring & Threat Detection
@@ -657,7 +658,7 @@ export async function runScan(provider, credentials) {
                         region: config.region, severity: 'pass', control: 'CC6.6', issue: null
                     });
                 }
-            } catch(e) { console.warn("GuardDuty fail", e); }
+            } catch(e) { log.warn("GuardDuty fail", e); }
 
             try {
                 // AWS Config Focus
@@ -673,7 +674,7 @@ export async function runScan(provider, credentials) {
                         region: config.region, severity: 'pass', control: 'CC7.1', issue: null
                     });
                 }
-            } catch(e) { console.warn("AWS Config fail", e); }
+            } catch(e) { log.warn("AWS Config fail", e); }
 
             try {
                 // CloudWatch Logs Retention Check
@@ -686,7 +687,7 @@ export async function runScan(provider, credentials) {
                         });
                     }
                 }
-            } catch(e) { console.warn("CW Logs fail", e); }
+            } catch(e) { log.warn("CW Logs fail", e); }
 
             try {
                 // CloudWatch Alarms for Root/IAM/CloudTrail
@@ -706,7 +707,7 @@ export async function runScan(provider, credentials) {
                 if (!hasTrailAlarm) {
                     resources.push({ name: 'CloudTrail Change Alarm', type: 'CloudWatch Alarms', icon: '🔔', region: 'Global', severity: 'warning', control: 'CC7.2', issue: 'No CloudWatch alarm for CloudTrail configuration changes' });
                 }
-            } catch(e) { console.warn("CW Alarms fail", e); }
+            } catch(e) { log.warn("CW Alarms fail", e); }
 
             // ═══════════════════════════════════════════
             // 12. Database & Compute Advanced (DynamoDB, Redshift, EKS)
@@ -727,7 +728,7 @@ export async function runScan(provider, credentials) {
                             resources.push({ name: table, type: 'DynamoDB Table', icon: '🗄️', region: config.region, severity: 'warning', control: 'CC6.7', issue: 'KMS Encryption disabled (using AWS owned)' });
                         }
                     }
-                } catch(e) { console.warn("DDB fail", e); }
+                } catch(e) { log.warn("DDB fail", e); }
 
                 // Redshift
                 try {
@@ -743,7 +744,7 @@ export async function runScan(provider, credentials) {
                             resources.push({ name: cluster.ClusterIdentifier, type: 'Redshift Cluster', icon: '📊', region: config.region, severity: 'critical', control: 'CC6.6', issue: 'Publicly Accessible' });
                         }
                     }
-                } catch(e) { console.warn("Redshift fail", e); }
+                } catch(e) { log.warn("Redshift fail", e); }
 
                 // EKS
                 try {
@@ -765,7 +766,7 @@ export async function runScan(provider, credentials) {
                             resources.push({ name: c, type: 'EKS Cluster', icon: '☸️', region: config.region, severity: 'critical', control: 'CC6.7', issue: 'Secrets encryption disabled' });
                         }
                     }
-                } catch(e) { console.warn("EKS fail", e); }
+                } catch(e) { log.warn("EKS fail", e); }
             };
 
             // ═══════════════════════════════════════════
@@ -791,7 +792,7 @@ export async function runScan(provider, credentials) {
                             }
                         } catch(e) {}
                     }
-                } catch(e) { console.warn("APIGW fail", e); }
+                } catch(e) { log.warn("APIGW fail", e); }
 
                 // CloudFront
                 try {
@@ -807,7 +808,7 @@ export async function runScan(provider, credentials) {
                             resources.push({ name: dist.Id, type: 'CloudFront Distribution', icon: '🌍', region: 'Global', severity: 'critical', control: 'CC6.7', issue: 'HTTP traffic allowed (Viewer Protocol Policy)' });
                         }
                     }
-                } catch(e) { console.warn("CloudFront fail", e); }
+                } catch(e) { log.warn("CloudFront fail", e); }
 
                 // SQS
                 try {
@@ -822,7 +823,7 @@ export async function runScan(provider, credentials) {
                             resources.push({ name: qName, type: 'SQS Queue', icon: '📨', region: config.region, severity: 'warning', control: 'CC7.2', issue: 'No Dead Letter Queue (DLQ) configured' });
                         }
                     }
-                } catch(e) { console.warn("SQS fail", e); }
+                } catch(e) { log.warn("SQS fail", e); }
 
                 // SNS
                 try {
@@ -834,7 +835,7 @@ export async function runScan(provider, credentials) {
                             resources.push({ name: tName, type: 'SNS Topic', icon: '📟', region: config.region, severity: 'warning', control: 'CC6.7', issue: 'Server-Side Encryption disabled' });
                         }
                     }
-                } catch(e) { console.warn("SNS fail", e); }
+                } catch(e) { log.warn("SNS fail", e); }
             };
 
             await Promise.allSettled([checkDataCompute(), checkAppEdge()]);
@@ -842,7 +843,7 @@ export async function runScan(provider, credentials) {
 
         return { resources };
     } catch (error) {
-        console.error('Scan Error:', error);
+        log.error('Scan Error:', error);
         throw error;
     }
 }
