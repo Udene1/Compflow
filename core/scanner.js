@@ -7,7 +7,7 @@ import { CloudTrailClient, DescribeTrailsCommand, GetTrailStatusCommand } from "
 import { Macie2Client, GetMacieSessionCommand } from "@aws-sdk/client-macie2";
 import { LambdaClient, ListFunctionsCommand } from "@aws-sdk/client-lambda";
 import { WAFV2Client, ListWebACLsCommand } from "@aws-sdk/client-wafv2";
-import { ShieldClient, GetSubscriptionStatusCommand } from "@aws-sdk/client-shield";
+import { ShieldClient, GetSubscriptionStateCommand } from "@aws-sdk/client-shield";
 import { SecretsManagerClient, ListSecretsCommand } from "@aws-sdk/client-secrets-manager";
 import { CloudWatchClient, DescribeAlarmsCommand } from "@aws-sdk/client-cloudwatch";
 import { CloudWatchLogsClient, DescribeLogGroupsCommand } from "@aws-sdk/client-cloudwatch-logs";
@@ -35,7 +35,7 @@ export async function runScan(provider, credentials) {
     }
 
     if (!credentials || !credentials.accessKeyId || !credentials.secretAccessKey) {
-        return res.status(400).json({ error: 'Missing cloud credentials' });
+        throw new Error('Missing cloud credentials');
     }
 
     try {
@@ -43,7 +43,8 @@ export async function runScan(provider, credentials) {
             region: credentials.region || 'us-east-1',
             credentials: {
                 accessKeyId: credentials.isObfuscated ? deobfuscate(credentials.accessKeyId) : credentials.accessKeyId,
-                secretAccessKey: credentials.isObfuscated ? deobfuscate(credentials.secretAccessKey) : credentials.secretAccessKey
+                secretAccessKey: credentials.isObfuscated ? deobfuscate(credentials.secretAccessKey) : credentials.secretAccessKey,
+                sessionToken: credentials.sessionToken
             }
         };
 
@@ -437,13 +438,14 @@ export async function runScan(provider, credentials) {
             } catch (e) { console.warn("WAF fail", e); }
 
             try {
-                const { Status } = await shield.send(new GetSubscriptionStatusCommand({}));
+                const { SubscriptionState } = await shield.send(new GetSubscriptionStateCommand({}));
+                const isSubscribed = SubscriptionState === 'SUBSCRIBED' || SubscriptionState === 'ACTIVE';
                 resources.push({
                     name: 'Shield Protection', type: 'Shield', icon: '🛡️',
                     region: 'Global',
-                    severity: Status === 'SUBSCRIBED' ? 'pass' : 'warning',
+                    severity: isSubscribed ? 'pass' : 'warning',
                     control: 'CC6.7',
-                    issue: Status === 'SUBSCRIBED' ? null : 'Shield Advanced not active'
+                    issue: isSubscribed ? null : 'Shield Advanced not active'
                 });
             } catch (e) { console.warn("Shield fail", e); }
 

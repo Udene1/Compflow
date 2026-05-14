@@ -29,7 +29,7 @@ export async function evaluateWithGemini(finding) {
         return fallbackReasoning(finding);
     }
 
-    const model = genAI.getGenerativeModel({ model: "gemini-1.5-pro" });
+    const model = genAI.getGenerativeModel({ model: "gemini-2.0-flash" });
 
     const prompt = `
         You are a Senior Cloud Security Engineer and Compliance Auditor.

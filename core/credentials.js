@@ -5,13 +5,20 @@ import { STSClient, AssumeRoleCommand } from '@aws-sdk/client-sts';
  * Uses PLATFORM_AWS_* env vars — the platform's own AWS identity.
  * This identity has ONLY sts:AssumeRole and ses:SendEmail permissions.
  */
-const stsClient = new STSClient({
-    region: process.env.AWS_REGION || 'us-east-1',
-    credentials: {
+const stsConfig = {
+    region: process.env.AWS_REGION || 'us-east-1'
+};
+
+// Use explicit keys if provided (for local dev/Vercel), 
+// otherwise let the SDK use the IAM Role (for AWS Lambda).
+if (process.env.PLATFORM_AWS_ACCESS_KEY_ID && process.env.PLATFORM_AWS_SECRET_ACCESS_KEY) {
+    stsConfig.credentials = {
         accessKeyId: process.env.PLATFORM_AWS_ACCESS_KEY_ID,
         secretAccessKey: process.env.PLATFORM_AWS_SECRET_ACCESS_KEY,
-    }
-});
+    };
+}
+
+const stsClient = new STSClient(stsConfig);
 
 /**
  * Assumes a client's cross-account IAM role and returns temporary credentials.

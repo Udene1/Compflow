@@ -3,13 +3,20 @@ import { SESClient, SendEmailCommand } from '@aws-sdk/client-ses';
 /**
  * SES client using platform credentials — sends reports on behalf of ComplianceFlow.
  */
-const sesClient = new SESClient({
-    region: process.env.AWS_REGION || 'us-east-1',
-    credentials: {
+const sesConfig = {
+    region: process.env.AWS_REGION || 'us-east-1'
+};
+
+// Use explicit keys if provided (for local dev/Vercel), 
+// otherwise let the SDK use the IAM Role (for AWS Lambda).
+if (process.env.PLATFORM_AWS_ACCESS_KEY_ID && process.env.PLATFORM_AWS_SECRET_ACCESS_KEY) {
+    sesConfig.credentials = {
         accessKeyId: process.env.PLATFORM_AWS_ACCESS_KEY_ID,
         secretAccessKey: process.env.PLATFORM_AWS_SECRET_ACCESS_KEY,
-    }
-});
+    };
+}
+
+const sesClient = new SESClient(sesConfig);
 
 const FROM_EMAIL = process.env.AWS_SES_FROM_EMAIL || 'reports@complianceflow.ai';
 
@@ -103,8 +110,11 @@ export function generateReport(clientName, scanResults, remediationSummary) {
  * @param {string} reportHtml
  */
 export async function sendReport(recipientEmail, clientName, reportHtml) {
-    if (!process.env.PLATFORM_AWS_ACCESS_KEY_ID) {
-        console.warn('[REPORTER] No AWS credentials configured — skipping email send.');
+    // If running locally/Vercel without a Role, we need explicit keys.
+    // In Lambda, we can proceed as long as the SES client was initialized (which it is).
+    // The SDK will throw a real error if SendEmailCommand fails due to missing perms.
+    if (!process.env.PLATFORM_AWS_ACCESS_KEY_ID && !process.env.AWS_LAMBDA_FUNCTION_NAME) {
+        console.warn('[REPORTER] No AWS credentials or Lambda environment found — skipping email send.');
         console.log(`[REPORTER] Report generated for ${clientName} (would send to ${recipientEmail}).`);
         return { sent: false, reason: 'no_credentials' };
     }
