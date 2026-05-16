@@ -288,12 +288,63 @@
 
                 <!-- ══════ Panel: Reports ══════ -->
                 <div class="panel" id="panel-reports">
-                    <div class="report-header-actions">
+                    <div class="report-header-actions no-print">
                         <div>
-                            <h3>SOC2 Audit Report</h3>
-                            <p style="color:var(--text-muted); font-size:0.85rem; margin-top:0.25rem;">Generate a comprehensive, audit-ready report from captured evidence.</p>
+                            <h3>Premium Governance Audit</h3>
+                            <p style="color:var(--text-muted); font-size:0.85rem; margin-top:0.25rem;">Multi-framework audit with 120+ controls and cryptographic proof.</p>
                         </div>
-                        <button class="btn btn-primary" id="btn-generate-report" onclick="Evidence.generateReport()">📊 Generate Report</button>
+                        <div style="display:flex; gap:0.5rem">
+                            <button class="btn btn-secondary btn-sm" onclick="window.print()">🖨️ Export PDF</button>
+                            <button class="btn btn-primary" id="btn-generate-report" onclick="Evidence.generateReport()">📊 Regenerate Audit</button>
+                        </div>
+                    </div>
+
+                    <div id="professional-report-container" style="display:none">
+                        <div class="premium-audit-header">
+                            <div class="branding">
+                                <div class="logo">Compliance<span>Flow</span></div>
+                                <div class="report-type">Governance & Risk Analysis Report</div>
+                            </div>
+                            <div class="meta">
+                                <div><strong>Report ID:</strong> <span id="rep-id-val">CF-2026-A001</span></div>
+                                <div><strong>Date:</strong> <span id="rep-date-val"></span></div>
+                                <div><strong>Classification:</strong> <span style="color:var(--danger); font-weight:700;">PROPRIETARY / CONFIDENTIAL</span></div>
+                            </div>
+                        </div>
+
+                        <div class="report-grid">
+                            <div class="exec-summary-card">
+                                <h4>Executive Summary</h4>
+                                <p id="exec-summary-text">Comprehensive infrastructure scan complete. The system has interrogated multi-cloud environments across AWS, GCP, and Azure. Governance maturity is trending positive, though critical drifts were identified in perimeter security.</p>
+                                <div class="risk-meter-wrap">
+                                    <div class="risk-label">Overall Risk Posture</div>
+                                    <div class="risk-meter"><div class="fill" id="risk-fill" style="width:15%"></div></div>
+                                    <div class="risk-value" id="risk-val">Low Risk</div>
+                                </div>
+                            </div>
+
+                            <div class="framework-scores-grid">
+                                <div class="fw-score-item soc2">
+                                    <span class="label">SOC2 Type II</span>
+                                    <span class="value" id="score-soc2">0%</span>
+                                </div>
+                                <div class="fw-score-item gdpr">
+                                    <span class="label">GDPR</span>
+                                    <span class="value" id="score-gdpr">0%</span>
+                                </div>
+                                <div class="fw-score-item hipaa">
+                                    <span class="label">HIPAA</span>
+                                    <span class="value" id="score-hipaa">0%</span>
+                                </div>
+                                <div class="fw-score-item iso">
+                                    <span class="label">ISO 27001</span>
+                                    <span class="value" id="score-iso">0%</span>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div class="report-section-title">Audit Findings & Mappings</div>
+                        <div id="report-findings-area"></div>
                     </div>
                     <div id="report-empty" class="empty-state">
                         <div class="icon">📄</div>

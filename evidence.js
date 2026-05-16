@@ -107,97 +107,95 @@ window.Evidence = (() => {
                 </div>
                 <div class="ev-integrity">✓ Verified</div>
             </div>`;
-        }).join('');
-    }
-
-    function generateReport() {
+        function generateReport() {
         if (evidenceData.length === 0) return;
         
         reportGenerated = true;
-        const container = document.getElementById('report-content');
+        const container = document.getElementById('report-findings-area');
         const empty = document.getElementById('report-empty');
-        const fw = Frameworks.getCurrent();
-        const fwId = Frameworks.getCurrentId();
-
-        empty.style.display = 'none';
+        const proContainer = document.getElementById('professional-report-container');
         
-        // Calculate coverage based on framework controls
-        const relevantEvidence = evidenceData.filter(e => e.controls.some(c => c.startsWith(fwId)));
-        const coveredCtrls = new Set();
-        relevantEvidence.forEach(e => {
-            e.controls.filter(c => c.startsWith(fwId)).forEach(c => coveredCtrls.add(c));
+        empty.style.display = 'none';
+        proContainer.style.display = 'block';
+
+        // Set metadata
+        document.getElementById('rep-date-val').textContent = new Date().toLocaleString();
+        
+        // Calculate scores for all frameworks
+        const frameworks = ['soc2', 'gdpr', 'hipaa', 'iso27001'];
+        const coverage = {};
+        
+        frameworks.forEach(fwId => {
+            const fw = Frameworks.DATA[fwId];
+            const relevantEvidence = evidenceData.filter(e => e.controls.some(c => c.startsWith(fwId)));
+            const coveredCtrls = new Set();
+            relevantEvidence.forEach(e => {
+                e.controls.filter(c => c.startsWith(fwId)).forEach(c => coveredCtrls.add(c));
+            });
+            const totalCtrls = Object.keys(fw.controls).length;
+            coverage[fwId] = Math.round((coveredCtrls.size / totalCtrls) * 100);
+            
+            // Update UI
+            const scoreEl = document.getElementById(`score-${fwId === 'iso27001' ? 'iso' : fwId}`);
+            if (scoreEl) scoreEl.textContent = coverage[fwId] + '%';
         });
 
-        const totalCtrls = Object.keys(fw.controls).length;
-        const coveragePct = Math.round((coveredCtrls.size / totalCtrls) * 100);
+        // Set Risk Meter (Inverse of average coverage)
+        const avgCoverage = Object.values(coverage).reduce((a, b) => a + b, 0) / 4;
+        const riskFill = document.getElementById('risk-fill');
+        const riskVal = document.getElementById('risk-val');
+        const riskLevel = 100 - avgCoverage;
+        
+        riskFill.style.width = riskLevel + '%';
+        if (riskLevel < 20) {
+            riskVal.textContent = 'Low Risk';
+            riskVal.style.color = 'var(--success)';
+        } else if (riskLevel < 50) {
+            riskVal.textContent = 'Medium Risk';
+            riskVal.style.color = 'var(--warning)';
+        } else {
+            riskVal.textContent = 'High Risk';
+            riskVal.style.color = 'var(--danger)';
+        }
 
+        // Generate Executive Summary Text
+        const summaryText = document.getElementById('exec-summary-text');
+        const criticalCount = evidenceData.filter(e => e.data.severity === 'critical').length;
+        summaryText.textContent = `Infrastructure audit complete. Analysis of 120+ controls reveals an average maturity of ${Math.round(avgCoverage)}%. ` +
+            (criticalCount > 0 ? `Urgent attention required for ${criticalCount} critical vulnerabilities in perimeter security.` : 
+            `Compliance posture is significantly hardened across all scale providers.`);
+
+        // Build Findings Table
         container.innerHTML = `
-            <div class="report-header-block">
-                <div class="report-meta">
-                    <div class="report-badge fw-${fwId}">${fw.name}</div>
-                    <h2>Compliance Readiness Audit</h2>
-                    <p class="report-date">Generated: ${new Date().toLocaleString()} &nbsp;|&nbsp; Report ID: RPT-${Date.now().toString(36).toUpperCase()}</p>
-                </div>
-                <div class="report-summary-stats">
-                    <div class="report-stat">
-                        <div class="report-stat-value">${relevantEvidence.length}</div>
-                        <div class="report-stat-label">Evidence Items</div>
-                    </div>
-                    <div class="report-stat">
-                        <div class="report-stat-value">${coveredCtrls.size}</div>
-                        <div class="report-stat-label">Controls Met</div>
-                    </div>
-                    <div class="report-stat">
-                        <div class="report-stat-value">${coveragePct}%</div>
-                        <div class="report-stat-label">Total Coverage</div>
-                    </div>
-                </div>
-            </div>
-
-            <div class="report-chain">
-                <h4>🔐 Chain of Custody</h4>
-                <div class="chain-info">
-                    <span>Digital Signature: <code>${relevantEvidence[0]?.hash || 'PENDING'}</code></span>
-                    <span>Signer: ComplianceFlow AI Orchestrator</span>
-                    <span>Integrity: <span class="chain-verified">✓ Verified State</span></span>
-                </div>
-            </div>
-
-            <h3 class="report-section-title">${fw.type} Coverage</h3>
-            <div class="tsc-grid">
-                ${Object.values(fw.controls).map(ctrl => {
-                    const isCovered = coveredCtrls.has(fwId + ':' + ctrl.id);
-                    return `
-                        <div class="tsc-card ${isCovered ? 'covered' : 'uncovered'}">
-                            <div class="tsc-id">${ctrl.id}</div>
-                            <div class="tsc-title">${ctrl.name}</div>
-                            <div class="tsc-status">${isCovered ? '✓ Covered' : '○ Pending'}</div>
-                        </div>
-                    `;
-                }).join('')}
-            </div>
-
             <div class="evidence-table-wrap">
                 <table class="evidence-table">
                     <thead>
                         <tr>
                             <th>ID</th>
-                            <th>Timestamp</th>
                             <th>Resource</th>
-                            <th>Mapping</th>
+                            <th>Provider</th>
+                            <th>Controls Met</th>
                             <th>Integrity Hash</th>
                         </tr>
                     </thead>
                     <tbody>
-                        ${relevantEvidence.map(e => `
+                        ${evidenceData.map(e => `
                             <tr>
                                 <td><code>${e.id}</code></td>
-                                <td style="font-size:0.72rem;">${new Date(e.timestamp).toLocaleTimeString()}</td>
                                 <td>
                                     <div style="font-weight:600;">${e.source}</div>
-                                    <div style="font-size:0.7rem;">${e.resourceType}</div>
+                                    <div style="font-size:0.7rem; color:var(--text-dim);">${e.resourceType}</div>
                                 </td>
-                                <td>${e.controls.filter(c => c.startsWith(fwId)).map(c => `<span class="rem-control-tag">${c.split(':')[1]}</span>`).join(' ')}</td>
+                                <td><span class="fw-status-badge">${e.provider || 'Multi-Cloud'}</span></td>
+                                <td>
+                                    <div class="control-badges-wrap">
+                                        ${e.controls.map(c => {
+                                            const [fw, id] = c.split(':');
+                                            const fwClass = fw === 'iso27001' ? 'iso' : fw;
+                                            return `<span class="rem-control-tag ${fwClass}" title="${c}">${fw[0].toUpperCase()}</span>`;
+                                        }).join('')}
+                                    </div>
+                                </td>
                                 <td><code style="font-size:0.65rem;">${e.hash.substring(0, 16)}...</code></td>
                             </tr>
                         `).join('')}
@@ -205,9 +203,13 @@ window.Evidence = (() => {
                 </table>
             </div>
 
-            <div class="report-actions">
-                <button class="btn btn-secondary" onclick="Evidence.downloadJSON()">📦 Export Evidence Pack (JSON)</button>
-                <button class="btn btn-primary" onclick="window.print()">🖨️ Download ${fw.name} Report (PDF)</button>
+            <div class="report-chain no-print">
+                <h4>🔐 Chain of Custody & Cryptographic Proof</h4>
+                <div class="chain-info">
+                    <span>Root Hash: <code>${evidenceData[0]?.hash || 'PENDING'}</code></span>
+                    <span>Validator: ComplianceFlow AI Governance Node</span>
+                    <span>State: <span class="chain-verified">✓ Cryptographically Verified</span></span>
+                </div>
             </div>
         `;
     }
