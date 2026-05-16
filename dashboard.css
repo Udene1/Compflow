@@ -70,7 +70,13 @@ body {
     display: flex;
     flex-direction: column;
     gap: 2px;
+    overflow-y: auto;
+    scrollbar-width: thin;
+    scrollbar-color: var(--glass-border) transparent;
 }
+
+.sidebar-nav::-webkit-scrollbar { width: 4px; }
+.sidebar-nav::-webkit-scrollbar-thumb { background: var(--glass-border); border-radius: 10px; }
 
 .nav-section-label {
     font-size: 0.65rem;
@@ -200,7 +206,12 @@ body {
     flex: 1;
     overflow-y: auto;
     padding: 2rem;
+    scrollbar-width: thin;
+    scrollbar-color: var(--glass-border) transparent;
 }
+
+.page-content::-webkit-scrollbar { width: 6px; }
+.page-content::-webkit-scrollbar-thumb { background: var(--glass-border); border-radius: 10px; }
 
 /* ─── Panels (pages) ─── */
 .panel { 
