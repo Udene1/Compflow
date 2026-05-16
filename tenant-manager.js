@@ -73,6 +73,32 @@ window.TenantManager = (() => {
                     <input type="text" id="onboard-role" placeholder="arn:aws:iam::...:role/ComplianceRole">
                 </div>
             `;
+        } else if (provider === 'gcp') {
+            container.innerHTML = `
+                <div class="input-group">
+                    <label>Service Account JSON Key</label>
+                    <textarea id="onboard-gcp-json" placeholder='{ "type": "service_account", ... }' style="height: 120px; font-family: monospace; font-size: 0.8rem;"></textarea>
+                </div>
+            `;
+        } else if (provider === 'azure') {
+            container.innerHTML = `
+                <div class="input-group">
+                    <label>Tenant ID / Directory ID</label>
+                    <input type="text" id="onboard-azure-tenant" placeholder="00000000-0000-...">
+                </div>
+                <div class="input-group">
+                    <label>Client ID / Application ID</label>
+                    <input type="text" id="onboard-azure-client" placeholder="00000000-0000-...">
+                </div>
+                <div class="input-group">
+                    <label>Client Secret</label>
+                    <input type="password" id="onboard-azure-secret" placeholder="••••••••">
+                </div>
+                <div class="input-group">
+                    <label>Subscription ID</label>
+                    <input type="text" id="onboard-azure-sub" placeholder="00000000-0000-...">
+                </div>
+            `;
         } else {
             container.innerHTML = `
                 <div class="input-group">
@@ -94,6 +120,18 @@ window.TenantManager = (() => {
             const roleArn = document.getElementById('onboard-role').value;
             if (!roleArn) return alert("Role ARN is required");
             credentials = { roleArn };
+        } else if (provider === 'gcp') {
+            const jsonKey = document.getElementById('onboard-gcp-json').value;
+            if (!jsonKey) return alert("GCP JSON Key is required");
+            try { JSON.parse(jsonKey); } catch(e) { return alert("Invalid JSON format"); }
+            credentials = { serviceAccountJson: jsonKey };
+        } else if (provider === 'azure') {
+            const tenantId = document.getElementById('onboard-azure-tenant').value;
+            const clientId = document.getElementById('onboard-azure-client').value;
+            const clientSecret = document.getElementById('onboard-azure-secret').value;
+            const subscriptionId = document.getElementById('onboard-azure-sub').value;
+            if (!tenantId || !clientId || !clientSecret || !subscriptionId) return alert("All Azure fields are required");
+            credentials = { tenantId, clientId, clientSecret, subscriptionId };
         } else {
             const apiToken = document.getElementById('onboard-token').value;
             if (!apiToken) return alert("API Token is required");

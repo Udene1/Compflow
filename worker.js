@@ -27,6 +27,17 @@ export const handler = async (event) => {
             log.info(`[CREDENTIALS] Assuming AWS role ${client.roleArn}...`);
             credentials = await getClientCredentials(client.roleArn, client.id);
             log.info(`[CREDENTIALS] ✓ AWS session established.`);
+        } else if (client.provider === 'gcp') {
+            log.info(`[CREDENTIALS] Loading GCP Service Account...`);
+            credentials = { serviceAccountJson: client.serviceAccountJson };
+        } else if (client.provider === 'azure') {
+            log.info(`[CREDENTIALS] Loading Azure Service Principal...`);
+            credentials = { 
+                tenantId: client.tenantId, 
+                clientId: client.clientId, 
+                clientSecret: client.clientSecret, 
+                subscriptionId: client.subscriptionId 
+            };
         } else {
             log.info(`[CREDENTIALS] Using ${client.provider.toUpperCase()} API Token...`);
             credentials = { apiToken: client.apiToken };

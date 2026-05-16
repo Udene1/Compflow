@@ -317,6 +317,8 @@
                         <label>Cloud Provider</label>
                         <select id="onboard-provider" onchange="TenantManager.updateOnboardFields()">
                             <option value="aws">Amazon Web Services (AWS)</option>
+                            <option value="gcp">Google Cloud Platform (GCP)</option>
+                            <option value="azure">Microsoft Azure</option>
                             <option value="hetzner">Hetzner Cloud</option>
                             <option value="digitalocean">DigitalOcean</option>
                         </select>
@@ -366,8 +368,8 @@
                         <label>Provider</label>
                         <select id="setting-provider">
                             <option value="aws">Amazon Web Services (AWS)</option>
-                            <option value="gcp" disabled>Google Cloud Platform (Coming Soon)</option>
-                            <option value="azure" disabled>Microsoft Azure (Coming Soon)</option>
+                            <option value="gcp">Google Cloud Platform (GCP)</option>
+                            <option value="azure">Microsoft Azure</option>
                         </select>
                     </div>
 
@@ -394,6 +396,8 @@
             </div>
         </div>
     </div>
+
+    <div id="toast-container"></div>
 
     <script src="live-terminal.js"></script>
     <script src="tenant-manager.js"></script>
@@ -444,6 +448,7 @@
         }
 
         async function runShowcase() {
+            if (typeof showToast !== 'function') return;
             showToast("🎬 Starting Platform Showcase...");
             const sequence = ['connect', 'tenants', 'scan', 'remediate', 'terminal', 'evidence', 'reports'];
             for (const p of sequence) {
@@ -453,10 +458,12 @@
                     navItems.forEach(n => n.classList.remove('active'));
                     nav.classList.add('active');
                 }
-                await new Promise(r => setTimeout(r, 1200));
+                await new Promise(r => setTimeout(r, 1500));
             }
             showToast("✨ Showcase Complete.");
+            await new Promise(r => setTimeout(r, 1000));
             switchPanel('connect');
+            navItems.forEach(n => n.classList.remove('active'));
             document.getElementById('nav-connect').classList.add('active');
         }
 
@@ -482,13 +489,21 @@
             if (window.Scanner) Scanner.updateScore();
             if (window.Evidence) Evidence.refreshView();
         }
+
         function showToast(msg) {
             const container = document.getElementById('toast-container');
+            if (!container) {
+                console.error("Toast container missing");
+                return;
+            }
             const toast = document.createElement('div');
             toast.className = 'toast';
             toast.textContent = msg;
             container.appendChild(toast);
-            setTimeout(() => toast.remove(), 3000);
+            setTimeout(() => {
+                toast.style.opacity = '0';
+                setTimeout(() => toast.remove(), 500);
+            }, 3000);
         }
 
         window.showToast = showToast;
