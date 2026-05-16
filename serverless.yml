@@ -34,21 +34,6 @@ provider:
             - "dynamodb:UpdateItem"
           Resource:
             - "arn:aws:dynamodb:${opt:region, 'us-east-1'}:*:table/ComplianceFlowClients"
-
-resources:
-  Resources:
-    ClientsTable:
-      Type: AWS::DynamoDB::Table
-      Properties:
-        TableName: ComplianceFlowClients
-        AttributeDefinitions:
-          - AttributeName: id
-            AttributeType: S
-        KeySchema:
-          - AttributeName: id
-            KeyType: HASH
-        BillingMode: PAY_PER_REQUEST
-
         - Effect: "Allow"
           Action:
             - "sqs:SendMessage"
