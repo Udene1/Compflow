@@ -161,12 +161,36 @@
                 <div class="panel" id="panel-scan">
                     <div class="scan-header">
                         <h3>Resource Scanner</h3>
-                        <div style="display:flex; gap:0.5rem; align-items:center;">
+                        <div style="display:flex; gap:0.5rem; align-items:center; flex-wrap:wrap;">
                             <input type="email" id="scan-report-email" placeholder="Email reports to..." class="btn btn-secondary btn-sm" style="width:180px; text-transform:none; cursor:text; background:rgba(255,255,255,0.02)">
                             <button class="btn btn-secondary btn-sm" onclick="Scanner.simulateDrift()">🧪 Simulate Drift</button>
                             <button class="btn btn-primary" id="btn-start-scan">Start Scan</button>
                         </div>
                     </div>
+
+                    <!-- Continuous Monitoring Controls -->
+                    <div class="monitor-bar" id="monitor-bar">
+                        <div class="monitor-left">
+                            <span id="monitor-status" class="monitor-badge">○ OFF</span>
+                            <span class="monitor-label">Continuous Monitoring</span>
+                        </div>
+                        <div class="monitor-right">
+                            <select id="monitor-schedule" class="monitor-select" onchange="DriftEngine.setSchedule(this.value)">
+                                <option value="15s">Demo (15s)</option>
+                                <option value="5m">Every 5 min</option>
+                                <option value="30m">Every 30 min</option>
+                                <option value="1h">Hourly</option>
+                                <option value="6h" selected>Every 6 hours</option>
+                                <option value="12h">Every 12 hours</option>
+                                <option value="24h">Daily</option>
+                            </select>
+                            <button class="btn btn-secondary btn-sm" onclick="DriftEngine.toggleAutopilot(!DriftEngine.isActive())">
+                                <span id="monitor-toggle-text">▶ Start</span>
+                            </button>
+                        </div>
+                    </div>
+
+                    <div class="monitor-history" id="monitor-history"></div>
 
                     <!-- Framework Maturity Matrix -->
                     <div class="maturity-grid" id="maturity-grid" style="display:none">
