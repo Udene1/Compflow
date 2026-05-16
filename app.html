@@ -477,7 +477,7 @@
         </div>
     </div>
 
-    <div id="toast-container"></div>
+
 
     <script src="live-terminal.js"></script>
     <script src="tenant-manager.js"></script>
@@ -487,7 +487,7 @@
     <script src="scanner.js"></script>
     <script src="remediation.js"></script>
     <script src="drift-engine.js"></script>
-    <script src="chat-engine.js"></script>
+
     <script>
         // ─── Navigation ───
         const navItems = document.querySelectorAll('.nav-item');
@@ -581,13 +581,35 @@
             if (window.Scanner) Scanner.updateScore();
             if (window.Evidence) Evidence.refreshView();
         }
+    </script>
 
+    <!-- ─── AI Chat Interrogation Drawer ─── -->
+    <button id="chat-toggle" class="chat-toggle no-print" onclick="ChatEngine.toggle()">
+        <span class="icon">🤖</span> AI Assistant
+    </button>
+
+    <div class="chat-drawer no-print" id="chat-drawer">
+        <div class="chat-header">
+            <div class="chat-title">Governance Architect AI</div>
+            <button class="chat-close" onclick="ChatEngine.toggle()">✕</button>
+        </div>
+        <div class="chat-messages" id="chat-messages">
+            <div class="chat-msg system">
+                Greetings. I am your Cloud Governance Architect. I have live access to your scan data and compliance evidence. How can I assist you with your infrastructure audit today?
+            </div>
+        </div>
+        <div class="chat-input-area">
+            <textarea id="chat-input" placeholder="Ask about your infrastructure..." rows="1"></textarea>
+            <button id="chat-send" onclick="ChatEngine.send()">🚀</button>
+        </div>
+    </div>
+
+    <div id="toast-container" class="toast-container"></div>
+    <script src="chat-engine.js"></script>
+    <script>
         function showToast(msg) {
             const container = document.getElementById('toast-container');
-            if (!container) {
-                console.error("Toast container missing");
-                return;
-            }
+            if (!container) return;
             const toast = document.createElement('div');
             toast.className = 'toast';
             toast.textContent = msg;
@@ -596,6 +618,13 @@
                 toast.style.opacity = '0';
                 setTimeout(() => toast.remove(), 500);
             }, 3000);
+        }
+
+        function toggleMobileSidebar() {
+            const sidebar = document.querySelector('.sidebar');
+            const overlay = document.getElementById('sidebar-overlay');
+            if (sidebar) sidebar.classList.toggle('open');
+            if (overlay) overlay.classList.toggle('active');
         }
 
         window.showToast = showToast;

@@ -1,11 +1,10 @@
 /**
- * ComplianceFlow AI | Chat Engine
- * Handles Infrastructure Interrogation via Gemini
+ * ComplianceFlow AI | Chat Interrogation Engine
+ * Governance Architect AI — Conversational Cloud Intelligence
  */
 
 const ChatEngine = {
     isOpen: false,
-    messages: [],
 
     toggle() {
         this.isOpen = !this.isOpen;
@@ -14,12 +13,52 @@ const ChatEngine = {
         
         if (this.isOpen) {
             drawer.classList.add('open');
-            toggle.style.background = 'var(--text-muted)';
+            if (toggle) toggle.style.background = 'var(--secondary)';
             document.getElementById('chat-input').focus();
         } else {
             drawer.classList.remove('open');
-            toggle.style.background = 'var(--primary)';
+            if (toggle) toggle.style.background = 'var(--primary)';
         }
+    },
+
+    // Assemble live infrastructure context from dashboard state
+    _getContext() {
+        const resources = window.Scanner ? Scanner.getResources() : [];
+        const fw = window.Frameworks ? Frameworks.getCurrent() : { name: 'SOC2 Type II' };
+        const score = document.getElementById('sidebar-score')?.textContent || 'N/A';
+
+        // Get maturity data from DOM
+        const maturityData = ['soc2', 'gdpr', 'hipaa', 'iso'].map(id => {
+            const el = document.getElementById(`maturity-${id}`);
+            return el ? `- ${id.toUpperCase()}: ${el.textContent}` : null;
+        }).filter(Boolean).join('\n');
+
+        // Classify resources
+        const passing = resources.filter(r => r.severity === 'pass').length;
+        const warnings = resources.filter(r => r.severity === 'warning').length;
+        const critical = resources.filter(r => r.severity === 'critical').length;
+
+        // Get connected providers
+        const providers = window.CloudConnect ? CloudConnect.getProviders().join(', ') : 'None';
+
+        return {
+            providers,
+            totalResources: resources.length,
+            passing,
+            warnings,
+            critical,
+            readinessScore: score,
+            activeFramework: fw.name,
+            maturityScores: maturityData || 'Not yet calculated',
+            resources: resources.map(r => ({
+                name: r.name,
+                type: r.type,
+                region: r.region,
+                severity: r.severity,
+                issue: r.issue || 'No issues',
+                control: r.control || 'N/A'
+            }))
+        };
     },
 
     async send() {
@@ -27,40 +66,41 @@ const ChatEngine = {
         const query = input.value.trim();
         if (!query) return;
 
-        // Reset input
         input.value = '';
-
-        // Add user message
         this.addMessage('user', query);
-
-        // Add loading state
-        const loadingId = this.addMessage('ai', `<span class="spinner"></span> Consulting the Audit Brain...`);
+        const loadingId = this.addMessage('ai', `<span class="spinner"></span> Analyzing infrastructure...`);
 
         try {
-            // Collect context from existing objects
-            const contextData = {
-                resources: window.Scanner ? Scanner.allResources : [],
-                framework: window.Frameworks ? Frameworks.getCurrent() : 'SOC2',
-                readiness: document.getElementById('sidebar-score')?.textContent || '0%'
-            };
+            const context = this._getContext();
 
             const res = await fetch('/api/chat', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ query, contextData })
+                body: JSON.stringify({ query, context })
             });
 
             const data = await res.json();
             
             if (data.error) throw new Error(data.error);
 
-            // Update AI message
-            this.updateMessage(loadingId, data.response);
+            // Simple markdown rendering
+            const formatted = this._renderMarkdown(data.response);
+            this.updateMessage(loadingId, formatted);
 
         } catch (error) {
             console.error("[CHAT] Error:", error);
-            this.updateMessage(loadingId, "I'm having trouble accessing my audit logs right now. Please verify your connection settings.");
+            this.updateMessage(loadingId, "⚠️ I'm having trouble accessing the reasoning engine. Please verify your Gemini API key and try again.");
         }
+    },
+
+    _renderMarkdown(text) {
+        return text
+            .replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>')
+            .replace(/\*(.*?)\*/g, '<em>$1</em>')
+            .replace(/`(.*?)`/g, '<code>$1</code>')
+            .replace(/^- (.+)$/gm, '<li>$1</li>')
+            .replace(/(<li>.*<\/li>)/gs, '<ul>$1</ul>')
+            .replace(/\n/g, '<br>');
     },
 
     addMessage(role, text) {
@@ -71,10 +111,7 @@ const ChatEngine = {
         div.id = id;
         div.innerHTML = text;
         container.appendChild(div);
-        
-        // Scroll to bottom
         container.scrollTop = container.scrollHeight;
-        
         return id;
     },
 
@@ -87,5 +124,18 @@ const ChatEngine = {
         }
     }
 };
+
+// Enter key to send
+document.addEventListener('DOMContentLoaded', () => {
+    const input = document.getElementById('chat-input');
+    if (input) {
+        input.addEventListener('keydown', (e) => {
+            if (e.key === 'Enter' && !e.shiftKey) {
+                e.preventDefault();
+                ChatEngine.send();
+            }
+        });
+    }
+});
 
 window.ChatEngine = ChatEngine;
