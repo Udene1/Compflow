@@ -473,6 +473,36 @@ export default async function handler(req, res) {
             }
         }
 
+        // ── GCP Remediation ──
+        else if (provider === 'gcp') {
+            const { runRemediation } = await import('../core/providers/gcp.js');
+            result = await runRemediation(provider, credentials, resourceType, resourceName, issue);
+        }
+
+        // ── Azure Remediation ──
+        else if (provider === 'azure') {
+            const { runRemediation } = await import('../core/providers/azure.js');
+            result = await runRemediation(provider, credentials, resourceType, resourceName, issue);
+        }
+
+        // ── Hetzner / DigitalOcean ──
+        else if (provider === 'hetzner' || provider === 'digitalocean') {
+            result = {
+                success: true,
+                advisory: true,
+                message: `ADVISORY: Automated remediation for ${provider.toUpperCase()} "${resourceType}" is not yet available. Configure manually via the ${provider} console.`
+            };
+        }
+
+        // ── Unknown Provider ──
+        else {
+            result = {
+                success: true,
+                advisory: true,
+                message: `ADVISORY: Provider "${provider}" is not recognized. No automated remediation available.`
+            };
+        }
+
         res.status(200).json(result);
     } catch (error) {
         console.error('Remediation Error:', error);

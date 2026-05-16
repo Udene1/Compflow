@@ -413,6 +413,204 @@ Note: "ADVISORY — $3,000/mo subscription required"`
   tracingEnabled: true
   metricsEnabled: true`
             }
+        },
+
+        // ── GCP Resource Diffs ──
+        'GCP Firewall': {
+            '0.0.0.0/0 allowed on port 22': {
+                before: `gcloud compute firewall-rules describe allow-all-ingress:
+  sourceRanges: ["0.0.0.0/0"]
+  allowed:
+    - IPProtocol: tcp
+      ports: ["22"]
+  direction: INGRESS`,
+                after: `gcloud compute firewall-rules update allow-all-ingress:
+  sourceRanges: ["10.128.0.0/9"]
+  allowed:
+    - IPProtocol: tcp
+      ports: ["22"]
+  direction: INGRESS
+  # SSH restricted to internal VPC CIDR`
+            }
+        },
+        'GCP Instance': {
+            'External IP address assigned': {
+                before: `networkInterfaces:
+  - accessConfigs:
+      - name: "External NAT"
+        type: ONE_TO_ONE_NAT
+        natIP: 35.202.xxx.xxx`,
+                after: `networkInterfaces:
+  - accessConfigs: []
+    # External IP removed
+    # Use Cloud NAT for outbound traffic
+    # Use IAP for SSH access`
+            }
+        },
+        'GCP CloudSQL': {
+            'Public IP enabled': {
+                before: `settings:
+  ipConfiguration:
+    ipv4Enabled: true
+    authorizedNetworks:
+      - value: "0.0.0.0/0"`,
+                after: `settings:
+  ipConfiguration:
+    ipv4Enabled: false
+    privateNetwork: "projects/myproj/global/networks/prod-vpc"
+    requireSsl: true`
+            }
+        },
+        'GCP Bucket': {
+            'Object versioning disabled': {
+                before: `gsutil versioning get gs://cf-audit-logs-private:
+  Suspended`,
+                after: `gsutil versioning set on gs://cf-audit-logs-private:
+  Enabled`
+            }
+        },
+        'GCP IAM': {
+            'Default Service Account has Editor role': {
+                before: `gcloud projects get-iam-policy:
+  bindings:
+    - role: roles/editor
+      members:
+        - serviceAccount:default-sa@project.iam`,
+                after: `gcloud projects get-iam-policy:
+  bindings:
+    - role: roles/storage.objectViewer
+      members:
+        - serviceAccount:default-sa@project.iam
+    - role: roles/cloudsql.client
+      members:
+        - serviceAccount:default-sa@project.iam
+  # Least-privilege roles applied`
+            }
+        },
+        'GCP VPC': {
+            'VPC Flow Logs disabled': {
+                before: `subnetworks:
+  - name: "default"
+    enableFlowLogs: false`,
+                after: `subnetworks:
+  - name: "default"
+    enableFlowLogs: true
+    logConfig:
+      aggregationInterval: INTERVAL_5_SEC
+      flowSampling: 1.0
+      metadata: INCLUDE_ALL_METADATA`
+            }
+        },
+        'GCP KMS': {
+            'Key rotation disabled': {
+                before: `cryptoKeys:
+  - name: "kms-key-prod"
+    rotationPeriod: null
+    nextRotationTime: null`,
+                after: `cryptoKeys:
+  - name: "kms-key-prod"
+    rotationPeriod: "7776000s"  # 90 days
+    nextRotationTime: "2026-08-14T00:00:00Z"`
+            }
+        },
+
+        // ── Azure Resource Diffs ──
+        'Azure NSG': {
+            'Inbound rule': {
+                before: `az network nsg rule show:
+  name: AllowAnyCustom
+  sourceAddressPrefix: "*"
+  destinationPortRange: "*"
+  access: Allow
+  priority: 100`,
+                after: `az network nsg rule update:
+  name: AllowVNetOnly
+  sourceAddressPrefix: "10.0.0.0/8"
+  destinationPortRange: "443"
+  access: Allow
+  priority: 100
+  # Wildcard removed — VNet only`
+            }
+        },
+        'Azure VM': {
+            'Managed Identity not assigned': {
+                before: `az vm identity show:
+  type: None
+  # No managed identity assigned`,
+                after: `az vm identity assign:
+  type: SystemAssigned
+  principalId: "12345-abcde-67890"
+  tenantId: "tenant-uuid"
+  # RBAC-based auth enabled`
+            }
+        },
+        'Azure Storage': {
+            'Public blob access enabled': {
+                before: `az storage account show:
+  allowBlobPublicAccess: true
+  minimumTlsVersion: TLS1_0`,
+                after: `az storage account update:
+  allowBlobPublicAccess: false
+  minimumTlsVersion: TLS1_2
+  supportsHttpsTrafficOnly: true`
+            }
+        },
+        'Azure SQL': {
+            'Firewall allows 0.0.0.0': {
+                before: `az sql server firewall-rule list:
+  - name: "AllowAllAzureIps"
+    startIpAddress: "0.0.0.0"
+    endIpAddress: "0.0.0.0"`,
+                after: `az sql server firewall-rule delete:
+  # Removed "AllowAllAzureIps" rule
+  # Access via VNet Service Endpoints only
+  az sql server vnet-rule create:
+    - subnet: "prod-data-subnet"`
+            }
+        },
+        'Azure KeyVault': {
+            'Soft delete disabled': {
+                before: `az keyvault show:
+  properties:
+    enableSoftDelete: false
+    enablePurgeProtection: false`,
+                after: `az keyvault update:
+  properties:
+    enableSoftDelete: true
+    softDeleteRetentionInDays: 90
+    enablePurgeProtection: true`
+            }
+        },
+        'Azure Monitor': {
+            'No diagnostic settings configured': {
+                before: `az monitor diagnostic-settings list:
+  value: []
+  # No activity log export`,
+                after: `az monitor diagnostic-settings create:
+  logs:
+    - category: Administrative
+    - category: Security
+    - category: Alert
+    - category: Policy
+  workspaceId: "/subscriptions/.../logAnalytics"
+  retentionPolicy:
+    enabled: true
+    days: 365`
+            }
+        },
+        'Azure AD': {
+            'Conditional Access MFA not enforced': {
+                before: `Conditional Access Policies:
+  - AdminMFA: NOT_CONFIGURED
+  # No MFA requirement for admins`,
+                after: `Conditional Access Policies:
+  - name: "Require MFA for Admins"
+    state: enabled
+    conditions:
+      users: directoryRoles/GlobalAdministrator
+    grantControls:
+      builtInControls: ["mfa"]`
+            }
         }
     };
 
