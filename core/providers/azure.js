@@ -22,7 +22,7 @@ export async function runScan(provider, credentials) {
             icon: '🛡️',
             region: location,
             severity: 'critical',
-            control: 'CC6.6',
+            technicalId: 'SG_OPEN_SSH',
             issue: 'Inbound rule "AllowAnyCustom" allows 0.0.0.0/0'
         });
 
@@ -33,7 +33,7 @@ export async function runScan(provider, credentials) {
             icon: '💻',
             region: location,
             severity: 'pass',
-            control: 'CC6.1',
+            technicalId: null,
             issue: null
         });
 
@@ -44,7 +44,7 @@ export async function runScan(provider, credentials) {
             icon: '🗄️',
             region: location,
             severity: 'warning',
-            control: 'CC6.7',
+            technicalId: 'S3_PUBLIC',
             issue: 'Public blob access enabled'
         });
 

@@ -92,7 +92,8 @@ export async function runScan(provider, credentials) {
                     }
                     resources.push({
                         name: bucket.Name, type: 'S3 Bucket', icon: '🪣',
-                        region: config.region, severity, control: 'CC6.1', issue
+                        region: config.region, severity, 
+                        technicalId: severity === 'pass' ? null : 'S3_PUBLIC', issue
                     });
 
                     // Check: Versioning & MFA Delete
@@ -101,7 +102,8 @@ export async function runScan(provider, credentials) {
                         if (vRes.Status !== 'Enabled') {
                             resources.push({
                                 name: bucket.Name, type: 'S3 Bucket', icon: '🪣',
-                                region: config.region, severity: 'warning', control: 'CC7.2',
+                                region: config.region, severity: 'warning',
+                                technicalId: 'S3_VERSIONING',
                                 issue: 'Versioning not enabled'
                             });
                         }
@@ -120,7 +122,8 @@ export async function runScan(provider, credentials) {
                     } catch (e) {
                         resources.push({
                             name: bucket.Name, type: 'S3 Bucket', icon: '🪣',
-                            region: config.region, severity: 'warning', control: 'CC6.7',
+                            region: config.region, severity: 'warning',
+                            technicalId: 'S3_ENCRYPTION',
                             issue: 'Default encryption disabled'
                         });
                     }
@@ -164,7 +167,7 @@ export async function runScan(provider, credentials) {
                         name: sg.GroupName, type: 'Security Group', icon: '🛡️',
                         region: config.region, 
                         severity: isOpen ? 'critical' : 'pass',
-                        control: 'CC6.6',
+                        technicalId: isOpen ? 'SG_OPEN_SSH' : null,
                         issue: isOpen ? 'Allows 0.0.0.0/0 on port 22' : null
                     });
                 }
@@ -184,7 +187,7 @@ export async function runScan(provider, credentials) {
                         name: vpc.VpcId, type: 'VPC', icon: '🌐',
                         region: config.region,
                         severity: flowLogsEnabled ? 'pass' : 'warning',
-                        control: 'CC7.2',
+                        technicalId: flowLogsEnabled ? null : 'VPC_FLOW_LOGS',
                         issue: flowLogsEnabled ? null : 'Flow Logs disabled'
                     });
                 }

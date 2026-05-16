@@ -126,13 +126,24 @@ window.Scanner = (() => {
         const sevClass = res.severity === 'pass' ? 'pass' : res.severity === 'warning' ? 'warning' : 'critical';
         const sevLabel = res.severity === 'pass' ? '✓ Pass' : res.severity === 'warning' ? '⚠ Warning' : '✕ Critical';
 
+        // Generate control badges
+        let controlsHtml = '';
+        if (res.controls) {
+            if (res.controls.soc2) controlsHtml += `<span class="rem-control-tag soc2" title="SOC2: ${res.controls.soc2.join(', ')}">S</span> `;
+            if (res.controls.gdpr) controlsHtml += `<span class="rem-control-tag gdpr" title="GDPR: ${res.controls.gdpr.join(', ')}">G</span> `;
+            if (res.controls.hipaa) controlsHtml += `<span class="rem-control-tag hipaa" title="HIPAA: ${res.controls.hipaa.join(', ')}">H</span> `;
+            if (res.controls.iso27001) controlsHtml += `<span class="rem-control-tag iso" title="ISO 27001: ${res.controls.iso27001.join(', ')}">I</span> `;
+        } else {
+            controlsHtml = `<span class="rem-control-tag">${res.control || 'N/A'}</span>`;
+        }
+
         tr.innerHTML = `
             <td><div class="resource-name">${res.icon} ${res.name}</div>
                 <div style="font-size:0.72rem; color:var(--text-dim); margin-top:2px;">${res.issue || 'No issues'}</div></td>
             <td><span class="resource-type">${res.type}</span></td>
             <td style="color:var(--text-muted); font-size:0.82rem;">${res.region}</td>
             <td><span class="severity-badge ${sevClass}">${sevLabel}</span></td>
-            <td><span class="rem-control-tag">${res.control}</span></td>
+            <td><div class="control-badges-wrap">${controlsHtml}</div></td>
         `;
         tbody.appendChild(tr);
     }
@@ -144,6 +155,34 @@ window.Scanner = (() => {
         document.getElementById('stat-warn').textContent = counts.warn;
         document.getElementById('stat-crit').textContent = counts.crit;
         
+        // Maturity Matrix Calculation
+        const maturity = { soc2: 42, gdpr: 31, hipaa: 26, iso27001: 35 };
+        const failures = { soc2: 0, gdpr: 0, hipaa: 0, iso27001: 0 };
+
+        scannedResources.forEach(res => {
+            if (res.severity !== 'pass' && res.controls) {
+                if (res.controls.soc2) failures.soc2 += res.controls.soc2.length;
+                if (res.controls.gdpr) failures.gdpr += res.controls.gdpr.length;
+                if (res.controls.hipaa) failures.hipaa += res.controls.hipaa.length;
+                if (res.controls.iso27001) failures.iso27001 += res.controls.iso27001.length;
+            }
+        });
+
+        const updateMaturity = (id, total, failed) => {
+            const passed = Math.max(0, total - failed);
+            const percent = Math.round((passed / total) * 100);
+            const el = document.getElementById(`maturity-${id}`);
+            const fill = document.getElementById(`fill-${id}`);
+            if (el) el.textContent = `${passed}/${total}`;
+            if (fill) fill.style.width = `${percent}%`;
+        };
+
+        document.getElementById('maturity-grid').style.display = 'grid';
+        updateMaturity('soc2', 42, failures.soc2);
+        updateMaturity('gdpr', 31, failures.gdpr);
+        updateMaturity('hipaa', 26, failures.hipaa);
+        updateMaturity('iso', 35, failures.iso27001);
+
         const badge = document.getElementById('issues-badge');
         const issues = scannedResources.filter(r => r.severity !== 'pass');
         if (issues.length > 0) {

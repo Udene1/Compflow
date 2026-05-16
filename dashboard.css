@@ -804,11 +804,25 @@ body {
 
 .rem-control-tag {
     font-family: var(--font-mono);
-    font-size: 0.7rem;
-    color: var(--primary);
-    background: rgba(99, 102, 241, 0.1);
-    padding: 0.2rem 0.5rem;
-    border-radius: 6px;
+    font-size: 0.65rem;
+    font-weight: 800;
+    padding: 2px 6px;
+    border-radius: 4px;
+    background: rgba(255,255,255,0.08);
+    color: var(--text-muted);
+    border: 1px solid var(--glass-border);
+    display: inline-block;
+}
+
+.rem-control-tag.soc2 { background: rgba(59, 130, 246, 0.15); color: #60a5fa; border-color: rgba(59, 130, 246, 0.3); }
+.rem-control-tag.gdpr { background: rgba(16, 185, 129, 0.15); color: #34d399; border-color: rgba(16, 185, 129, 0.3); }
+.rem-control-tag.hipaa { background: rgba(245, 158, 11, 0.15); color: #fbbf24; border-color: rgba(245, 158, 11, 0.3); }
+.rem-control-tag.iso { background: rgba(139, 92, 246, 0.15); color: #a78bfa; border-color: rgba(139, 92, 246, 0.3); }
+
+.control-badges-wrap {
+    display: flex;
+    gap: 4px;
+    flex-wrap: wrap;
 }
 
 .rem-card-actions {
@@ -993,6 +1007,61 @@ body {
     background-clip: text;
     -webkit-text-fill-color: transparent;
 }
+
+/* ─── Maturity Matrix ─── */
+.maturity-grid {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 1rem;
+    margin-bottom: 2rem;
+}
+
+.maturity-card {
+    background: var(--glass);
+    border: 1px solid var(--glass-border);
+    border-radius: 16px;
+    padding: 1.25rem;
+    position: relative;
+    overflow: hidden;
+}
+
+.maturity-card .label {
+    font-size: 0.65rem;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+    color: var(--text-dim);
+    margin-bottom: 0.5rem;
+    font-weight: 700;
+}
+
+.maturity-card .value {
+    font-size: 1.5rem;
+    font-weight: 800;
+    margin-bottom: 0.75rem;
+}
+
+.maturity-card.soc2 { border-left: 4px solid #3b82f6; }
+.maturity-card.gdpr { border-left: 4px solid #10b981; }
+.maturity-card.hipaa { border-left: 4px solid #f59e0b; }
+.maturity-card.iso { border-left: 4px solid #8b5cf6; }
+
+.progress-mini {
+    height: 4px;
+    background: rgba(255,255,255,0.05);
+    border-radius: 10px;
+    overflow: hidden;
+}
+
+.progress-mini .fill {
+    height: 100%;
+    width: 0%;
+    transition: width 1s ease;
+}
+
+.soc2 .fill { background: #3b82f6; }
+.gdpr .fill { background: #10b981; }
+.hipaa .fill { background: #f59e0b; }
+.iso .fill { background: #8b5cf6; }
 
 /* ─── Empty State ─── */
 .empty-state {
