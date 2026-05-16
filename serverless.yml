@@ -93,6 +93,15 @@ resources:
       Properties:
         QueueName: ComplianceFlowScanQueue
         VisibilityTimeout: 900 # Matches Lambda timeout
+        RedrivePolicy:
+          deadLetterTargetArn: !GetAtt ScanDLQ.Arn
+          maxReceiveCount: 3
+
+    ScanDLQ:
+      Type: AWS::SQS::Queue
+      Properties:
+        QueueName: ComplianceFlowScanDLQ
+        MessageRetentionPeriod: 1209600 # 14 days
 
 package:
   patterns:

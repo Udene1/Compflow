@@ -3,6 +3,7 @@ import { runRemediation } from './core/remediator.js';
 import { evaluateWithGemini } from './core/gemini.js';
 import { getClientCredentials, validatePlatformEnv } from './core/credentials.js';
 import { loadClients } from './core/registry.js';
+import { saveAuditLog } from './core/audit.js';
 import { generateReport, generatePdfReport, sendReport } from './core/reporter.js';
 
 // Validate platform environment on startup
@@ -63,6 +64,17 @@ async function orchestratorLoop() {
                             anomaly.name, 
                             anomaly.issue
                         );
+
+                        // --- PERSIST AUDIT LOG ---
+                        await saveAuditLog(client.id, 'INFO', `REMEDIATED: ${anomaly.name}`, {
+                            resource: anomaly.name,
+                            type: anomaly.type,
+                            issue: anomaly.issue,
+                            decision: llmDecision.action,
+                            reason: llmDecision.reason,
+                            status: 'fixed'
+                        });
+
                         if (result.advisory) {
                             console.log(`[AGENT] ⚠️ Advisory: ${result.message}`);
                             escalatedCount++;
@@ -76,6 +88,13 @@ async function orchestratorLoop() {
                         console.error(`[AGENT] ❌ Fix failed: ${e.message}`);
                         escalatedCount++;
                         remediationDetails.push({ name: anomaly.name, issue: anomaly.issue, status: 'failed' });
+                        
+                        await saveAuditLog(client.id, 'ERROR', `FIX_FAILED: ${anomaly.name}`, {
+                            resource: anomaly.name,
+                            issue: anomaly.issue,
+                            error: e.message,
+                            status: 'failed'
+                        });
                     }
                 } else {
                     const reason = !client.autoRemediate 
@@ -84,6 +103,16 @@ async function orchestratorLoop() {
                     console.log(`[AGENT] ⏸ Escalating: ${anomaly.name} (${reason})`);
                     escalatedCount++;
                     remediationDetails.push({ name: anomaly.name, issue: anomaly.issue, status: 'escalated' });
+
+                    // --- PERSIST AUDIT LOG ---
+                    await saveAuditLog(client.id, 'WARN', `ESCALATED: ${anomaly.name}`, {
+                        resource: anomaly.name,
+                        type: anomaly.type,
+                        issue: anomaly.issue,
+                        decision: llmDecision.action,
+                        reason,
+                        status: 'escalated'
+                    });
                 }
             }
 

@@ -246,6 +246,16 @@
                             <div class="stat-value crit" id="stat-crit">0</div>
                         </div>
                     </div>
+                    <div id="audit-trail-section" class="audit-trail-section" style="display:none; margin-top:2rem; border-top:1px solid rgba(255,255,255,0.05); padding-top:1.5rem;">
+                        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:1rem;">
+                            <h4 style="color:var(--text-muted); font-size:0.9rem; text-transform:uppercase; letter-spacing:0.05em;">AI Governance Audit Trail</h4>
+                            <button class="btn btn-secondary btn-xs" onclick="AuditTrail.refresh()">🔄 Refresh Trace</button>
+                        </div>
+                        <div id="audit-trail-list" class="audit-trail-list">
+                            <!-- Audit logs will be injected here -->
+                        </div>
+                    </div>
+
                     <div id="scan-empty" class="empty-state">
                         <div class="icon">🔍</div>
                         <h3>No scan results yet</h3>
@@ -652,6 +662,58 @@
                 setTimeout(() => toast.remove(), 500);
             }, 3000);
         }
+
+        const AuditTrail = {
+            async refresh() {
+                const list = document.getElementById('audit-trail-list');
+                const section = document.getElementById('audit-trail-section');
+                const clientId = 'demo-client'; // In prod, this would come from the context
+                
+                try {
+                    const res = await fetch(`/api/audit?clientId=${clientId}`);
+                    const logs = await res.json();
+                    
+                    if (logs && logs.length > 0) {
+                        section.style.display = 'block';
+                        list.innerHTML = logs.map(log => `
+                            <div class="audit-item">
+                                <div class="audit-item-header">
+                                    <div class="audit-item-title">${log.message}</div>
+                                    <div class="audit-item-badge audit-badge-${log.level.toLowerCase()}">${log.level}</div>
+                                </div>
+                                <div class="audit-item-time">${new Date(log.timestamp).toLocaleString()}</div>
+                                <div class="audit-item-reason">${log.details?.reason || 'No additional reasoning provided.'}</div>
+                                <div class="audit-item-details">
+                                    <div class="audit-detail-cell">
+                                        <div class="label">Resource</div>
+                                        <div class="val">${log.details?.resource || 'N/A'}</div>
+                                    </div>
+                                    <div class="audit-detail-cell">
+                                        <div class="label">Decision</div>
+                                        <div class="val">${log.details?.decision || 'Escalated'}</div>
+                                    </div>
+                                    <div class="audit-detail-cell">
+                                        <div class="label">Status</div>
+                                        <div class="val">${log.details?.status || 'Active'}</div>
+                                    </div>
+                                </div>
+                            </div>
+                        `).join('');
+                    } else {
+                        section.style.display = 'none';
+                    }
+                } catch (e) {
+                    console.error('Failed to fetch audit trail:', e);
+                }
+            }
+        };
+
+        // Hook into scan completion
+        const originalUpdateScore = Scanner.updateScore;
+        Scanner.updateScore = function() {
+            originalUpdateScore.apply(this, arguments);
+            AuditTrail.refresh();
+        };
 
         function toggleMobileSidebar() {
             const sidebar = document.querySelector('.sidebar');
