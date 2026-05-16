@@ -3,7 +3,7 @@ import { runRemediation } from './core/remediator.js';
 import { evaluateWithGemini } from './core/gemini.js';
 import { getClientCredentials, validatePlatformEnv } from './core/credentials.js';
 import { loadClients } from './core/registry.js';
-import { generateReport, sendReport } from './core/reporter.js';
+import { generateReport, generatePdfReport, sendReport } from './core/reporter.js';
 
 // Validate platform environment on startup
 validatePlatformEnv();
@@ -96,10 +96,12 @@ async function orchestratorLoop() {
             };
             
             const reportHtml = generateReport(client.name, resources, remediationSummary);
-            console.log(`[REPORTER] Report generated. Summary: ${resolvedCount} resolved | ${escalatedCount} escalated.`);
+            const pdfBuffer = await generatePdfReport(client.name, resources);
+            
+            console.log(`[REPORTER] Report & PDF generated. Summary: ${resolvedCount} resolved | ${escalatedCount} escalated.`);
 
             if (client.email) {
-                await sendReport(client.email, client.name, reportHtml);
+                await sendReport(client.email, client.name, reportHtml, pdfBuffer);
             } else {
                 console.warn(`[REPORTER] No email configured for ${client.name} — skipping delivery.`);
             }

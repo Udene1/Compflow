@@ -19,7 +19,7 @@ provider:
         - Effect: "Allow"
           Action:
             - "sts:AssumeRole"
-          Resource: "*" # The cross-account client roles
+          Resource: "arn:aws:iam::*:role/ComplianceFlow-*" # Restricted to roles created via our CFN template
         - Effect: "Allow"
           Action:
             - "ses:SendEmail"
