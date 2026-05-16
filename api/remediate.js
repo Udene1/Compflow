@@ -18,7 +18,7 @@ export default async function handler(req, res) {
         return res.status(405).json({ error: 'Method Not Allowed' });
     }
 
-    const { credentials, provider, resourceType, resourceName, issue } = req.body;
+    const { credentials, provider, resourceType, resourceName, issue, dryRun } = req.body;
 
     const XOR_KEY = 'CompFlow_Guard_2026';
     function deobfuscate(encoded) {
@@ -36,6 +36,40 @@ export default async function handler(req, res) {
     }
 
     try {
+        // ── PHASE 1: Blast Radius Control (Auto-Fix Whitelist) ──
+        // Only low-risk, non-destructive actions are permitted for autonomous remediation.
+        // Dangerous actions (Networking, IAM, Elastic IPs) MUST escalate, even if the LLM hallucinated safety.
+        const SAFE_WHITELIST = {
+            'S3 Bucket': ['Public access', 'Versioning', 'Default encryption', 'Lifecycle'],
+            'CloudTrail': ['Log Validation', 'Not multi-region', 'Log encryption'],
+            'KMS Key': ['Rotation'],
+            'DynamoDB Table': ['PITR'],
+            'Log Group': ['retention', '< 365'],
+            'API Gateway Stage': ['X-Ray'],
+            'EC2 Instance': ['IMDSv2'],
+            'Threat Detection': ['disabled']
+        };
+
+        const isSafeParams = SAFE_WHITELIST[resourceType] && 
+                             SAFE_WHITELIST[resourceType].some(safeWord => issue.includes(safeWord));
+
+        if (!isSafeParams) {
+            return res.status(200).json({
+                success: true,
+                advisory: true,
+                message: `ADVISORY [BLAST RADIUS]: Auto-fixing "${issue}" on ${resourceType} is outside the safe whitelist. Escalated for human review.`
+            });
+        }
+
+        // ── PHASE 1: Dry-Run Mode ──
+        if (dryRun) {
+            console.log(`[DRY-RUN] ${provider.toUpperCase()} Remediation prevented for ${resourceType} "${resourceName}": ${issue}`);
+            return res.status(200).json({
+                success: true,
+                message: `[DRY-RUN] Validated safety. Would execute fix for ${resourceName}.`
+            });
+        }
+
         const config = {
             region: credentials.region || 'us-east-1',
             credentials: {

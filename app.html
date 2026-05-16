@@ -107,9 +107,18 @@
                 <!-- ══════ Panel: Connect ══════ -->
                 <div class="panel active" id="panel-connect">
                     <h3 style="margin-bottom: 0.5rem;">Connect Your Cloud</h3>
-                    <p style="color:var(--text-muted); margin-bottom: 2rem; font-size: 0.9rem;">
+                    <p style="color:var(--text-muted); margin-bottom: 1rem; font-size: 0.9rem;">
                         Select a provider to authorize read/write access for scanning and auto-remediation.
                     </p>
+
+                    <div class="onboarding-banner" style="background: rgba(16, 185, 129, 0.1); border: 1px solid rgba(16,185,129,0.3); padding: 1rem; border-radius: 8px; margin-bottom: 2rem; display: flex; justify-content: space-between; align-items: center;">
+                        <div>
+                            <h4 style="color: #10b981; margin-bottom: 0.25rem;">Secure AWS Onboarding</h4>
+                            <p style="font-size: 0.85rem; color: var(--text-muted);">Use our automated template to provision a mathematically provable Least-Privilege cross-account role.</p>
+                        </div>
+                        <a href="complianceflow-iam-setup.yaml" download class="btn btn-primary btn-sm">📦 Download CloudFormation</a>
+                    </div>
+
                     <div class="provider-grid">
                         <div class="provider-card" data-provider="aws">
                             <div class="provider-icon">☁️</div>

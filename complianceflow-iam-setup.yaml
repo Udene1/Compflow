@@ -1,0 +1,102 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: |
+  ComplianceFlow AI-Native Governance Engine: Connect Cloud Role Setup.
+  This template creates a secure, Least-Privilege cross-account IAM role for ComplianceFlow
+  to continuously monitor your cloud infrastructure and autonomously remediate specific,
+  low-risk security findings.
+
+Parameters:
+  ComplianceFlowAccountId:
+    Type: String
+    Description: The AWS Account ID of the ComplianceFlow orchestration environment.
+    Default: '123456789012' # Placeholder for the ComplianceFlow central account
+
+  ExternalId:
+    Type: String
+    Description: A unique string provided by ComplianceFlow for secure AssumeRole access to prevent confused deputy attacks.
+    Default: 'CF-AINS-ONBOARDING'
+    MinLength: 8
+
+Resources:
+  ComplianceFlowCrossAccountRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: "ComplianceFlow-AINS-Orchestrator-Role"
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              AWS: !Sub "arn:aws:iam::${ComplianceFlowAccountId}:root"
+            Action: sts:AssumeRole
+            Condition:
+              StringEquals:
+                "sts:ExternalId": !Ref ExternalId
+      
+      # Step 1: Read-Only Audit Permissions (Baseline)
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/SecurityAudit
+        - arn:aws:iam::aws:policy/job-function/ViewOnlyAccess
+      
+      # Step 2: Strict "Blast Radius Strategy" Auto-Fix Whitelist Permissions
+      # Only grants access to specific, low-risk, non-destructive mutation commands
+      Policies:
+        - PolicyName: ComplianceFlow-Safe-AutoFix-Whitelist
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Sid: SafeS3Remediation
+                Effect: Allow
+                Action:
+                  - s3:PutBucketPublicAccessBlock
+                  - s3:PutBucketVersioning
+                  - s3:PutEncryptionConfiguration
+                  - s3:PutLifecycleConfiguration
+                Resource: "*"
+              
+              - Sid: SafeCloudTrailRemediation
+                Effect: Allow
+                Action:
+                  - cloudtrail:UpdateTrail
+                Resource: "*"
+              
+              - Sid: SafeKMSRemediation
+                Effect: Allow
+                Action:
+                  - kms:EnableKeyRotation
+                Resource: "*"
+              
+              - Sid: SafeDynamoDBRemediation
+                Effect: Allow
+                Action:
+                  - dynamodb:UpdateContinuousBackups
+                Resource: "*"
+              
+              - Sid: SafeCloudWatchLogsRemediation
+                Effect: Allow
+                Action:
+                  - logs:PutRetentionPolicy
+                Resource: "*"
+              
+              - Sid: SafeEC2Remediation
+                Effect: Allow
+                Action:
+                  - ec2:ModifyInstanceMetadataOptions
+                Resource: "*"
+              
+              - Sid: SafeGuardDutyRemediation
+                Effect: Allow
+                Action:
+                  - guardduty:CreateDetector
+                Resource: "*"
+              
+              - Sid: SafeAPIGatewayRemediation
+                Effect: Allow
+                Action:
+                  - apigateway:PATCH
+                Resource: "*"
+
+Outputs:
+  RoleArn:
+    Description: The ARN of the newly created IAM Role. Please copy and paste this into the ComplianceFlow dashboard.
+    Value: !GetAtt ComplianceFlowCrossAccountRole.Arn

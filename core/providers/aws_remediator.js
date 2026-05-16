@@ -14,7 +14,7 @@ import { SQSClient, SetQueueAttributesCommand } from "@aws-sdk/client-sqs";
 import { SNSClient, SetTopicAttributesCommand } from "@aws-sdk/client-sns";
 import { log } from './logger.js';
 
-export async function runRemediation(provider, credentials, resourceType, resourceName, issue) {
+export async function runRemediation(provider, credentials, resourceType, resourceName, issue, dryRun = false) {
 
     const XOR_KEY = 'CompFlow_Guard_2026';
     function deobfuscate(encoded) {
@@ -32,6 +32,36 @@ export async function runRemediation(provider, credentials, resourceType, resour
     }
 
     try {
+        // ── PHASE 1: Blast Radius Control (Auto-Fix Whitelist) ──
+        // This protects the background orchestrator from risky LLM hallucinations
+        const SAFE_WHITELIST = {
+            'S3 Bucket': ['Public access', 'Versioning', 'Default encryption', 'Lifecycle'],
+            'CloudTrail': ['Log Validation', 'Not multi-region', 'Log encryption'],
+            'KMS Key': ['Rotation'],
+            'DynamoDB Table': ['PITR'],
+            'Log Group': ['retention', '< 365'],
+            'API Gateway Stage': ['X-Ray'],
+            'EC2 Instance': ['IMDSv2'],
+            'Threat Detection': ['disabled']
+        };
+
+        const isSafeParams = SAFE_WHITELIST[resourceType] && 
+                             SAFE_WHITELIST[resourceType].some(safeWord => issue.includes(safeWord));
+
+        if (!isSafeParams) {
+            log.info(`[BLAST RADIUS] Auto-fix blocked and escalated for ${resourceType} "${resourceName}": ${issue}`);
+            return {
+                success: true,
+                advisory: true,
+                message: `ADVISORY: Issue "${issue}" on ${resourceType} is outside the strict auto-fix whitelist. Escalated for human review.`
+            };
+        }
+
+        if (dryRun) {
+            log.info(`[DRY-RUN] Would fix ${resourceType} "${resourceName}": ${issue}`);
+            return { success: true, message: `[DRY-RUN] Validated safety. Would execute fix.` };
+        }
+
         const config = {
             region: credentials.region || 'us-east-1',
             credentials: {
