@@ -42,6 +42,8 @@
                 </div>
             </div>
 
+            <div class="sidebar-overlay" id="sidebar-overlay" onclick="toggleMobileSidebar()"></div>
+            
             <nav class="sidebar-nav">
                 <div class="nav-section-label">Infrastructure</div>
                 <a class="nav-item active" data-panel="connect" id="nav-connect">
@@ -88,6 +90,7 @@
         <!-- Main -->
         <main class="main-content">
             <div class="topbar">
+                <button class="mobile-toggle no-print" onclick="toggleMobileSidebar()">☰</button>
                 <div class="header-main">
                     <h2 id="page-title">Cloud Connect</h2>
                     <div id="active-fw-badge" class="fw-status-badge">SOC2 Type II</div>
@@ -512,8 +515,20 @@
                 // Highlight nav
                 navItems.forEach(n => n.classList.remove('active'));
                 item.classList.add('active');
+
+                // Close mobile sidebar on selection
+                if (window.innerWidth <= 768) {
+                    toggleMobileSidebar();
+                }
             });
         });
+
+        function toggleMobileSidebar() {
+            const sidebar = document.querySelector('.sidebar');
+            const overlay = document.getElementById('sidebar-overlay');
+            if (sidebar) sidebar.classList.toggle('open');
+            if (overlay) overlay.classList.toggle('active');
+        }
 
         function switchPanel(panelId) {
             panels.forEach(p => p.classList.remove('active'));
@@ -584,6 +599,7 @@
         }
 
         window.showToast = showToast;
+        window.toggleMobileSidebar = toggleMobileSidebar;
     </script>
 </body>
 </html>
