@@ -94,6 +94,7 @@
                 </div>
                 <div class="topbar-actions">
                     <div class="connection-chips" id="connection-chips"></div>
+                    <button class="btn btn-secondary btn-sm" onclick="runShowcase()">✨ Play Show</button>
                     <a href="index.html" class="btn btn-secondary btn-sm">← Landing Page</a>
                 </div>
             </div>
@@ -398,6 +399,7 @@
 
         const titles = {
             connect: 'Cloud Connect',
+            tenants: 'Governance Registry',
             scan: 'Resource Scanner',
             remediate: 'Remediation Center',
             terminal: 'Live Terminal',
@@ -407,16 +409,46 @@
 
         navItems.forEach(item => {
             item.addEventListener('click', () => {
-                if (item.classList.contains('fw-pill')) return; // ignore pills
                 const panel = item.dataset.panel;
                 if (!panel) return;
+                
+                // Switch panel
+                switchPanel(panel);
+                
+                // Highlight nav
                 navItems.forEach(n => n.classList.remove('active'));
-                panels.forEach(p => p.classList.remove('active'));
                 item.classList.add('active');
-                document.getElementById('panel-' + panel).classList.add('active');
-                pageTitle.textContent = titles[panel] || '';
             });
         });
+
+        function switchPanel(panelId) {
+            panels.forEach(p => p.classList.remove('active'));
+            const target = document.getElementById('panel-' + panelId);
+            if (target) {
+                target.classList.add('active');
+                pageTitle.textContent = titles[panelId] || 'ComplianceFlow';
+            }
+        }
+
+        async function runShowcase() {
+            showToast("🎬 Starting Platform Showcase...");
+            const sequence = ['connect', 'tenants', 'scan', 'remediate', 'terminal', 'evidence', 'reports'];
+            for (const p of sequence) {
+                switchPanel(p);
+                const nav = document.querySelector(`.nav-item[data-panel="${p}"]`);
+                if (nav) {
+                    navItems.forEach(n => n.classList.remove('active'));
+                    nav.classList.add('active');
+                }
+                await new Promise(r => setTimeout(r, 1200));
+            }
+            showToast("✨ Showcase Complete.");
+            switchPanel('connect');
+            document.getElementById('nav-connect').classList.add('active');
+        }
+
+        window.switchPanel = switchPanel;
+        window.runShowcase = runShowcase;
 
         function setGlobalFramework(id) {
             Frameworks.setFramework(id);
@@ -437,6 +469,16 @@
             if (window.Scanner) Scanner.updateScore();
             if (window.Evidence) Evidence.refreshView();
         }
+        function showToast(msg) {
+            const container = document.getElementById('toast-container');
+            const toast = document.createElement('div');
+            toast.className = 'toast';
+            toast.textContent = msg;
+            container.appendChild(toast);
+            setTimeout(() => toast.remove(), 3000);
+        }
+
+        window.showToast = showToast;
     </script>
 </body>
 </html>
