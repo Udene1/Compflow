@@ -29,7 +29,8 @@ async function orchestratorLoop() {
             console.log(`[CREDENTIALS] Assuming role ${client.roleArn}...`);
             let credentials;
             try {
-                credentials = await getClientCredentials(client.roleArn, client.id);
+                // Mandatory ExternalId to prevent Confused Deputy attacks
+                credentials = await getClientCredentials(client.roleArn, client.id, client.externalId);
                 console.log(`[CREDENTIALS] ✓ Temporary session established (1h TTL).`);
             } catch (e) {
                 console.error(`[CREDENTIALS] ❌ Failed to assume role for ${client.name}: ${e.message}`);

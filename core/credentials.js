@@ -22,17 +22,22 @@ const stsClient = new STSClient(stsConfig);
 
 /**
  * Assumes a client's cross-account IAM role and returns temporary credentials.
- * Each client creates an IAM Role (e.g. ComplianceFlowAudit) in their account
- * with a trust policy allowing our platform's AWS account to assume it.
+ * Mandatory ExternalId is used to prevent the "Confused Deputy" problem.
  * 
  * @param {string} roleArn - The client's IAM Role ARN
  * @param {string} clientId - Unique client identifier (used as session name)
+ * @param {string} externalId - Required unique external ID for this client
  * @returns {Promise<{accessKeyId: string, secretAccessKey: string, sessionToken: string}>}
  */
-export async function getClientCredentials(roleArn, clientId) {
+export async function getClientCredentials(roleArn, clientId, externalId) {
+    if (!externalId) {
+        throw new Error(`[SECURITY] Attempted AssumeRole for ${clientId} without ExternalId. Aborting to prevent Confused Deputy risk.`);
+    }
+
     const command = new AssumeRoleCommand({
         RoleArn: roleArn,
         RoleSessionName: `complianceflow-${clientId}-${Date.now()}`,
+        ExternalId: externalId,
         DurationSeconds: 3600, // 1 hour TTL
     });
 
