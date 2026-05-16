@@ -158,7 +158,8 @@
                 <div class="panel" id="panel-scan">
                     <div class="scan-header">
                         <h3>Resource Scanner</h3>
-                        <div style="display:flex; gap:0.5rem">
+                        <div style="display:flex; gap:0.5rem; align-items:center;">
+                            <input type="email" id="scan-report-email" placeholder="Email reports to..." class="btn btn-secondary btn-sm" style="width:180px; text-transform:none; cursor:text; background:rgba(255,255,255,0.02)">
                             <button class="btn btn-secondary btn-sm" onclick="Scanner.simulateDrift()">🧪 Simulate Drift</button>
                             <button class="btn btn-primary" id="btn-start-scan">Start Scan</button>
                         </div>

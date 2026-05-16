@@ -44,7 +44,7 @@ window.Scanner = (() => {
             const res = await fetch('/api/scan', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ provider, credentials })
+                body: JSON.stringify({ provider, credentials, email: document.getElementById('scan-report-email')?.value })
             });
             const data = await res.json();
             
@@ -110,7 +110,7 @@ window.Scanner = (() => {
             const res = await fetch('/api/scan', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ provider, credentials })
+                body: JSON.stringify({ provider, credentials, email: document.getElementById('scan-report-email')?.value })
             });
             const data = await res.json();
             return data.resources || [];
