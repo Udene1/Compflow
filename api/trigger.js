@@ -25,7 +25,7 @@ export default async function handler(req, res) {
 
         await sqs.send(new SendMessageCommand({
             QueueUrl: QUEUE_URL,
-            MessageBody: JSON.stringify(client)
+            MessageBody: JSON.stringify({ ...client, credentials: { ...client } }) // Pass client as creds for now, adapter will map it
         }));
 
         return res.status(200).json({ success: true, message: "Scan dispatched to queue." });

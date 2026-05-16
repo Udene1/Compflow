@@ -314,13 +314,26 @@
                 </div>
                 <div class="modal-body">
                     <div class="input-group">
-                        <label>Tenant Name</label>
-                        <input type="text" id="onboard-name" placeholder="e.g. Production AWS">
+                        <label>Cloud Provider</label>
+                        <select id="onboard-provider" onchange="TenantManager.updateOnboardFields()">
+                            <option value="aws">Amazon Web Services (AWS)</option>
+                            <option value="hetzner">Hetzner Cloud</option>
+                            <option value="digitalocean">DigitalOcean</option>
+                        </select>
                     </div>
                     <div class="input-group">
-                        <label>AWS Role ARN</label>
-                        <input type="text" id="onboard-role" placeholder="arn:aws:iam::...:role/ComplianceRole">
+                        <label>Tenant Name</label>
+                        <input type="text" id="onboard-name" placeholder="e.g. My GPU Hive">
                     </div>
+                    
+                    <!-- Dynamic Fields Container -->
+                    <div id="onboard-dynamic-fields">
+                        <div class="input-group">
+                            <label>AWS Role ARN</label>
+                            <input type="text" id="onboard-role" placeholder="arn:aws:iam::...:role/ComplianceRole">
+                        </div>
+                    </div>
+
                     <div class="input-group">
                         <label>Contact Email</label>
                         <input type="email" id="onboard-email" placeholder="compliance@company.com">

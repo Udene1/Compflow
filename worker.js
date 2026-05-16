@@ -20,14 +20,21 @@ export const handler = async (event) => {
     log.info(`➤ WORKER START: Processing tenant ${client.name}`);
 
     try {
-        // Step 1: Assume client's IAM role
-        log.info(`[CREDENTIALS] Assuming role ${client.roleArn}...`);
-        const credentials = await getClientCredentials(client.roleArn, client.id);
-        log.info(`[CREDENTIALS] ✓ Temporary session established.`);
+        let credentials = {};
+        
+        // Step 1: Resolve Credentials based on Provider
+        if (client.provider === 'aws') {
+            log.info(`[CREDENTIALS] Assuming AWS role ${client.roleArn}...`);
+            credentials = await getClientCredentials(client.roleArn, client.id);
+            log.info(`[CREDENTIALS] ✓ AWS session established.`);
+        } else {
+            log.info(`[CREDENTIALS] Using ${client.provider.toUpperCase()} API Token...`);
+            credentials = { apiToken: client.apiToken };
+        }
 
         // Step 2: Scan
-        log.info(`[SCANNER] Executing deep cloud scan...`);
-        const { resources } = await runScan('aws', credentials);
+        log.info(`[SCANNER] Executing deep ${client.provider.toUpperCase()} scan...`);
+        const { resources } = await runScan(client.provider, credentials);
         const anomalies = resources.filter(r => r.severity !== 'pass');
         log.info(`[SCANNER] Found ${anomalies.length} anomalies.`);
 
@@ -37,14 +44,14 @@ export const handler = async (event) => {
         const remediationDetails = [];
 
         for (const anomaly of anomalies) {
-            log.info(`[AGENT] Consulting Gemini for ${anomaly.name}...`);
+            log.info(`[AGENT] Consulting Gemini for ${anomaly.name} (${anomaly.type})...`);
             const llmDecision = await evaluateWithGemini(anomaly);
 
             if (llmDecision.action === 'AUTO_FIX' && client.autoRemediate) {
                 log.info(`[AGENT] ⚡ EXECUTING AUTO-FIX: ${anomaly.name}`);
                 
                 try {
-                    const result = await runRemediation('aws', credentials, anomaly.type, anomaly.name, anomaly.issue);
+                    const result = await runRemediation(client.provider, credentials, anomaly.type, anomaly.name, anomaly.issue);
                     if (result.advisory) {
                         log.warn(`[AGENT] Advisory: ${result.message}`);
                         escalatedCount++;

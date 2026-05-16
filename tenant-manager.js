@@ -34,8 +34,8 @@ window.TenantManager = (() => {
         list.innerHTML = tenants.map(t => `
             <div class="tenant-card">
                 <div class="tenant-info">
-                    <h4>${t.name}</h4>
-                    <code>${t.roleArn.split('/').pop() || t.roleArn}</code>
+                    <h4>${t.name} <span class="provider-tag">${t.provider.toUpperCase()}</span></h4>
+                    <code>${t.roleArn ? t.roleArn.split('/').pop() : 'API Key Active'}</code>
                 </div>
                 <div class="tenant-controls">
                     <div class="toggle-group">
@@ -62,19 +62,51 @@ window.TenantManager = (() => {
         document.getElementById('modal-onboarding').classList.remove('active');
     }
 
+    function updateOnboardFields() {
+        const provider = document.getElementById('onboard-provider').value;
+        const container = document.getElementById('onboard-dynamic-fields');
+        
+        if (provider === 'aws') {
+            container.innerHTML = `
+                <div class="input-group">
+                    <label>AWS Role ARN</label>
+                    <input type="text" id="onboard-role" placeholder="arn:aws:iam::...:role/ComplianceRole">
+                </div>
+            `;
+        } else {
+            container.innerHTML = `
+                <div class="input-group">
+                    <label>${provider.toUpperCase()} API Token</label>
+                    <input type="password" id="onboard-token" placeholder="Bearer Token...">
+                </div>
+            `;
+        }
+    }
+
     async function saveTenant() {
+        const provider = document.getElementById('onboard-provider').value;
         const name = document.getElementById('onboard-name').value;
-        const roleArn = document.getElementById('onboard-role').value;
         const email = document.getElementById('onboard-email').value;
         const autoRemediate = document.getElementById('onboard-auto').checked;
 
-        if (!name || !roleArn) return alert("Name and Role ARN are required.");
+        let credentials = {};
+        if (provider === 'aws') {
+            const roleArn = document.getElementById('onboard-role').value;
+            if (!roleArn) return alert("Role ARN is required");
+            credentials = { roleArn };
+        } else {
+            const apiToken = document.getElementById('onboard-token').value;
+            if (!apiToken) return alert("API Token is required");
+            credentials = { apiToken };
+        }
+
+        if (!name) return alert("Name is required.");
 
         try {
             const res = await fetch('/api/tenants', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ name, roleArn, email, autoRemediate })
+                body: JSON.stringify({ provider, name, email, autoRemediate, ...credentials })
             });
 
             if (res.ok) {
@@ -118,7 +150,7 @@ window.TenantManager = (() => {
         } catch (e) { console.error(e); }
     }
 
-    return { init, openOnboarding, closeOnboarding, saveTenant, toggleAuto, runScan, removeTenant };
+    return { init, openOnboarding, closeOnboarding, saveTenant, toggleAuto, runScan, removeTenant, updateOnboardFields };
 })();
 
 document.addEventListener('DOMContentLoaded', TenantManager.init);

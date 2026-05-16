@@ -11,13 +11,15 @@ export default async function handler(req, res) {
         }
 
         if (method === 'POST') {
-            const { name, roleArn, email, autoRemediate } = req.body;
-            if (!name || !roleArn) return res.status(400).json({ error: "Missing required fields" });
+            const { name, provider, roleArn, apiToken, email, autoRemediate } = req.body;
+            if (!name || !provider) return res.status(400).json({ error: "Missing required fields" });
 
             const newTenant = {
                 id: uuidv4(),
                 name,
+                provider,
                 roleArn,
+                apiToken,
                 email: email || "",
                 autoRemediate: autoRemediate === true,
                 status: 'active'

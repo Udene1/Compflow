@@ -1034,6 +1034,17 @@ body {
     margin: 0;
     font-size: 1.1rem;
     color: var(--text-bright);
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+}
+
+.provider-tag {
+    font-size: 0.65rem;
+    background: var(--primary);
+    padding: 2px 8px;
+    border-radius: 4px;
+    text-transform: uppercase;
 }
 
 .tenant-info code {
