@@ -405,26 +405,26 @@
         </main>
 
         <!-- ══════ AI Chat Drawer (Floating) ══════ -->
-        <div class="chat-toggle" id="chat-toggle" onclick="ChatEngine.toggle()">
-            <span class="icon">💬</span>
-            <span class="label">Ask AI</span>
-        </div>
+        <button class="chat-toggle no-print" id="chat-toggle" onclick="ChatEngine.toggle()">
+            <span class="icon">🤖</span>
+            <span class="label">AI Assistant</span>
+        </button>
 
-        <div class="chat-drawer" id="chat-drawer">
+        <div class="chat-drawer no-print" id="chat-drawer">
             <div class="chat-header">
                 <div class="title">
-                    ComplianceFlow <span>Brain</span>
+                    Governance Architect <span>AI</span>
                 </div>
                 <button class="chat-close" onclick="ChatEngine.toggle()">✕</button>
             </div>
             <div class="chat-messages" id="chat-messages">
-                <div class="chat-msg ai">
-                    Hello! I'm your AI Compliance Auditor. Ask me anything about your current infrastructure or security posture.
+                <div class="chat-msg system">
+                    Greetings. I am your Cloud Governance Architect. I have live access to your scan data and compliance evidence. How can I assist you with your infrastructure audit today?
                 </div>
             </div>
             <div class="chat-input-area">
-                <input type="text" id="chat-input" placeholder="e.g. Which S3 buckets are public?" onkeydown="if(event.key === 'Enter') ChatEngine.send()">
-                <button class="chat-send" onclick="ChatEngine.send()">⚡</button>
+                <textarea id="chat-input" placeholder="Ask about your infrastructure..." rows="1" onkeydown="if(event.key === 'Enter' && !event.shiftKey) { event.preventDefault(); ChatEngine.send(); }"></textarea>
+                <button class="chat-send" id="chat-send" onclick="ChatEngine.send()">🚀</button>
             </div>
         </div>
 
@@ -626,26 +626,6 @@
         }
     </script>
 
-    <!-- ─── AI Chat Interrogation Drawer ─── -->
-    <button id="chat-toggle" class="chat-toggle no-print" onclick="ChatEngine.toggle()">
-        <span class="icon">🤖</span> AI Assistant
-    </button>
-
-    <div class="chat-drawer no-print" id="chat-drawer">
-        <div class="chat-header">
-            <div class="chat-title">Governance Architect AI</div>
-            <button class="chat-close" onclick="ChatEngine.toggle()">✕</button>
-        </div>
-        <div class="chat-messages" id="chat-messages">
-            <div class="chat-msg system">
-                Greetings. I am your Cloud Governance Architect. I have live access to your scan data and compliance evidence. How can I assist you with your infrastructure audit today?
-            </div>
-        </div>
-        <div class="chat-input-area">
-            <textarea id="chat-input" placeholder="Ask about your infrastructure..." rows="1"></textarea>
-            <button id="chat-send" onclick="ChatEngine.send()">🚀</button>
-        </div>
-    </div>
 
     <div id="toast-container" class="toast-container"></div>
     <script src="chat-engine.js"></script>

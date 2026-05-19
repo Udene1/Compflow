@@ -25,8 +25,8 @@ body {
     background: var(--bg);
     color: var(--text);
     font-family: var(--font-main);
-    overflow: hidden;
-    height: 100vh;
+    overflow-x: hidden;
+    min-height: 100vh;
 }
 
 /* ─── Layout ─── */
@@ -1559,6 +1559,28 @@ input:checked + .slider:before { transform: translateX(16px); }
     #scan-report-email { width: 100% !important; }
     
     .risk-meter { height: 30px !important; }
+
+    /* AI Chat drawer adjustments */
+    .chat-toggle {
+        bottom: 1rem;
+        right: 1rem;
+        padding: 0.6rem 1rem;
+        font-size: 0.8rem;
+    }
+
+    .chat-drawer {
+        bottom: 0;
+        right: 0;
+        width: 100%;
+        height: 100%;
+        max-height: 100%;
+        border-radius: 0;
+        transform: translateX(100%);
+    }
+
+    .chat-drawer.open {
+        transform: translateX(0);
+    }
 }
 
 /* ─── Continuous Monitoring ─── */
