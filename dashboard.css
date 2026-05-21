@@ -26,13 +26,18 @@ body {
     color: var(--text);
     font-family: var(--font-main);
     overflow-x: hidden;
-    min-height: 100vh;
+    /* Use dvh for better mobile viewport handling */
+    min-height: 100dvh;
+    display: flex;
+    flex-direction: column;
 }
 
 /* ─── Layout ─── */
 .app-layout {
     display: flex;
-    height: 100vh;
+    flex: 1;
+    height: 100dvh;
+    width: 100%;
 }
 
 /* ─── Sidebar ─── */
@@ -208,6 +213,8 @@ body {
     padding: 2rem;
     scrollbar-width: thin;
     scrollbar-color: var(--glass-border) transparent;
+    /* Ensure inertia scrolling on iOS */
+    -webkit-overflow-scrolling: touch;
 }
 
 .page-content::-webkit-scrollbar { width: 6px; }
@@ -1544,43 +1551,63 @@ input:checked + .slider:before { transform: translateX(16px); }
     .topbar { padding: 0 1rem; }
     .topbar-actions { display: none; }
     
-    .page-content { padding: 1rem; }
-    
-    .scan-stats { grid-template-columns: 1fr 1fr !important; }
-    .maturity-grid { grid-template-columns: 1fr !important; }
-    .tsc-grid { grid-template-columns: 1fr !important; }
-    
-    .table-container, .resource-table, .evidence-table-wrap {
-        display: block;
-        overflow-x: auto;
-    }
-    
-    .scan-header { flex-direction: column; align-items: stretch !important; gap: 1rem; }
-    #scan-report-email { width: 100% !important; }
-    
     .risk-meter { height: 30px !important; }
+
+    /* Fix the dashboard scrollability on small devices */
+    .app-layout {
+        height: auto;
+        min-height: 100dvh;
+        flex-direction: column;
+    }
+
+    .main-content {
+        overflow: visible;
+        height: auto;
+    }
+
+    .page-content {
+        overflow: visible;
+        padding: 1.5rem 1rem;
+    }
+
+    .topbar {
+        position: sticky;
+        top: 0;
+        z-index: 100;
+        background: var(--bg);
+        backdrop-filter: blur(12px);
+    }
 
     /* AI Chat drawer adjustments */
     .chat-toggle {
-        bottom: 1rem;
-        right: 1rem;
-        padding: 0.6rem 1rem;
-        font-size: 0.8rem;
+        bottom: 1.5rem;
+        right: 1.25rem;
+        padding: 0.75rem 1.25rem;
+        font-size: 0.85rem;
+        border-radius: 12px;
     }
 
     .chat-drawer {
         bottom: 0;
         right: 0;
         width: 100%;
-        height: 100%;
+        height: 85vh; /* Don't cover literally everything, leave a gap or handle full screen better */
+        height: 85dvh;
         max-height: 100%;
-        border-radius: 0;
-        transform: translateX(100%);
+        border-radius: 20px 20px 0 0;
+        transform: translateY(100%);
     }
 
     .chat-drawer.open {
-        transform: translateX(0);
+        transform: translateY(0);
     }
+}
+
+/* ─── Extra Small Devices ─── */
+@media (max-width: 480px) {
+    .scan-stats { grid-template-columns: 1fr !important; }
+    .topbar-actions { display: none; }
+    .sidebar { width: 100%; }
 }
 
 /* ─── Continuous Monitoring ─── */
