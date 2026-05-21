@@ -12,7 +12,7 @@ import { APIGatewayClient, UpdateRestApiCommand, UpdateStageCommand } from "@aws
 import { CloudFrontClient, UpdateDistributionCommand, GetDistributionConfigCommand } from "@aws-sdk/client-cloudfront";
 import { SQSClient, SetQueueAttributesCommand } from "@aws-sdk/client-sqs";
 import { SNSClient, SetTopicAttributesCommand } from "@aws-sdk/client-sns";
-import { log } from './logger.js';
+import { log } from '../logger.js';
 
 export async function runRemediation(provider, credentials, resourceType, resourceName, issue, dryRun = false) {
 

@@ -20,7 +20,7 @@ import { APIGatewayClient, GetRestApisCommand, GetStagesCommand } from "@aws-sdk
 import { CloudFrontClient, ListDistributionsCommand, GetDistributionConfigCommand } from "@aws-sdk/client-cloudfront";
 import { SQSClient, ListQueuesCommand, GetQueueAttributesCommand } from "@aws-sdk/client-sqs";
 import { SNSClient, ListTopicsCommand, GetTopicAttributesCommand } from "@aws-sdk/client-sns";
-import { log } from './logger.js';
+import { log } from '../logger.js';
 
 export async function runScan(provider, credentials) {
 
