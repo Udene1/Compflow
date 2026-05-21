@@ -26,9 +26,24 @@ const SYSTEM_PROMPT = `You are the ComplianceFlow Governance Architect AI — a 
 - Explain compliance requirements in plain language.
 - Compare security posture across cloud providers.`;
 
+const MAX_RETRIES = 3;
+const BASE_DELAY_MS = 1000;
+
+function sleep(ms) {
+    return new Promise(resolve => setTimeout(resolve, ms));
+}
+
 export default async function handler(req, res) {
     if (req.method !== 'POST') {
         return res.status(405).json({ error: 'Method Not Allowed' });
+    }
+
+    // Explicit production check to help debugging
+    if (!process.env.GEMINI_API_KEY && process.env.NODE_ENV === 'production') {
+        log.error("[CHAT] Missing GEMINI_API_KEY in production.");
+        return res.status(500).json({ 
+            error: "AI Configuration Error: GEMINI_API_KEY is missing. Please set it in Vercel environment variables." 
+        });
     }
 
     const { query, context } = req.body;
@@ -42,7 +57,10 @@ export default async function handler(req, res) {
 
         const model = genAI.getGenerativeModel({ 
             model: "gemini-2.0-flash",
-            systemInstruction: SYSTEM_PROMPT
+            systemInstruction: {
+                role: "system",
+                parts: [{ text: SYSTEM_PROMPT }]
+            }
         });
 
         // Build context-enriched prompt
@@ -69,13 +87,41 @@ ${JSON.stringify((context.resources || []).slice(0, 20), null, 2)}
             history: [],
         });
 
-        const result = await chat.sendMessage(userPrompt);
-        const response = result.response.text();
+        let responseText = "";
+        let success = false;
 
-        log.info(`[CHAT] Response generated (${response.length} chars)`);
-        res.status(200).json({ response });
+        for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
+            try {
+                const result = await chat.sendMessage(userPrompt);
+                responseText = result.response.text();
+                success = true;
+                break;
+            } catch (error) {
+                const isRetryable = error.status === 429 || error.status >= 500 || error.message?.includes('rate');
+                if (isRetryable && attempt < MAX_RETRIES) {
+                    const delay = BASE_DELAY_MS * Math.pow(2, attempt - 1);
+                    log.warn(`[CHAT] Attempt ${attempt}/${MAX_RETRIES} failed. Retrying in ${delay}ms...`);
+                    await sleep(delay);
+                } else {
+                    throw error;
+                }
+            }
+        }
+
+        log.info(`[CHAT] Response generated (${responseText.length} chars)`);
+        res.status(200).json({ response: responseText });
+
     } catch (error) {
         log.error("[CHAT] Gemini error:", error);
-        res.status(500).json({ error: 'AI reasoning failed: ' + error.message });
+        
+        // Provide more helpful error messages for common issues
+        let userMessage = error.message;
+        if (error.message?.includes('API key not valid')) {
+            userMessage = "The provided GEMINI_API_KEY is invalid. Please check your configuration.";
+        } else if (error.message?.includes('quota')) {
+            userMessage = "AI rate limit exceeded. Please try again in a moment.";
+        }
+
+        res.status(500).json({ error: 'AI reasoning failed: ' + userMessage });
     }
 }
