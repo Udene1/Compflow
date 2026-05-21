@@ -127,3 +127,12 @@ functions:
       - sqs:
           arn: !GetAtt ScanQueue.Arn
           batchSize: 1
+
+  scan:
+    handler: api/lambda-scan.handler
+    timeout: 900
+    events:
+      - http:
+          path: /api/scan
+          method: post
+          cors: true
