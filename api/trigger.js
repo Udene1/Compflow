@@ -1,15 +1,20 @@
 import { SQSClient, SendMessageCommand } from "@aws-sdk/client-sqs";
 import { getClient } from '../core/registry.js';
 
-const sqs = new SQSClient({ 
-    region: process.env.AWS_REGION || "us-east-1",
-    credentials: {
+const clientConfig = { 
+    region: process.env.AWS_REGION || "us-east-1"
+};
+
+if (process.env.PLATFORM_AWS_ACCESS_KEY_ID && process.env.PLATFORM_AWS_SECRET_ACCESS_KEY) {
+    clientConfig.credentials = {
         accessKeyId: process.env.PLATFORM_AWS_ACCESS_KEY_ID,
         secretAccessKey: process.env.PLATFORM_AWS_SECRET_ACCESS_KEY
-    }
-});
+    };
+}
 
-const QUEUE_URL = process.env.SCAN_QUEUE_URL;
+const sqs = new SQSClient(clientConfig);
+
+const QUEUE_URL = process.env.SCAN_QUEUE_URL || "https://sqs.us-east-1.amazonaws.com/716563790683/CompFlowScanQueue";
 
 export default async function handler(req, res) {
     if (req.method !== 'POST') return res.status(405).end();

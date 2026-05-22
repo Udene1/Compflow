@@ -1,16 +1,22 @@
 import { DynamoDBClient } from "@aws-sdk/client-dynamodb";
 import { DynamoDBDocumentClient, ScanCommand, PutCommand, GetCommand, UpdateCommand } from "@aws-sdk/lib-dynamodb";
 
-const client = new DynamoDBClient({ 
-    region: process.env.AWS_REGION || "us-east-1",
-    credentials: {
+const clientConfig = { 
+    region: process.env.AWS_REGION || "us-east-1"
+};
+
+// Only add credentials if they are explicitly provided in environment
+if (process.env.PLATFORM_AWS_ACCESS_KEY_ID && process.env.PLATFORM_AWS_SECRET_ACCESS_KEY) {
+    clientConfig.credentials = {
         accessKeyId: process.env.PLATFORM_AWS_ACCESS_KEY_ID,
         secretAccessKey: process.env.PLATFORM_AWS_SECRET_ACCESS_KEY
-    }
-});
+    };
+}
+
+const client = new DynamoDBClient(clientConfig);
 const docClient = DynamoDBDocumentClient.from(client);
 
-const TABLE_NAME = "ComplianceFlowClients";
+const TABLE_NAME = process.env.CLIENTS_TABLE || "CompFlowClientsTable";
 
 /**
  * Loads all clients from the DynamoDB registry.
