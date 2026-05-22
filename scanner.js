@@ -53,18 +53,24 @@ window.Scanner = (() => {
 
         try {
             const clientId = 'adhoc_user'; // Default for main scan button
-            const triggerRes = await fetch('/api/scan', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ 
-                    provider, 
-                    credentials, 
-                    clientId,
-                    email: document.getElementById('scan-report-email')?.value 
-                })
-            });
+            let triggerRes;
+            try {
+                triggerRes = await fetch('/api/scan', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ provider, credentials, clientId, email: document.getElementById('scan-report-email')?.value })
+                });
+            } catch (e) {
+                console.warn("Vercel proxy failed, trying direct Lambda trigger...", e);
+                const LAMBDA_URL = "https://x1ruejr9v8.execute-api.us-east-1.amazonaws.com/dev/api/scan";
+                triggerRes = await fetch(LAMBDA_URL, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ provider, credentials, clientId, email: document.getElementById('scan-report-email')?.value })
+                });
+            }
+
             const triggerData = await triggerRes.json();
-            
             if (triggerData.error) throw new Error(triggerData.error);
 
             LiveTerminal.log('system', `Deep scan queued (ID: ${clientId}). Polling for results...`);
