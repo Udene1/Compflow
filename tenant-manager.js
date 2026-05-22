@@ -169,9 +169,20 @@ window.TenantManager = (() => {
     }
 
     async function runScan(id) {
+        // Throttling: Prevent rapid manual triggers
+        const now = Date.now();
+        const COOLDOWN = 60000; 
+        window._lastTriggerTime = window._lastTriggerTime || {};
+        if (window._lastTriggerTime[id] && (now - window._lastTriggerTime[id] < COOLDOWN)) {
+            const remaining = Math.ceil((COOLDOWN - (now - window._lastTriggerTime[id])) / 1000);
+            showToast(`Wait ${remaining}s before re-triggering this tenant.`);
+            return;
+        }
+
         showToast("Dispatching autonomous scan task...");
         LiveTerminal.log('system', `Manual scan triggered for tenant: ${id}`);
-        // In Phase B, this would trigger the Scheduler Lambda
+        window._lastTriggerTime[id] = now;
+
         await fetch('/api/trigger', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },

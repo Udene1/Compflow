@@ -26,8 +26,19 @@ window.Scanner = (() => {
         }
 
         const btn = document.getElementById('btn-start-scan');
+        
+        // Throttling: Prevent rapid re-scanning
+        const now = Date.now();
+        const COOLDOWN = 60000; // 60 seconds
+        if (window._lastScanTime && (now - window._lastScanTime < COOLDOWN)) {
+            const remaining = Math.ceil((COOLDOWN - (now - window._lastScanTime)) / 1000);
+            LiveTerminal.log('system', `Please wait ${remaining}s before re-scanning.`);
+            return;
+        }
+
         btn.disabled = true;
         btn.textContent = 'Scanning...';
+        window._lastScanTime = now;
 
         scannedResources = [];
         document.getElementById('resource-tbody').innerHTML = '';
