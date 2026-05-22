@@ -4,6 +4,7 @@ import { evaluateWithGemini } from './core/gemini.js';
 import { getClientCredentials } from './core/credentials.js';
 import { generateReport, sendReport } from './core/reporter.js';
 import { Logger } from './core/logger.js';
+import { saveAuditLog } from './core/audit.js';
 
 /**
  * Worker Handler
@@ -84,8 +85,16 @@ export const handler = async (event) => {
             }
         }
 
-        // Step 4: Generate & Send Report
-        log.info(`[REPORTER] Generating report...`);
+        // Step 4: Save results for frontend polling
+        log.info(`[REPORTER] Generating results for polling...`);
+        await saveAuditLog(client.id, 'SCAN_COMPLETE', `Scan completed for ${client.name}`, { 
+            resources, 
+            executionId,
+            summary: { resolved: resolvedCount, escalated: escalatedCount, details: remediationDetails }
+        });
+
+        // Step 5: Generate & Send Report
+        log.info(`[REPORTER] Generating email report...`);
         const summary = { resolved: resolvedCount, escalated: escalatedCount, details: remediationDetails };
         const reportHtml = generateReport(client.name, resources, summary);
 

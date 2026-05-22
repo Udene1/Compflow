@@ -52,54 +52,31 @@ window.Scanner = (() => {
         LiveTerminal.log('agent', `Requesting enumeration of resources...`);
 
         try {
-            const res = await fetch('/api/scan', {
+            const clientId = 'adhoc_user'; // Default for main scan button
+            const triggerRes = await fetch('/api/scan', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ provider, credentials, email: document.getElementById('scan-report-email')?.value })
+                body: JSON.stringify({ 
+                    provider, 
+                    credentials, 
+                    clientId,
+                    email: document.getElementById('scan-report-email')?.value 
+                })
             });
-            const data = await res.json();
+            const triggerData = await triggerRes.json();
             
-            if (data.error) throw new Error(data.error);
+            if (triggerData.error) throw new Error(triggerData.error);
 
-            scannedResources = data.resources || [];
+            LiveTerminal.log('system', `Deep scan queued (ID: ${clientId}). Polling for results...`);
+            
+            // Start Polling
+            const results = await pollForResults(clientId);
+            if (!results) throw new Error("Scan timed out or failed on backend.");
+
+            scannedResources = results;
             document.getElementById('scan-progress-fill').style.width = '100%';
 
-            scannedResources.forEach((res, i) => {
-                res.id = i;
-                const controlKeys = Frameworks.getMapping(res.type, res.issue);
-                res.controlKeys = controlKeys;
-                
-                const activeControlKey = controlKeys.find(k => k.startsWith(Frameworks.getCurrentId())) || controlKeys[0];
-                const controlDetail = Frameworks.getControlDetails(activeControlKey);
-                res.control = controlDetail ? controlDetail.id : 'N/A';
-
-                addResourceRow(res);
-                
-                if (res.severity === 'critical') {
-                    LiveTerminal.log('insight', `CRITICAL: ${res.type} "${res.name}" — ${res.issue}`);
-                } else if (res.severity === 'warning') {
-                    LiveTerminal.log('agent', `Warning: ${res.type} "${res.name}" — ${res.issue}`);
-                }
-            });
-
-            LiveTerminal.log('output', `Scan complete: ${scannedResources.length} resources found.`);
-            
-            updateStatsUI();
-            updateScore();
-            
-            // Baseline for Drift Engine
-            if (window.DriftEngine) DriftEngine.setBaseline(scannedResources);
-
-            // Evidence
-            if (window.Evidence) {
-                for (const r of scannedResources) {
-                    await Evidence.captureFromScan(r);
-                }
-            }
-            updateEvidenceBadge();
-
-            // Remediation
-            if (window.Remediation) Remediation.buildFromScan(scannedResources);
+            displayResults(scannedResources);
             
             btn.disabled = false;
             btn.textContent = 'Re-scan';
@@ -109,6 +86,60 @@ window.Scanner = (() => {
             btn.disabled = false;
             btn.textContent = 'Retry Scan';
         }
+    }
+
+    async function pollForResults(clientId) {
+        const MAX_ATTEMPTS = 30; // 60 seconds total polling
+        const start = Date.now();
+        
+        for (let i = 0; i < MAX_ATTEMPTS; i++) {
+            await new Promise(r => setTimeout(r, 2000));
+            
+            try {
+                const res = await fetch(`/api/logs?clientId=${clientId}`);
+                const data = await res.json();
+                
+                // Find the latest SCAN_COMPLETE log that is NEWER than our start time
+                const latestScan = (data.logs || []).find(l => 
+                    l.level === 'SCAN_COMPLETE' && 
+                    new Date(l.timestamp).getTime() > start - 5000 // Buffer
+                );
+
+                if (latestScan && latestScan.details && latestScan.details.resources) {
+                    return latestScan.details.resources;
+                }
+            } catch (e) { console.warn("Polling error:", e); }
+        }
+        return null; // Timeout
+    }
+
+    function displayResults(resources) {
+        document.getElementById('resource-tbody').innerHTML = '';
+        resources.forEach((res, i) => {
+            res.id = i;
+            const controlKeys = Frameworks.getMapping(res.type, res.issue);
+            res.controlKeys = controlKeys;
+            
+            const activeControlKey = controlKeys.find(k => k.startsWith(Frameworks.getCurrentId())) || controlKeys[0];
+            const controlDetail = Frameworks.getControlDetails(activeControlKey);
+            res.control = controlDetail ? controlDetail.id : 'N/A';
+
+            addResourceRow(res);
+            
+            if (res.severity === 'critical') {
+                LiveTerminal.log('insight', `CRITICAL: ${res.type} "${res.name}" — ${res.issue}`);
+            } else if (res.severity === 'warning') {
+                LiveTerminal.log('agent', `Warning: ${res.type} "${res.name}" — ${res.issue}`);
+            }
+        });
+
+        LiveTerminal.log('output', `Scan complete: ${resources.length} resources found.`);
+        updateStatsUI();
+        updateScore();
+        
+        if (window.DriftEngine) DriftEngine.setBaseline(resources);
+        if (window.Remediation) Remediation.buildFromScan(resources);
+    }
     }
 
     async function runBackgroundScan() {
