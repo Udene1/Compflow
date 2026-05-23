@@ -54,23 +54,34 @@ window.Scanner = (() => {
         try {
             const clientId = 'adhoc_user'; // Default for main scan button
             let triggerRes;
+            const LAMBDA_URL = "https://x1ruejr9v8.execute-api.us-east-1.amazonaws.com/dev/api/scan";
+            
             try {
-                triggerRes = await fetch('/api/scan', {
+                // Try direct Lambda trigger first to bypass Vercel instability
+                LiveTerminal.log('system', 'Directing scan request to cloud engine...');
+                triggerRes = await fetch(LAMBDA_URL, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({ provider, credentials, clientId, email: document.getElementById('scan-report-email')?.value })
                 });
+
+                if (!triggerRes.ok) throw new Error(`HTTP ${triggerRes.status}`);
             } catch (e) {
-                console.warn("Vercel proxy failed, trying direct Lambda trigger...", e);
-                const LAMBDA_URL = "https://x1ruejr9v8.execute-api.us-east-1.amazonaws.com/dev/api/scan";
-                triggerRes = await fetch(LAMBDA_URL, {
+                console.warn("Direct Lambda trigger failed, trying Vercel proxy fallback...", e);
+                triggerRes = await fetch('/api/scan', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({ provider, credentials, clientId, email: document.getElementById('scan-report-email')?.value })
                 });
             }
 
-            const triggerData = await triggerRes.json();
+            let triggerData;
+            try {
+                triggerData = await triggerRes.json();
+            } catch (jsonErr) {
+                throw new Error("Backend returned non-JSON response. Please check if Vercel/Lambda are live.");
+            }
+            
             if (triggerData.error) throw new Error(triggerData.error);
 
             LiveTerminal.log('system', `Deep scan queued (ID: ${clientId}). Polling for results...`);
