@@ -3,7 +3,7 @@ name: Production Deployment
 on:
   push:
     branches:
-      - production  # Triggers only on push to the 'production' branch
+      - main  # Triggers only on push to the 'main' branch
 
 jobs:
   deploy-backend:
