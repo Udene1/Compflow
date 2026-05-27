@@ -5,9 +5,11 @@ window.TenantManager = (() => {
         await loadTenants();
     }
 
+    const BASE_URL = "https://x1ruejr9v8.execute-api.us-east-1.amazonaws.com/dev";
+
     async function loadTenants() {
         try {
-            const res = await fetch('/api/tenants');
+            const res = await fetch(`${BASE_URL}/api/tenants`);
             const data = await res.json();
             tenants = data.tenants || [];
             renderTenants();
@@ -141,7 +143,7 @@ window.TenantManager = (() => {
         if (!name) return alert("Name is required.");
 
         try {
-            const res = await fetch('/api/tenants', {
+            const res = await fetch(`${BASE_URL}/api/tenants`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ provider, name, email, autoRemediate, ...credentials })
@@ -159,7 +161,7 @@ window.TenantManager = (() => {
 
     async function toggleAuto(id, enabled) {
         try {
-            await fetch('/api/tenants/toggle', {
+            await fetch(`${BASE_URL}/api/tenants/toggle`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ id, autoRemediate: enabled })
@@ -183,7 +185,7 @@ window.TenantManager = (() => {
         LiveTerminal.log('system', `Manual scan triggered for tenant: ${id}`);
         window._lastTriggerTime[id] = now;
 
-        await fetch('/api/trigger', {
+        await fetch(`${BASE_URL}/api/trigger`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ clientId: id })

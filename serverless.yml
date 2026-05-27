@@ -14,13 +14,12 @@ provider:
     # AWS Lambda uses the IAM Role below natively.
 
   iam:
-
     role:
       statements:
         - Effect: "Allow"
           Action:
             - "sts:AssumeRole"
-          Resource: "arn:aws:iam::*:role/ComplianceFlow-*" # Restricted to roles created via our CFN template
+          Resource: "arn:aws:iam::*:role/ComplianceFlow-*" 
         - Effect: "Allow"
           Action:
             - "ses:SendEmail"
@@ -35,6 +34,7 @@ provider:
             - "dynamodb:UpdateItem"
           Resource:
             - "arn:aws:dynamodb:${opt:region, 'us-east-1'}:*:table/CompFlowClientsTable"
+            - "arn:aws:dynamodb:${opt:region, 'us-east-1'}:*:table/CompFlowAuditTable"
         - Effect: "Allow"
           Action:
             - "sqs:SendMessage"
@@ -46,6 +46,7 @@ provider:
 
 resources:
   Resources:
+    # ─── DATABASE ───
     ClientsTable:
       Type: AWS::DynamoDB::Table
       Properties:
@@ -74,11 +75,12 @@ resources:
             KeyType: RANGE
         BillingMode: PAY_PER_REQUEST
 
+    # ─── QUEUE ───
     ScanQueue:
       Type: AWS::SQS::Queue
       Properties:
         QueueName: CompFlowScanQueue
-        VisibilityTimeout: 900 # Matches Lambda timeout
+        VisibilityTimeout: 900
         RedrivePolicy:
           deadLetterTargetArn: !GetAtt ScanDLQ.Arn
           maxReceiveCount: 3
@@ -87,14 +89,6 @@ resources:
       Type: AWS::SQS::Queue
       Properties:
         QueueName: CompFlowScanDLQ
-        MessageRetentionPeriod: 1209600 # 14 days
-
-package:
-  patterns:
-    - "!node_modules/@aws-sdk/**"
-    - "!node_modules/.cache/**"
-    - "!.git/**"
-    - "!.env"
 
 functions:
   scheduler:
@@ -102,10 +96,11 @@ functions:
     environment:
       SCAN_QUEUE_URL: !Ref ScanQueue
     events:
-      - schedule: cron(0 12 ? * MON-FRI *) # Every weekday at 12:00 UTC
+      - schedule: cron(0 12 ? * MON-FRI *)
       - http:
           path: /api/trigger
           method: post
+          cors: true
 
   tenants:
     handler: api/tenants.handler
@@ -113,12 +108,15 @@ functions:
       - http:
           path: /api/tenants
           method: get
+          cors: true
       - http:
           path: /api/tenants
           method: post
+          cors: true
       - http:
           path: /api/tenants/toggle
           method: post
+          cors: true
 
   worker:
     handler: worker.handler

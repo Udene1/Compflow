@@ -51,35 +51,24 @@ window.Scanner = (() => {
         LiveTerminal.log('system', `Contacting real cloud APIs for ${provider.toUpperCase()}...`);
         LiveTerminal.log('agent', `Requesting enumeration of resources...`);
 
+        const BASE_URL = "https://x1ruejr9v8.execute-api.us-east-1.amazonaws.com/dev";
+        
         try {
             const clientId = 'adhoc_user'; // Default for main scan button
-            let triggerRes;
-            const LAMBDA_URL = "https://x1ruejr9v8.execute-api.us-east-1.amazonaws.com/dev/api/scan";
-            
-            try {
-                // Try direct Lambda trigger first to bypass Vercel instability
-                LiveTerminal.log('system', 'Directing scan request to cloud engine...');
-                triggerRes = await fetch(LAMBDA_URL, {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ provider, credentials, clientId, email: document.getElementById('scan-report-email')?.value })
-                });
+            LiveTerminal.log('system', 'Directing scan request to cloud engine...');
+            const triggerRes = await fetch(`${BASE_URL}/api/scan`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ provider, credentials, clientId, email: document.getElementById('scan-report-email')?.value })
+            });
 
-                if (!triggerRes.ok) throw new Error(`HTTP ${triggerRes.status}`);
-            } catch (e) {
-                console.warn("Direct Lambda trigger failed, trying Vercel proxy fallback...", e);
-                triggerRes = await fetch('/api/scan', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ provider, credentials, clientId, email: document.getElementById('scan-report-email')?.value })
-                });
-            }
+            if (!triggerRes.ok) throw new Error(`HTTP ${triggerRes.status}`);
 
             let triggerData;
             try {
                 triggerData = await triggerRes.json();
             } catch (jsonErr) {
-                throw new Error("Backend returned non-JSON response. Please check if Vercel/Lambda are live.");
+                throw new Error("Backend returned non-JSON response. Please check if Lambda is live.");
             }
             
             if (triggerData.error) throw new Error(triggerData.error);
@@ -113,7 +102,7 @@ window.Scanner = (() => {
             await new Promise(r => setTimeout(r, 2000));
             
             try {
-                const res = await fetch(`/api/logs?clientId=${clientId}`);
+                const res = await fetch(`${BASE_URL}/api/logs?clientId=${clientId}`);
                 const data = await res.json();
                 
                 // Find the latest SCAN_COMPLETE log that is NEWER than our start time
