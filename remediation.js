@@ -731,7 +731,8 @@ Note: "ADVISORY — $3,000/mo subscription required"`
 
         LiveTerminal.log('action', `EXECUTING REAL FIX: ${issue.type} "${issue.name}" — ${issue.issue}`);
 
-        fetch('/api/remediate', {
+        const BASE_URL = "https://x1ruejr9v8.execute-api.us-east-1.amazonaws.com/dev";
+        fetch(`${BASE_URL}/api/remediate`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ 
