@@ -69,7 +69,7 @@ window.CloudConnect = (() => {
         if (card) connect(provider, card);
     }
 
-    function connect(provider, card) {
+    async function connect(provider, card) {
         if (state.providers[provider]) return;
 
         card.classList.add('selected');
@@ -80,7 +80,7 @@ window.CloudConnect = (() => {
         statusEl.textContent = 'Connecting...';
         statusEl.className = 'status-line connecting';
 
-        // Build steps UI
+        // Build steps UI (still useful for UX, but now driven by progress)
         stepsContainer.innerHTML = '<h4 style="margin-bottom:0.75rem; font-size:0.9rem;">Connection Progress</h4>';
         const stepEls = STEPS.map((text, i) => {
             const div = document.createElement('div');
@@ -90,46 +90,78 @@ window.CloudConnect = (() => {
             return div;
         });
 
-        // Emit to terminal
         LiveTerminal.log('system', `Initiating real connection to ${provider.toUpperCase()}...`);
 
-        let stepIndex = 0;
-        const interval = setInterval(() => {
-            if (stepIndex < STEPS.length) {
-                // Mark previous as done
-                if (stepIndex > 0) {
-                    stepEls[stepIndex - 1].classList.remove('active');
-                    stepEls[stepIndex - 1].classList.add('done');
-                    stepEls[stepIndex - 1].querySelector('.check').textContent = '✓';
-                }
-                stepEls[stepIndex].classList.add('active');
-                stepEls[stepIndex].querySelector('.check').innerHTML = '<span class="spinner"></span>';
+        try {
+            // Update UI to first step
+            updateStepUI(0, stepEls, barEl);
+            LiveTerminal.log('agent', STEPS[0]);
 
-                const pct = Math.round(((stepIndex + 1) / STEPS.length) * 100);
-                barEl.style.width = pct + '%';
+            const BASE_URL = "https://x1ruejr9v8.execute-api.us-east-1.amazonaws.com/dev";
+            const response = await fetch(`${BASE_URL}/api/validate`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ 
+                    provider, 
+                    credentials: state.credentials[provider] 
+                })
+            });
 
-                LiveTerminal.log('agent', STEPS[stepIndex]);
-                stepIndex++;
-            } else {
-                clearInterval(interval);
+            const data = await response.json();
 
-                // Mark final step done
-                stepEls[STEPS.length - 1].classList.remove('active');
-                stepEls[STEPS.length - 1].classList.add('done');
-                stepEls[STEPS.length - 1].querySelector('.check').textContent = '✓';
-
-                barEl.style.width = '100%';
-                statusEl.textContent = '✓ Connected';
-                statusEl.className = 'status-line connected';
-                card.classList.remove('selected');
-                card.classList.add('connected');
-
-                state.providers[provider] = true;
-                LiveTerminal.log('output', `${provider.toUpperCase()} session active. Actual infrastructure access granted.`);
-
-                updateChips();
+            if (!response.ok || !data.success) {
+                throw new Error(data.error || "Connection failed");
             }
-        }, 700);
+
+            // Success Path - Fast-forward UI steps
+            for (let i = 1; i < STEPS.length; i++) {
+                await new Promise(r => setTimeout(r, 400));
+                updateStepUI(i, stepEls, barEl);
+                LiveTerminal.log('agent', STEPS[i]);
+            }
+
+            barEl.style.width = '100%';
+            statusEl.textContent = '✓ Connected';
+            statusEl.className = 'status-line connected';
+            card.classList.remove('selected');
+            card.classList.add('connected');
+
+            state.providers[provider] = true;
+            LiveTerminal.log('output', `${provider.toUpperCase()} Identity Verified: ${data.identity || 'Session Active'}`);
+            LiveTerminal.log('insight', `SUCCESS: Cloud environment connected and validated in real-time.`);
+
+            updateChips();
+
+        } catch (err) {
+            console.error("Connection failed:", err);
+            statusEl.textContent = '✕ Failed';
+            statusEl.className = 'status-line failed';
+            card.classList.remove('selected');
+            
+            // Mark current step as failed
+            const currentStep = stepEls.find(el => el.classList.contains('active')) || stepEls[0];
+            currentStep.classList.remove('active');
+            currentStep.classList.add('error');
+            currentStep.querySelector('.check').textContent = '✕';
+            
+            LiveTerminal.log('insight', `CONNECTION ERROR: ${err.message}`);
+            showToast(`Connection failed: ${err.message}`);
+        }
+    }
+
+    function updateStepUI(index, stepEls, barEl) {
+        // Mark previous as done
+        for (let i = 0; i < index; i++) {
+            stepEls[i].classList.remove('active');
+            stepEls[i].classList.add('done');
+            stepEls[i].querySelector('.check').textContent = '✓';
+        }
+        
+        stepEls[index].classList.add('active');
+        stepEls[index].querySelector('.check').innerHTML = '<span class="spinner"></span>';
+
+        const pct = Math.round(((index + 1) / STEPS.length) * 100);
+        barEl.style.width = pct + '%';
     }
 
     function updateChips() {

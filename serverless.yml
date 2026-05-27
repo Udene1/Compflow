@@ -134,3 +134,11 @@ functions:
           path: /api/scan
           method: post
           cors: true
+
+  validate:
+    handler: api/validate.handler
+    events:
+      - http:
+          path: /api/validate
+          method: post
+          cors: true
