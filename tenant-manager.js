@@ -185,11 +185,47 @@ window.TenantManager = (() => {
         LiveTerminal.log('system', `Manual scan triggered for tenant: ${id}`);
         window._lastTriggerTime[id] = now;
 
-        await fetch(`${BASE_URL}/api/trigger`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ clientId: id })
-        });
+        try {
+            const triggerRes = await fetch(`${BASE_URL}/api/trigger`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ clientId: id })
+            });
+
+            if (!triggerRes.ok) throw new Error("Failed to dispatch scan");
+            
+            LiveTerminal.log('agent', `Scan queued for ${id}. Awaiting cloud agent results...`);
+            
+            // Poll for completion logs
+            let attempts = 0;
+            const poll = setInterval(async () => {
+                attempts++;
+                if (attempts > 30) {
+                    clearInterval(poll);
+                    LiveTerminal.log('insight', `Scan for ${id} timed out. Check Background Tasks.`);
+                    return;
+                }
+
+                try {
+                    const logRes = await fetch(`${BASE_URL}/api/audit?clientId=${id}`);
+                    const logs = await logRes.json();
+                    
+                    // Look for the completion log
+                    const complete = logs.find(l => l.level === 'SCAN_COMPLETE' && new Date(l.timestamp).getTime() > now - 5000);
+                    if (complete) {
+                        clearInterval(poll);
+                        LiveTerminal.log('output', `✓ Scan Complete for ${id}: ${complete.message}`);
+                        if (complete.details && complete.details.summary) {
+                            const s = complete.details.summary;
+                            LiveTerminal.log('insight', `Results: ${s.resolved} Fixed, ${s.escalated} Escalated.`);
+                        }
+                    }
+                } catch (e) { console.warn("Poll error", e); }
+            }, 3000);
+
+        } catch (e) {
+            LiveTerminal.log('insight', `TRigger Failed: ${e.message}`);
+        }
     }
 
     async function removeTenant(id) {
