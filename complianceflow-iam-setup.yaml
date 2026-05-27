@@ -5,6 +5,7 @@ Description: |
   to continuously monitor your cloud infrastructure and autonomously remediate specific,
   low-risk security findings.
 
+Parameters:
   CustomerName:
     Type: String
     Description: The name of your organization (no spaces).
