@@ -5,11 +5,11 @@ window.TenantManager = (() => {
         await loadTenants();
     }
 
-    const BASE_URL = "https://x1ruejr9v8.execute-api.us-east-1.amazonaws.com/dev";
+    // Use relative paths for Vercel deployment
 
     async function loadTenants() {
         try {
-            const res = await fetch(`${BASE_URL}/api/tenants`);
+            const res = await fetch(`/api/tenants`);
             const data = await res.json();
             tenants = data.tenants || [];
             renderTenants();
@@ -143,7 +143,7 @@ window.TenantManager = (() => {
         if (!name) return alert("Name is required.");
 
         try {
-            const res = await fetch(`${BASE_URL}/api/tenants`, {
+            const res = await fetch(`/api/tenants`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ provider, name, email, autoRemediate, ...credentials })
@@ -161,7 +161,7 @@ window.TenantManager = (() => {
 
     async function toggleAuto(id, enabled) {
         try {
-            await fetch(`${BASE_URL}/api/tenants/toggle`, {
+            await fetch(`/api/tenants/toggle`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ id, autoRemediate: enabled })
@@ -186,7 +186,7 @@ window.TenantManager = (() => {
         window._lastTriggerTime[id] = now;
 
         try {
-            const triggerRes = await fetch(`${BASE_URL}/api/trigger`, {
+            const triggerRes = await fetch(`/api/trigger`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ clientId: id })
@@ -207,7 +207,7 @@ window.TenantManager = (() => {
                 }
 
                 try {
-                    const logRes = await fetch(`${BASE_URL}/api/audit?clientId=${id}`);
+                    const logRes = await fetch(`/api/audit?clientId=${id}`);
                     const logs = await logRes.json();
                     
                     // Look for the completion log

@@ -51,7 +51,7 @@ window.Scanner = (() => {
         LiveTerminal.log('system', `Contacting real cloud APIs for ${provider.toUpperCase()}...`);
         LiveTerminal.log('agent', `Requesting enumeration of resources...`);
 
-        const BASE_URL = "https://x1ruejr9v8.execute-api.us-east-1.amazonaws.com/dev";
+        const BASE_URL = ""; // Use relative paths for Vercel deployment
         
         try {
             const clientId = 'adhoc_user';
@@ -185,7 +185,7 @@ window.Scanner = (() => {
         const provider = providers[0];
         const credentials = CloudConnect.getCredentials(provider);
 
-        const BASE_URL = "https://x1ruejr9v8.execute-api.us-east-1.amazonaws.com/dev";
+        const BASE_URL = "";
         try {
             const res = await fetch(`${BASE_URL}/api/scan`, {
                 method: 'POST',

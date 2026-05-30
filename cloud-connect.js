@@ -97,8 +97,7 @@ window.CloudConnect = (() => {
             updateStepUI(0, stepEls, barEl);
             LiveTerminal.log('agent', STEPS[0]);
 
-            const BASE_URL = "https://x1ruejr9v8.execute-api.us-east-1.amazonaws.com/dev";
-            const response = await fetch(`${BASE_URL}/api/validate`, {
+            const response = await fetch(`/api/validate`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ 
