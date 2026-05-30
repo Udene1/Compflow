@@ -70,6 +70,25 @@ window.LiveTerminal = (() => {
         }
     }
 
+    /**
+     * Appends a batch of log entries from the Jobs table.
+     * Only renders entries newer than lastIndex to avoid duplicates.
+     * @param {Array} logs - Array of { timestamp, level, message }
+     * @param {number} fromIndex - Index to start rendering from
+     * @returns {number} New index (length of logs array)
+     */
+    function logBatch(logs, fromIndex = 0) {
+        if (!logs || logs.length <= fromIndex) return fromIndex;
+
+        const newLogs = logs.slice(fromIndex);
+        for (const entry of newLogs) {
+            const level = (entry.level || 'system').toLowerCase();
+            log(level, entry.message || '');
+        }
+
+        return logs.length;
+    }
+
     function applyFilter() {
         const el = terminalEl();
         el.querySelectorAll('.log-line').forEach(line => {
@@ -89,5 +108,5 @@ window.LiveTerminal = (() => {
 
     document.addEventListener('DOMContentLoaded', init);
 
-    return { log };
+    return { log, logBatch };
 })();

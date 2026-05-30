@@ -1,5 +1,5 @@
 // ─── ComplianceFlow AI: Resource Scanner ───
-// Generates a realistic cloud resource inventory and scans for compliance issues
+// Connects to AWS Lambda backend, tracks jobs, and streams results to the terminal
 
 window.Scanner = (() => {
     let scannedResources = [];
@@ -46,7 +46,7 @@ window.Scanner = (() => {
         document.getElementById('resource-table').style.display = 'table';
         document.getElementById('scan-stats').style.display = 'grid';
         document.getElementById('scan-progress-wrap').style.display = 'block';
-        document.getElementById('scan-progress-fill').style.width = '10%';
+        document.getElementById('scan-progress-fill').style.width = '5%';
 
         LiveTerminal.log('system', `Contacting real cloud APIs for ${provider.toUpperCase()}...`);
         LiveTerminal.log('agent', `Requesting enumeration of resources...`);
@@ -54,8 +54,10 @@ window.Scanner = (() => {
         const BASE_URL = "https://x1ruejr9v8.execute-api.us-east-1.amazonaws.com/dev";
         
         try {
-            const clientId = 'adhoc_user'; // Default for main scan button
+            const clientId = 'adhoc_user';
             LiveTerminal.log('system', 'Directing scan request to cloud engine...');
+
+            // ── Step 1: Trigger scan and get jobId ──
             const triggerRes = await fetch(`${BASE_URL}/api/scan`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
@@ -73,10 +75,15 @@ window.Scanner = (() => {
             
             if (triggerData.error) throw new Error(triggerData.error);
 
-            LiveTerminal.log('system', `Deep scan queued (ID: ${clientId}). Polling for results...`);
-            
-            // Start Polling
-            const results = await pollForResults(clientId);
+            const jobId = triggerData.jobId;
+            if (!jobId) {
+                throw new Error("No jobId returned from scan endpoint.");
+            }
+
+            LiveTerminal.log('system', `Scan job created (ID: ${jobId.slice(0, 8)}...). Streaming progress...`);
+
+            // ── Step 2: Poll job status ──
+            const results = await pollJobStatus(jobId, BASE_URL);
             if (!results) throw new Error("Scan timed out or failed on backend.");
 
             scannedResources = results;
@@ -94,28 +101,53 @@ window.Scanner = (() => {
         }
     }
 
-    async function pollForResults(clientId) {
-        const MAX_ATTEMPTS = 30; // 60 seconds total polling
+    /**
+     * Polls /api/job-status for progressive updates.
+     * Streams logs to terminal and updates progress bar in real-time.
+     */
+    async function pollJobStatus(jobId, baseUrl) {
+        const MAX_POLL_MS = 15 * 60 * 1000; // 15 minute timeout
+        const POLL_INTERVAL = 3000; // 3 seconds
         const start = Date.now();
-        
-        for (let i = 0; i < MAX_ATTEMPTS; i++) {
-            await new Promise(r => setTimeout(r, 2000));
-            
-            try {
-                const res = await fetch(`${BASE_URL}/api/logs?clientId=${clientId}`);
-                const data = await res.json();
-                
-                // Find the latest SCAN_COMPLETE log that is NEWER than our start time
-                const latestScan = (data.logs || []).find(l => 
-                    l.level === 'SCAN_COMPLETE' && 
-                    new Date(l.timestamp).getTime() > start - 5000 // Buffer
-                );
+        let logIndex = 0; // Track which logs we've already rendered
 
-                if (latestScan && latestScan.details && latestScan.details.resources) {
-                    return latestScan.details.resources;
+        while (Date.now() - start < MAX_POLL_MS) {
+            await new Promise(r => setTimeout(r, POLL_INTERVAL));
+
+            try {
+                const res = await fetch(`${baseUrl}/api/job-status?jobId=${jobId}`);
+                if (!res.ok) {
+                    console.warn(`[POLL] HTTP ${res.status}`);
+                    continue;
                 }
-            } catch (e) { console.warn("Polling error:", e); }
+
+                const job = await res.json();
+
+                // Stream new logs to terminal
+                if (job.logs && job.logs.length > logIndex) {
+                    logIndex = LiveTerminal.logBatch(job.logs, logIndex);
+                }
+
+                // Update progress bar
+                if (job.progress > 0) {
+                    document.getElementById('scan-progress-fill').style.width = `${Math.min(job.progress, 99)}%`;
+                }
+
+                // Check terminal states
+                if (job.status === 'completed') {
+                    return job.resources || [];
+                }
+
+                if (job.status === 'failed') {
+                    throw new Error(job.errorMessage || 'Scan failed on backend.');
+                }
+
+            } catch (e) {
+                if (e.message.includes('failed')) throw e;
+                console.warn("[POLL] Error:", e.message);
+            }
         }
+
         return null; // Timeout
     }
 

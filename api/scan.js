@@ -1,11 +1,17 @@
 import { LambdaClient, InvokeCommand } from "@aws-sdk/client-lambda";
+import { createJob } from '../core/jobs.js';
 
+/**
+ * Scan Proxy (Vercel API Route)
+ * Creates a job record, triggers Lambda async, returns jobId.
+ * Total execution: ~2-3 seconds (safe for Vercel free tier).
+ */
 export default async function handler(req, res) {
-    // 1. Always return JSON
     try {
         if (req.method === 'OPTIONS') return res.status(200).end();
-        
-        // 2. Validate Env
+        if (req.method !== 'POST') return res.status(405).json({ error: 'Method Not Allowed' });
+
+        // 1. Validate env
         const LAMBDA_KEY = process.env.PLATFORM_AWS_ACCESS_KEY_ID;
         const LAMBDA_SECRET = process.env.PLATFORM_AWS_SECRET_ACCESS_KEY;
         const FUNCTION_NAME = process.env.SCAN_FUNCTION_NAME || "comp-flow-ains-dev-scan";
@@ -14,7 +20,11 @@ export default async function handler(req, res) {
             return res.status(503).json({ error: "Cloud scanner credentials missing in environment." });
         }
 
-        // 3. Initialize Client
+        // 2. Create a job record in DynamoDB
+        const clientId = req.body?.clientId || 'adhoc_user';
+        const jobId = await createJob(clientId, 'on_demand');
+
+        // 3. Initialize Lambda client
         const lambda = new LambdaClient({
             region: process.env.AWS_REGION || "us-east-1",
             credentials: {
@@ -23,15 +33,16 @@ export default async function handler(req, res) {
             }
         });
 
-        // 4. Trigger Async
+        // 4. Trigger Lambda async with jobId
         const payload = {
+            jobId,
             provider: req.body?.provider,
             credentials: req.body?.credentials,
-            clientId: req.body?.clientId || 'adhoc_user',
+            clientId,
             email: req.body?.email
         };
 
-        console.log(`[SCAN-PROXY] dispatching to ${FUNCTION_NAME}`);
+        console.log(`[SCAN-PROXY] Job ${jobId} → dispatching to ${FUNCTION_NAME}`);
 
         const command = new InvokeCommand({
             FunctionName: FUNCTION_NAME,
@@ -41,10 +52,12 @@ export default async function handler(req, res) {
 
         await lambda.send(command);
 
+        // 5. Return jobId immediately
         return res.status(202).json({ 
             success: true, 
             status: 'queued', 
-            clientId: payload.clientId 
+            jobId,
+            clientId
         });
 
     } catch (err) {
