@@ -1,4 +1,5 @@
-import { SESClient, SendRawEmailCommand } from '@aws-sdk/client-ses';
+import pkg from '@aws-sdk/client-sesv2';
+const { SESv2Client, SendEmailCommand } = pkg;
 import nodemailer from 'nodemailer';
 import PDFDocument from 'pdfkit';
 import { ControlMatrix } from './controls.js';
@@ -15,7 +16,7 @@ if (process.env.PLATFORM_AWS_ACCESS_KEY_ID && process.env.PLATFORM_AWS_SECRET_AC
     };
 }
 
-const sesClient = new SESClient(sesConfig);
+const sesClient = new SESv2Client(sesConfig);
 const FROM_EMAIL = process.env.AWS_SES_FROM_EMAIL || 'reports@complianceflow.ai';
 
 /**
@@ -154,7 +155,7 @@ export async function sendReport(recipientEmail, clientName, reportHtml, pdfBuff
     }
 
     const transporter = nodemailer.createTransport({
-        SES: { ses: sesClient, aws: { SendRawEmailCommand } }
+        SES: { sesClient, SendEmailCommand }
     });
 
     const mailOptions = {

@@ -146,7 +146,6 @@ window.Scanner = (() => {
         if (window.DriftEngine) DriftEngine.setBaseline(resources);
         if (window.Remediation) Remediation.buildFromScan(resources);
     }
-    }
 
     async function runBackgroundScan() {
         if (!CloudConnect.isConnected()) return null;
