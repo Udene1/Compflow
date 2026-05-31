@@ -115,7 +115,7 @@
                     <div class="onboarding-banner" style="background: rgba(16, 185, 129, 0.1); border: 1px solid rgba(16,185,129,0.3); padding: 1rem; border-radius: 8px; margin-bottom: 2rem; display: flex; justify-content: space-between; align-items: center;">
                         <div>
                             <h4 style="color: #10b981; margin-bottom: 0.25rem;">Secure AWS Onboarding</h4>
-                            <p style="font-size: 0.85rem; color: var(--text-muted);">Use our automated template to provision a mathematically provable Least-Privilege cross-account role.</p>
+                            <p style="font-size: 0.85rem; color: var(--text-muted);">Welcome to ComplianceFlow. Let's secure your cloud. Use our automated template to provision a mathematically provable Least-Privilege cross-account role.</p>
                         </div>
                         <a href="complianceflow-iam-setup.yaml" download class="btn btn-primary btn-sm">📦 Download CloudFormation</a>
                     </div>
@@ -497,13 +497,33 @@
                     </div>
 
                     <div class="input-group">
-                        <label>AWS Access Key ID</label>
-                        <input type="text" id="setting-access-key" placeholder="AKIA...">
+                        <label>Authentication Method</label>
+                        <select id="setting-auth-method" onchange="CloudConnect.toggleAuthMethod()" style="background:rgba(0,0,0,0.2); color:#fff; border:1px solid rgba(255,255,255,0.1); padding:0.5rem; border-radius:4px; width:100%">
+                            <option value="keys">API Keys (Direct Access)</option>
+                            <option value="role">IAM Role (Cross-Account Secure)</option>
+                        </select>
                     </div>
 
-                    <div class="input-group">
-                        <label>AWS Secret Access Key</label>
-                        <input type="password" id="setting-secret-key" placeholder="••••••••••••••••">
+                    <div id="aws-keys-group">
+                        <div class="input-group">
+                            <label>AWS Access Key ID</label>
+                            <input type="text" id="setting-access-key" placeholder="AKIA...">
+                        </div>
+                        <div class="input-group">
+                            <label>AWS Secret Access Key</label>
+                            <input type="password" id="setting-secret-key" placeholder="••••••••••••••••">
+                        </div>
+                    </div>
+
+                    <div id="aws-role-group" style="display:none">
+                        <div class="input-group">
+                            <label>Cross-Account Role ARN</label>
+                            <input type="text" id="setting-role-arn" placeholder="arn:aws:iam::ACCOUNT_ID:role/ComplianceFlow-Role">
+                        </div>
+                        <div class="input-group">
+                            <label>External ID</label>
+                            <input type="text" id="setting-external-id" placeholder="Your unique security handshake ID" value="CF-AINS-ONBOARDING-SECRET">
+                        </div>
                     </div>
 
                     <div class="input-group">

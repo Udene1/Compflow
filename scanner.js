@@ -37,7 +37,7 @@ window.Scanner = (() => {
         }
 
         btn.disabled = true;
-        btn.textContent = 'Scanning...';
+        btn.textContent = 'Analyzing your perimeter...';
         window._lastScanTime = now;
 
         scannedResources = [];

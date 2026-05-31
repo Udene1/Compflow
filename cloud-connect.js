@@ -45,23 +45,26 @@ window.CloudConnect = (() => {
     }
 
     function saveSettings() {
-        const provider = document.getElementById('setting-provider').value;
+        const authMethod = document.getElementById('setting-auth-method').value;
         const accessKey = document.getElementById('setting-access-key').value;
         const secretKey = document.getElementById('setting-secret-key').value;
+        const roleArn = document.getElementById('setting-role-arn').value;
+        const externalId = document.getElementById('setting-external-id').value;
         const region = document.getElementById('setting-region').value;
         const reportEmail = document.getElementById('setting-report-email').value;
 
-        if (!accessKey || !secretKey) {
+        if (authMethod === 'keys' && (!accessKey || !secretKey)) {
             alert('Please provide both access key and secret key.');
             return;
         }
+        if (authMethod === 'role' && !roleArn) {
+            alert('Please provide the Role ARN.');
+            return;
+        }
 
-        state.credentials[provider] = {
-            accessKeyId: accessKey,
-            secretAccessKey: secretKey,
-            region: region,
-            reportEmail: reportEmail
-        };
+        const data = { authMethod, accessKey, secretKey, roleArn, externalId, region, reportEmail };
+        localStorage.setItem('cf_aws_creds', JSON.stringify(data));
+        state.credentials[provider] = data;
 
         closeSettings();
         LiveTerminal.log('system', `Credentials saved for ${provider.toUpperCase()}. Ready to connect.`);
