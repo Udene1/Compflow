@@ -204,12 +204,19 @@ window.CloudConnect = (() => {
         return {
             accessKeyId: obfuscate(creds.accessKeyId),
             secretAccessKey: obfuscate(creds.secretAccessKey),
-            region: creds.region, // non-sensitive
+            region: creds.region,
+            reportEmail: creds.reportEmail,
             isObfuscated: true
         };
     }
 
-    return { init, isConnected, getProviders, getCredentials, openSettings, closeSettings, saveSettings };
+    function getSettings() {
+        // Return first active provider's settings
+        const active = Object.keys(state.credentials)[0];
+        return state.credentials[active] || {};
+    }
+
+    return { init, isConnected, getProviders, getCredentials, getSettings, openSettings, closeSettings, saveSettings };
 })();
 
 document.addEventListener('DOMContentLoaded', CloudConnect.init);

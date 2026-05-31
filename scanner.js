@@ -138,6 +138,7 @@ window.Scanner = (() => {
 
                 // Check terminal states
                 if (job.status === 'completed') {
+                    await displayResults(job.resources || []);
                     return job.resources || [];
                 }
 
