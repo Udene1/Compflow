@@ -45,6 +45,7 @@ window.CloudConnect = (() => {
     }
 
     function saveSettings() {
+        const provider = document.getElementById('setting-provider').value;
         const authMethod = document.getElementById('setting-auth-method').value;
         const accessKey = document.getElementById('setting-access-key').value;
         const secretKey = document.getElementById('setting-secret-key').value;
