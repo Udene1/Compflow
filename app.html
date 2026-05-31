@@ -172,7 +172,6 @@
                     <div class="scan-header">
                         <h3>Resource Scanner</h3>
                         <div style="display:flex; gap:0.5rem; align-items:center; flex-wrap:wrap;">
-                            <input type="email" id="scan-report-email" placeholder="Email reports to..." class="btn btn-secondary btn-sm" style="width:180px; text-transform:none; cursor:text; background:rgba(255,255,255,0.02)">
                             <button class="btn btn-secondary btn-sm" onclick="Scanner.simulateDrift()">🧪 Simulate Drift</button>
                             <button class="btn btn-primary" id="btn-start-scan">Start Scan</button>
                         </div>
@@ -510,6 +509,11 @@
                     <div class="input-group">
                         <label>Default Region</label>
                         <input type="text" id="setting-region" placeholder="us-east-1" value="us-east-1">
+                    </div>
+
+                    <div class="input-group">
+                        <label>Reporting Email</label>
+                        <input type="email" id="setting-report-email" placeholder="compliance@yourcompany.com">
                     </div>
 
                     <div class="modal-actions">

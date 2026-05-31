@@ -58,10 +58,13 @@ window.Scanner = (() => {
             LiveTerminal.log('system', 'Directing scan request to cloud engine...');
 
             // ── Step 1: Trigger scan and get jobId ──
+            const settings = CloudConnect.getSettings();
+            const email = settings.reportEmail;
+
             const triggerRes = await fetch(`${BASE_URL}/api/scan`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ provider, credentials, clientId, email: document.getElementById('scan-report-email')?.value })
+                body: JSON.stringify({ provider, credentials, clientId, email })
             });
 
             if (!triggerRes.ok) throw new Error(`HTTP ${triggerRes.status}`);
@@ -151,9 +154,11 @@ window.Scanner = (() => {
         return null; // Timeout
     }
 
-    function displayResults(resources) {
+    async function displayResults(resources) {
         document.getElementById('resource-tbody').innerHTML = '';
-        resources.forEach((res, i) => {
+        
+        // Use for...of to correctly await async evidence capture
+        for (const [i, res] of resources.entries()) {
             res.id = i;
             const controlKeys = Frameworks.getMapping(res.type, res.issue);
             res.controlKeys = controlKeys;
@@ -163,14 +168,14 @@ window.Scanner = (() => {
             res.control = controlDetail ? controlDetail.id : 'N/A';
 
             addResourceRow(res);
-            if (window.Evidence) Evidence.captureFromScan(res);
+            if (window.Evidence) await Evidence.captureFromScan(res);
             
             if (res.severity === 'critical') {
                 LiveTerminal.log('insight', `CRITICAL: ${res.type} "${res.name}" — ${res.issue}`);
             } else if (res.severity === 'warning') {
                 LiveTerminal.log('agent', `Warning: ${res.type} "${res.name}" — ${res.issue}`);
             }
-        });
+        }
 
         LiveTerminal.log('output', `Scan complete: ${resources.length} resources found.`);
         updateStatsUI();

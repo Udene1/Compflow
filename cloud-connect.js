@@ -49,6 +49,7 @@ window.CloudConnect = (() => {
         const accessKey = document.getElementById('setting-access-key').value;
         const secretKey = document.getElementById('setting-secret-key').value;
         const region = document.getElementById('setting-region').value;
+        const reportEmail = document.getElementById('setting-report-email').value;
 
         if (!accessKey || !secretKey) {
             alert('Please provide both access key and secret key.');
@@ -58,7 +59,8 @@ window.CloudConnect = (() => {
         state.credentials[provider] = {
             accessKeyId: accessKey,
             secretAccessKey: secretKey,
-            region: region
+            region: region,
+            reportEmail: reportEmail
         };
 
         closeSettings();
