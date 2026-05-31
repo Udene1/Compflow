@@ -188,5 +188,5 @@ window.Frameworks = (() => {
         return DATA[fwId]?.controls[ctrlId];
     }
 
-    return { DATA, setFramework, getCurrent, getMapping, getControlDetails };
+    return { DATA, setFramework, getCurrent, getCurrentId, getMapping, getControlDetails };
 })();

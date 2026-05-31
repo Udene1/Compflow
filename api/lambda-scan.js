@@ -2,6 +2,8 @@ import { runScan } from '../core/scanner.js';
 import { log } from '../core/logger.js';
 import { saveAuditLog } from '../core/audit.js';
 import { updateJobProgress, completeJob } from '../core/jobs.js';
+import * as reporter from '../core/reporter.js';
+
 
 /**
  * Lambda Scan Handler
@@ -11,7 +13,7 @@ export const handler = async (event) => {
     // Determine if this is an API Gateway event or a direct invocation
     const isApiGateway = !!event.httpMethod;
     const body = isApiGateway ? JSON.parse(event.body || '{}') : event;
-    const { credentials, provider, clientId = 'adhoc_user', jobId } = body;
+    const { credentials, provider, clientId = 'adhoc_user', jobId, email } = body;
 
     const headers = {
         'Content-Type': 'application/json',
@@ -83,6 +85,22 @@ export const handler = async (event) => {
         // ── Step 6: Complete the job ──
         if (jobId) {
             await completeJob(jobId, 'completed', result.resources || []);
+        }
+
+        // ── Step 7: Email Report (if requested) ──
+        if (email) {
+            console.log(`[LAMBDA-SCAN] Generating report for ${email}...`);
+            const remediationSummary = {
+                resolved: 0,
+                details: (result.resources || []).filter(r => r.severity !== 'pass').map(r => ({
+                    name: r.name,
+                    status: 'active',
+                    issue: r.issue
+                }))
+            };
+            const reportHtml = reporter.generateReport(clientId, result.resources || [], remediationSummary);
+            const pdfBuffer = await reporter.generatePdfReport(clientId, result.resources || []);
+            await reporter.sendReport(email, clientId, reportHtml, pdfBuffer);
         }
 
         console.log(`[LAMBDA-SCAN] Scan complete. ${result.resources?.length || 0} resources recorded.`);

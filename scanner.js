@@ -163,6 +163,7 @@ window.Scanner = (() => {
             res.control = controlDetail ? controlDetail.id : 'N/A';
 
             addResourceRow(res);
+            if (window.Evidence) Evidence.captureFromScan(res);
             
             if (res.severity === 'critical') {
                 LiveTerminal.log('insight', `CRITICAL: ${res.type} "${res.name}" — ${res.issue}`);
@@ -177,6 +178,7 @@ window.Scanner = (() => {
         
         if (window.DriftEngine) DriftEngine.setBaseline(resources);
         if (window.Remediation) Remediation.buildFromScan(resources);
+        if (window.Evidence) Evidence.refreshView();
     }
 
     async function runBackgroundScan() {
