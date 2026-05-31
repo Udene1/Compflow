@@ -8,12 +8,10 @@ window.CloudConnect = (() => {
     };
 
     const STEPS = [
-        'Initiating hand-off to cloud agent...',
-        'Validating API keys with provider...',
-        'Checking IAM permission scope (ReadOnlyAccess)...',
-        'Verifying S3/EC2 enumeration capabilities...',
-        'Establishing secure session...',
-        'Cloud environment connected.'
+        'Establishing secure handshake...',
+        'Validating identity with provider...',
+        'Verifying audit permission scope...',
+        'Securing governance session...'
     ];
 
     function init() {
