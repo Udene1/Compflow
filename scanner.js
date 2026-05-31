@@ -55,7 +55,7 @@ window.Scanner = (() => {
         
         try {
             const clientId = 'adhoc_user';
-            LiveTerminal.log('system', 'Directing scan request to cloud engine...');
+            LiveTerminal.log('system', 'Consulting the cloud engine for your infrastructure map...');
 
             // ── Step 1: Trigger scan and get jobId ──
             const settings = CloudConnect.getSettings();

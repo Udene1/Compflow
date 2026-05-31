@@ -26,7 +26,7 @@ Parameters:
   ComplianceFlowAccountId:
     Type: String
     Description: The AWS Account ID of the ComplianceFlow orchestration environment.
-    Default: '123456789012' # Placeholder for the ComplianceFlow central account
+    Default: '716563790683' # The central ComplianceFlow orchestration account
 
   ExternalId:
     Type: String

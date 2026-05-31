@@ -3,6 +3,7 @@ import { log } from '../core/logger.js';
 import { saveAuditLog } from '../core/audit.js';
 import { updateJobProgress, completeJob } from '../core/jobs.js';
 import * as reporter from '../core/reporter.js';
+import { getClientCredentials } from '../core/credentials.js';
 
 
 /**
@@ -35,6 +36,32 @@ export const handler = async (event) => {
                 : { error: err };
         }
 
+        // ── Step 0: Handle Cross-Account AssumeRole ──
+        let activeCredentials = credentials;
+        if (credentials.authMethod === 'role' && credentials.roleArn) {
+            console.log(`[LAMBDA-SCAN] Cross-account scan requested. Assuming role: ${credentials.roleArn}`);
+            if (jobId) await updateJobProgress(jobId, 'in_progress', 15, 'AGENT', `Assuming cross-account role: ${credentials.roleArn.split('/').pop()}...`);
+            
+            try {
+                const sessionCredentials = await getClientCredentials(
+                    credentials.roleArn, 
+                    clientId, 
+                    credentials.externalId
+                );
+                activeCredentials = {
+                    ...credentials,
+                    accessKeyId: sessionCredentials.accessKeyId,
+                    secretAccessKey: sessionCredentials.secretAccessKey,
+                    sessionToken: sessionCredentials.sessionToken,
+                    isObfuscated: false // They are raw from STS
+                };
+            } catch (err) {
+                console.error('[LAMBDA-SCAN] AssumeRole failed:', err);
+                if (jobId) await completeJob(jobId, 'failed', [], `AssumeRole Failed: ${err.message}`);
+                throw err;
+            }
+        }
+
         // ── Step 1: Mark in_progress ──
         if (jobId) {
             await updateJobProgress(jobId, 'in_progress', 10, 'SYSTEM', `Scan started for ${provider.toUpperCase()}`);
@@ -52,7 +79,7 @@ export const handler = async (event) => {
             await updateJobProgress(jobId, 'in_progress', 30, 'AGENT', `Executing ${provider.toUpperCase()} resource enumeration...`);
         }
 
-        const result = await runScan(provider, credentials);
+        const result = await runScan(provider, activeCredentials);
 
         if (jobId) {
             const resourceCount = result.resources?.length || 0;

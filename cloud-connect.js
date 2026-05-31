@@ -202,8 +202,11 @@ window.CloudConnect = (() => {
         
         // Return obfuscated creds for secure transit
         return {
-            accessKeyId: obfuscate(creds.accessKeyId),
-            secretAccessKey: obfuscate(creds.secretAccessKey),
+            authMethod: creds.authMethod,
+            accessKeyId: obfuscate(creds.accessKey),
+            secretAccessKey: obfuscate(creds.secretKey),
+            roleArn: creds.roleArn,
+            externalId: creds.externalId,
             region: creds.region,
             reportEmail: creds.reportEmail,
             isObfuscated: true
@@ -216,7 +219,7 @@ window.CloudConnect = (() => {
         return state.credentials[active] || {};
     }
 
-    return { init, isConnected, getProviders, getCredentials, getSettings, openSettings, closeSettings, saveSettings };
+    return { init, isConnected, getProviders, getCredentials, getSettings, openSettings, closeSettings, saveSettings, toggleAuthMethod };
 })();
 
 document.addEventListener('DOMContentLoaded', CloudConnect.init);
