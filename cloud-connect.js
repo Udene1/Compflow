@@ -57,14 +57,14 @@ window.CloudConnect = (() => {
     function saveSettings() {
         const provider = document.getElementById('setting-provider').value;
         const authMethod = document.getElementById('setting-auth-method').value;
-        const accessKey = document.getElementById('setting-access-key').value;
-        const secretKey = document.getElementById('setting-secret-key').value;
+        const accessKeyId = document.getElementById('setting-access-key').value;
+        const secretAccessKey = document.getElementById('setting-secret-key').value;
         const roleArn = document.getElementById('setting-role-arn').value;
         const externalId = document.getElementById('setting-external-id').value;
         const region = document.getElementById('setting-region').value;
         const reportEmail = document.getElementById('setting-report-email').value;
 
-        if (authMethod === 'keys' && (!accessKey || !secretKey)) {
+        if (authMethod === 'keys' && (!accessKeyId || !secretAccessKey)) {
             alert('Please provide both access key and secret key.');
             return;
         }
@@ -73,7 +73,7 @@ window.CloudConnect = (() => {
             return;
         }
 
-        const data = { authMethod, accessKey, secretKey, roleArn, externalId, region, reportEmail };
+        const data = { authMethod, accessKeyId, secretAccessKey, roleArn, externalId, region, reportEmail };
         localStorage.setItem('cf_aws_creds', JSON.stringify(data));
         state.credentials[provider] = data;
 
@@ -173,6 +173,12 @@ window.CloudConnect = (() => {
             
             LiveTerminal.log('insight', `CONNECTION ERROR: ${err.message}`);
             showToast(`Connection failed: ${err.message}`);
+
+            // If it was an auto-connect failure, clear the bad state to stop the loop
+            if (localStorage.getItem('cf_aws_creds')) {
+                console.warn("Clearing invalid saved credentials.");
+                localStorage.removeItem('cf_aws_creds');
+            }
         }
     }
 
@@ -229,8 +235,8 @@ window.CloudConnect = (() => {
         // Return obfuscated creds for secure transit
         return {
             authMethod: creds.authMethod,
-            accessKeyId: obfuscate(creds.accessKey),
-            secretAccessKey: obfuscate(creds.secretKey),
+            accessKeyId: obfuscate(creds.accessKeyId),
+            secretAccessKey: obfuscate(creds.secretAccessKey),
             roleArn: creds.roleArn,
             externalId: creds.externalId,
             region: creds.region,
