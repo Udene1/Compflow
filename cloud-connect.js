@@ -148,9 +148,21 @@ window.CloudConnect = (() => {
             updateChips();
 
             // Show the Tracker UI on the Scan Page
+            const tracker = document.getElementById('scheduled-scan-tracker');
+            if (tracker) {
+                tracker.style.display = 'block';
+                
+                // Calculate next scan time (e.g. 2 hours from now for visual UI display)
+                const now = new Date();
+                now.setHours(now.getHours() + 2);
+                document.getElementById('next-scan-time').textContent = 'Next Scan: ' + now.toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'}) + ' UTC';
+                
                 const evidence = Evidence.getEvidenceLog();
-                const remediationCount = evidence.filter(e => e.type === 'Remediation Action').length;
-                document.getElementById('last-scan-status').innerHTML = `Last Scan: <span style="color:var(--success)">Auto-Remediated ${remediationCount} Issues</span>`;
+                const remediationCount = (evidence || []).filter(e => e.type === 'Remediation Action').length;
+                const statusEl = document.getElementById('last-scan-status');
+                if (statusEl) {
+                    statusEl.innerHTML = `Last Scan: <span style="color:var(--success)">Auto-Remediated ${remediationCount} Issues</span>`;
+                }
             }
 
         } catch (err) {

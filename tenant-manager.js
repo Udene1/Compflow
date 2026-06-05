@@ -33,10 +33,15 @@ window.TenantManager = (() => {
 
         empty.style.display = 'none';
         list.style.display = 'grid';
-        list.innerHTML = tenants.map(t => `
+        list.innerHTML = tenants.map(t => {
+            const statusBadge = t.configStatus ? 
+                `<span class="status-badge warn" style="font-size:0.65rem; margin-left:0.5rem;">${t.configStatus}</span>` : 
+                `<span class="status-badge pass" style="font-size:0.65rem; margin-left:0.5rem;">Active</span>`;
+            
+            return `
             <div class="tenant-card">
                 <div class="tenant-info">
-                    <h4>${t.name} <span class="provider-tag">${t.provider.toUpperCase()}</span></h4>
+                    <h4>${t.name} <span class="provider-tag">${t.provider.toUpperCase()}</span> ${statusBadge}</h4>
                     <code>${t.roleArn ? t.roleArn.split('/').pop() : 'API Key Active'}</code>
                 </div>
                 <div class="tenant-controls">
@@ -50,8 +55,8 @@ window.TenantManager = (() => {
                     <button class="btn btn-secondary btn-sm" onclick="TenantManager.runScan('${t.id}')">Scan Now</button>
                     <button class="btn btn-sm btn-danger" onclick="TenantManager.removeTenant('${t.id}')">🗑️</button>
                 </div>
-            </div>
-        `).join('');
+            </div>`;
+        }).join('');
     }
 
     function openOnboarding() {
@@ -148,10 +153,11 @@ window.TenantManager = (() => {
             externalId = 'CF-EXT-' + crypto.randomUUID().toUpperCase();
             const roleArn = `arn:aws:iam::${awsAccountId}:role/ComplianceFlow-AINS-Scanner`;
             
-            const s3Url = "https://raw.githubusercontent.com/udene1/compflow/main/complianceflow-iam-setup.yaml";
+            // USE CORRECT CASE for GitHub Raw URLs (Case-Sensitive)
+            const s3Url = "https://raw.githubusercontent.com/Udene1/Compflow/main/complianceflow-iam-setup.yaml";
             quickLink = `https://console.aws.amazon.com/cloudformation/home?region=us-east-1#/stacks/create/review?templateURL=${s3Url}&stackName=ComplianceFlow-Integration&param_ExternalId=${externalId}`;
             
-            credentials = { roleArn, externalId };
+            credentials = { roleArn, externalId, configStatus: 'Awaiting AWS Setup' };
         } else if (provider === 'gcp') {
             const jsonKey = document.getElementById('onboard-gcp-json').value;
             if (!jsonKey) return alert("GCP JSON Key is required");
