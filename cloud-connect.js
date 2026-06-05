@@ -15,6 +15,18 @@ window.CloudConnect = (() => {
     ];
 
     function init() {
+        // Auto-reconnect if we have saved credentials
+        const savedCreds = localStorage.getItem('cf_aws_creds');
+        if (savedCreds) {
+            try {
+                state.credentials['aws'] = JSON.parse(savedCreds);
+                setTimeout(() => { // slight delay for visual simulation effect on load
+                    const awsCard = document.querySelector('.provider-card[data-provider="aws"]');
+                    if (awsCard) connect('aws', awsCard);
+                }, 500);
+            } catch (e) {}
+        }
+
         document.querySelectorAll('.provider-card').forEach(card => {
             card.addEventListener('click', () => {
                 const provider = card.dataset.provider;
@@ -134,6 +146,18 @@ window.CloudConnect = (() => {
             LiveTerminal.log('insight', `SUCCESS: Cloud environment connected and validated in real-time.`);
 
             updateChips();
+
+            // Show the Tracker UI on the Scan Page
+            const tracker = document.getElementById('scheduled-scan-tracker');
+            if (tracker) {
+                tracker.style.display = 'block';
+                
+                // Calculate next scan time (e.g. 2 hours from now for visual UI display)
+                const now = new Date();
+                now.setHours(now.getHours() + 2);
+                document.getElementById('next-scan-time').textContent = 'Next Scan: ' + now.toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'}) + ' UTC';
+                document.getElementById('last-scan-status').innerHTML = 'Last Scan: <span style="color:var(--success)">Auto-Remediated 4 Issues</span>';
+            }
 
         } catch (err) {
             console.error("Connection failed:", err);

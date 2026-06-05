@@ -6,23 +6,6 @@ Description: |
   low-risk security findings.
 
 Parameters:
-  CustomerName:
-    Type: String
-    Description: The name of your organization (no spaces).
-    MinLength: 3
-    MaxLength: 20
-    AllowedPattern: '^[a-zA-Z0-9\-]+$'
-
-  Environment:
-    Type: String
-    Description: The environment this role will monitor (e.g., Prod, Staging, Dev).
-    Default: 'Prod'
-    AllowedValues:
-      - 'Prod'
-      - 'Staging'
-      - 'Dev'
-      - 'Sandbox'
-
   ComplianceFlowAccountId:
     Type: String
     Description: The AWS Account ID of the ComplianceFlow orchestration environment.
@@ -31,14 +14,14 @@ Parameters:
   ExternalId:
     Type: String
     Description: A unique string provided by ComplianceFlow for secure AssumeRole access to prevent confused deputy attacks.
-    Default: 'CF-AINS-ONBOARDING-SECRET'
     MinLength: 8
+    NoEcho: true
 
 Resources:
   ComplianceFlowCrossAccountRole:
     Type: AWS::IAM::Role
     Properties:
-      RoleName: !Sub "ComplianceFlow-AINS-${Environment}-${CustomerName}"
+      RoleName: "ComplianceFlow-AINS-Scanner"
       AssumeRolePolicyDocument:
         Version: '2012-10-17'
         Statement:

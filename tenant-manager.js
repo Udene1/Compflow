@@ -71,8 +71,8 @@ window.TenantManager = (() => {
         if (provider === 'aws') {
             container.innerHTML = `
                 <div class="input-group">
-                    <label>AWS Role ARN</label>
-                    <input type="text" id="onboard-role" placeholder="arn:aws:iam::...:role/ComplianceRole">
+                    <label>AWS Account ID</label>
+                    <input type="text" id="onboard-aws-account" placeholder="12-Digit Account ID (e.g. 123456789012)" maxlength="12" pattern="\\d{12}">
                 </div>
             `;
         } else if (provider === 'gcp') {
@@ -118,10 +118,23 @@ window.TenantManager = (() => {
         const autoRemediate = document.getElementById('onboard-auto').checked;
 
         let credentials = {};
+        let externalId = null;
+        let quickLink = null;
+        
         if (provider === 'aws') {
-            const roleArn = document.getElementById('onboard-role').value;
-            if (!roleArn) return alert("Role ARN is required");
-            credentials = { roleArn };
+            const awsAccountId = document.getElementById('onboard-aws-account').value;
+            if (!awsAccountId || !/^\\d{12}$/.test(awsAccountId)) {
+                return alert("A valid 12-digit AWS Account ID is required");
+            }
+            
+            // Generate unique ExternalId and deterministic ARN
+            externalId = 'CF-EXT-' + crypto.randomUUID().toUpperCase();
+            const roleArn = \`arn:aws:iam::\${awsAccountId}:role/ComplianceFlow-AINS-Scanner\`;
+            
+            const s3Url = "https://raw.githubusercontent.com/udene1/compflow/main/complianceflow-iam-setup.yaml";
+            quickLink = \`https://console.aws.amazon.com/cloudformation/home?region=us-east-1#/stacks/create/review?templateURL=\${s3Url}&stackName=ComplianceFlow-Integration&param_ExternalId=\${externalId}\`;
+            
+            credentials = { roleArn, externalId };
         } else if (provider === 'gcp') {
             const jsonKey = document.getElementById('onboard-gcp-json').value;
             if (!jsonKey) return alert("GCP JSON Key is required");
@@ -141,6 +154,7 @@ window.TenantManager = (() => {
         }
 
         if (!name) return alert("Name is required.");
+        if (!email) return alert("A reporting email is required for scan report delivery.");
 
         try {
             const res = await fetch(`/api/tenants`, {
@@ -153,6 +167,11 @@ window.TenantManager = (() => {
                 showToast("Tenant onboarded successfully!");
                 closeOnboarding();
                 await loadTenants();
+                
+                if (provider === 'aws' && quickLink) {
+                    window.open(quickLink, '_blank');
+                    showToast("Opening AWS Quick-Create Link... Please deploy the stack.");
+                }
             }
         } catch (e) {
             showToast("Error saving tenant: " + e.message);

@@ -199,6 +199,20 @@
                         </div>
                     </div>
 
+                    <div class="scan-history-card" id="scheduled-scan-tracker" style="display:none; background:rgba(0,0,0,0.2); border:1px solid rgba(255,255,255,0.05); padding:1rem; border-radius:8px; margin-bottom:1rem; margin-top:1rem;">
+                        <h4 style="font-size:0.9rem; color:var(--text-muted); margin-bottom:0.8rem; text-transform:uppercase; letter-spacing:0.05em;">Autonomous Schedule</h4>
+                        <div style="display:flex; justify-content:space-between; align-items:center;">
+                            <div>
+                                <div style="font-size:1.05rem; font-weight:600; color:#fff;" id="next-scan-time">Next Scan: Today at 12:00 PM UTC</div>
+                                <div style="font-size:0.75rem; color:var(--text-dim); margin-top:3px;">Triggered natively via AWS EventBridge Cron</div>
+                            </div>
+                            <div style="text-align:right;">
+                                <div style="font-size:0.9rem; color:var(--text-muted);" id="last-scan-status">Last Scan: 0 anomalies (No Data)</div>
+                                <div style="font-size:0.8rem; margin-top:3px;"><a href="#" onclick="switchPanel('reports')" style="color:var(--primary); text-decoration:none;">View Full Audit Logs →</a></div>
+                            </div>
+                        </div>
+                    </div>
+                    
                     <div class="monitor-history" id="monitor-history"></div>
 
                     <!-- Framework Maturity Matrix -->
@@ -460,8 +474,9 @@
                     </div>
 
                     <div class="input-group">
-                        <label>Contact Email</label>
-                        <input type="email" id="onboard-email" placeholder="compliance@company.com">
+                        <label>Report Delivery Email <span style="color:var(--danger)">*</span></label>
+                        <input type="email" id="onboard-email" placeholder="compliance@company.com" required>
+                        <small style="color:var(--text-dim); font-size:0.72rem;">Automated scan reports & alerts will be sent here.</small>
                     </div>
                     <div style="display:flex; align-items:center; gap:0.5rem; margin-top:1rem;">
                         <input type="checkbox" id="onboard-auto" checked>
