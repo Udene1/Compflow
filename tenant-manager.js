@@ -153,9 +153,10 @@ window.TenantManager = (() => {
             externalId = 'CF-EXT-' + crypto.randomUUID().toUpperCase();
             const roleArn = `arn:aws:iam::${awsAccountId}:role/ComplianceFlow-AINS-Scanner`;
             
-            // USE CORRECT CASE for GitHub Raw URLs (Case-Sensitive)
+            // USE CORRECT CASE and ENCODE for GitHub Raw URLs
             const s3Url = "https://raw.githubusercontent.com/Udene1/Compflow/main/complianceflow-iam-setup.yaml";
-            quickLink = `https://console.aws.amazon.com/cloudformation/home?region=us-east-1#/stacks/create/review?templateURL=${s3Url}&stackName=ComplianceFlow-Integration&param_ExternalId=${externalId}`;
+            const encodedUrl = encodeURIComponent(s3Url);
+            quickLink = `https://console.aws.amazon.com/cloudformation/home?region=us-east-1#/stacks/create/review?templateURL=${encodedUrl}&stackName=ComplianceFlow-Integration&param_ExternalId=${encodeURIComponent(externalId)}`;
             
             credentials = { roleArn, externalId, configStatus: 'Awaiting AWS Setup' };
         } else if (provider === 'gcp') {
