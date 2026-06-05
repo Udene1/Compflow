@@ -245,7 +245,7 @@ window.CloudConnect = (() => {
         return state.credentials[active] || {};
     }
 
-    return { init, isConnected, getProviders, getCredentials, getSettings, openSettings, closeSettings, saveSettings, toggleAuthMethod };
+    return { init, isConnected, getProviders, getCredentials, getSettings, openSettings, closeSettings, saveSettings };
 })();
 
 document.addEventListener('DOMContentLoaded', CloudConnect.init);

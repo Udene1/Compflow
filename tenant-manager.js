@@ -123,16 +123,16 @@ window.TenantManager = (() => {
         
         if (provider === 'aws') {
             const awsAccountId = document.getElementById('onboard-aws-account').value;
-            if (!awsAccountId || !/^\\d{12}$/.test(awsAccountId)) {
+            if (!awsAccountId || !/^\d{12}$/.test(awsAccountId)) {
                 return alert("A valid 12-digit AWS Account ID is required");
             }
             
             // Generate unique ExternalId and deterministic ARN
             externalId = 'CF-EXT-' + crypto.randomUUID().toUpperCase();
-            const roleArn = \`arn:aws:iam::\${awsAccountId}:role/ComplianceFlow-AINS-Scanner\`;
+            const roleArn = `arn:aws:iam::${awsAccountId}:role/ComplianceFlow-AINS-Scanner`;
             
             const s3Url = "https://raw.githubusercontent.com/udene1/compflow/main/complianceflow-iam-setup.yaml";
-            quickLink = \`https://console.aws.amazon.com/cloudformation/home?region=us-east-1#/stacks/create/review?templateURL=\${s3Url}&stackName=ComplianceFlow-Integration&param_ExternalId=\${externalId}\`;
+            quickLink = `https://console.aws.amazon.com/cloudformation/home?region=us-east-1#/stacks/create/review?templateURL=${s3Url}&stackName=ComplianceFlow-Integration&param_ExternalId=${externalId}`;
             
             credentials = { roleArn, externalId };
         } else if (provider === 'gcp') {
