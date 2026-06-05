@@ -295,11 +295,18 @@ window.Scanner = (() => {
         document.getElementById('sidebar-score').textContent = score + '%';
     }
 
-    function markFixed(resourceId) {
+    async function markFixed(resourceId) {
         const res = scannedResources.find(r => r.id === resourceId);
         if (res) {
+            const before = { severity: res.severity, issue: res.issue };
             res.severity = 'pass';
             res.issue = null;
+
+            if (window.Evidence) {
+                await Evidence.captureFromRemediation(res, before, { severity: 'pass', issue: null });
+                Evidence.refreshView();
+            }
+
             const row = document.getElementById('resource-row-' + resourceId);
             if (row) {
                 const badge = row.querySelector('.severity-badge');

@@ -14,8 +14,18 @@ window.Evidence = (() => {
         return 'SHA256-' + Array.from(new Uint8Array(buf)).map(b => b.toString(16).padStart(2,'0')).join('').toUpperCase();
     }
 
+    function load() {
+        try {
+            const saved = localStorage.getItem('cf_evidence');
+            if (saved) evidenceData = JSON.parse(saved);
+        } catch (e) { console.error("Evidence Load Error", e); }
+    }
+
+    function save() {
+        localStorage.setItem('cf_evidence', JSON.stringify(evidenceData));
+    }
+
     async function captureFromScan(resource) {
-        // Tag with all mapped controls
         const controls = resource.controlKeys || ['soc2:CC6.1'];
         const hash = await SHA256(resource.name + resource.type + Date.now());
         
@@ -31,6 +41,7 @@ window.Evidence = (() => {
             data: resource
         };
         evidenceData.push(item);
+        save();
         
         if (window.LiveTerminal) {
             LiveTerminal.log('system', `Evidence captured: ${item.id} mapped to ${controls.length} frameworks.`);
@@ -53,6 +64,7 @@ window.Evidence = (() => {
             data: { before, after }
         };
         evidenceData.push(item);
+        save();
         
         if (window.LiveTerminal) {
             LiveTerminal.log('system', `Remediation evidence signed: ${item.id}`);
@@ -61,8 +73,6 @@ window.Evidence = (() => {
 
     function refreshView() {
         const fw = Frameworks.getCurrent();
-        
-        // Update subtitles
         const subtitle = document.getElementById('evidence-subtitle');
         if (subtitle) subtitle.textContent = `All captured evidence mapped to ${fw.name} requirements.`;
 
@@ -77,6 +87,8 @@ window.Evidence = (() => {
         const empty = document.getElementById('evidence-empty');
         const fwId = Frameworks.getCurrentId();
 
+        if (!container || !empty) return;
+
         if (evidenceData.length === 0) {
             empty.style.display = 'block';
             container.innerHTML = '';
@@ -85,12 +97,10 @@ window.Evidence = (() => {
 
         empty.style.display = 'none';
         
-        // Filter based on current framework
         const filtered = evidenceData.filter(e => e.controls.some(c => c.startsWith(fwId)));
 
         container.innerHTML = filtered.map(item => {
             const ctrlLabels = item.controls.filter(c => c.startsWith(fwId)).map(c => c.split(':')[1]);
-            
             return `
             <div class="evidence-entry">
                 <div class="evidence-main">
@@ -107,7 +117,10 @@ window.Evidence = (() => {
                 </div>
                 <div class="ev-integrity">✓ Verified</div>
             </div>`;
-        function generateReport() {
+        }).join('');
+    }
+
+    function generateReport() {
         if (evidenceData.length === 0) return;
         
         reportGenerated = true;
@@ -115,18 +128,18 @@ window.Evidence = (() => {
         const empty = document.getElementById('report-empty');
         const proContainer = document.getElementById('professional-report-container');
         
-        empty.style.display = 'none';
-        proContainer.style.display = 'block';
+        if (empty) empty.style.display = 'none';
+        if (proContainer) proContainer.style.display = 'block';
 
-        // Set metadata
-        document.getElementById('rep-date-val').textContent = new Date().toLocaleString();
+        const repDate = document.getElementById('rep-date-val');
+        if (repDate) repDate.textContent = new Date().toLocaleString();
         
-        // Calculate scores for all frameworks
         const frameworks = ['soc2', 'gdpr', 'hipaa', 'iso27001'];
         const coverage = {};
         
         frameworks.forEach(fwId => {
             const fw = Frameworks.DATA[fwId];
+            if (!fw) return;
             const relevantEvidence = evidenceData.filter(e => e.controls.some(c => c.startsWith(fwId)));
             const coveredCtrls = new Set();
             relevantEvidence.forEach(e => {
@@ -135,83 +148,76 @@ window.Evidence = (() => {
             const totalCtrls = Object.keys(fw.controls).length;
             coverage[fwId] = Math.round((coveredCtrls.size / totalCtrls) * 100);
             
-            // Update UI
             const scoreEl = document.getElementById(`score-${fwId === 'iso27001' ? 'iso' : fwId}`);
             if (scoreEl) scoreEl.textContent = coverage[fwId] + '%';
         });
 
-        // Set Risk Meter (Inverse of average coverage)
         const avgCoverage = Object.values(coverage).reduce((a, b) => a + b, 0) / 4;
         const riskFill = document.getElementById('risk-fill');
         const riskVal = document.getElementById('risk-val');
         const riskLevel = 100 - avgCoverage;
         
-        riskFill.style.width = riskLevel + '%';
-        if (riskLevel < 20) {
-            riskVal.textContent = 'Low Risk';
-            riskVal.style.color = 'var(--success)';
-        } else if (riskLevel < 50) {
-            riskVal.textContent = 'Medium Risk';
-            riskVal.style.color = 'var(--warning)';
-        } else {
-            riskVal.textContent = 'High Risk';
-            riskVal.style.color = 'var(--danger)';
+        if (riskFill) riskFill.style.width = riskLevel + '%';
+        if (riskVal) {
+            if (riskLevel < 20) {
+                riskVal.textContent = 'Low Risk';
+                riskVal.style.color = 'var(--success)';
+            } else if (riskLevel < 50) {
+                riskVal.textContent = 'Medium Risk';
+                riskVal.style.color = 'var(--warning)';
+            } else {
+                riskVal.textContent = 'High Risk';
+                riskVal.style.color = 'var(--danger)';
+            }
         }
 
-        // Generate Executive Summary Text
         const summaryText = document.getElementById('exec-summary-text');
-        const criticalCount = evidenceData.filter(e => e.data.severity === 'critical').length;
-        summaryText.textContent = `Infrastructure audit complete. Analysis of 120+ controls reveals an average maturity of ${Math.round(avgCoverage)}%. ` +
-            (criticalCount > 0 ? `Urgent attention required for ${criticalCount} critical vulnerabilities in perimeter security.` : 
-            `Compliance posture is significantly hardened across all scale providers.`);
+        const criticalCount = evidenceData.filter(e => e.data && e.data.severity === 'critical').length;
+        if (summaryText) {
+            summaryText.textContent = `Infrastructure audit complete. Analysis of 120+ controls reveals an average maturity of ${Math.round(avgCoverage)}%. ` +
+                (criticalCount > 0 ? `Urgent attention required for ${criticalCount} critical vulnerabilities in perimeter security.` : 
+                `Compliance posture is significantly hardened across all scale providers.`);
+        }
 
-        // Build Findings Table
-        container.innerHTML = `
-            <div class="evidence-table-wrap">
-                <table class="evidence-table">
-                    <thead>
-                        <tr>
-                            <th>ID</th>
-                            <th>Resource</th>
-                            <th>Provider</th>
-                            <th>Controls Met</th>
-                            <th>Integrity Hash</th>
-                        </tr>
-                    </thead>
-                    <tbody>
-                        ${evidenceData.map(e => `
+        if (container) {
+            container.innerHTML = `
+                <div class="evidence-table-wrap">
+                    <table class="evidence-table">
+                        <thead>
                             <tr>
-                                <td><code>${e.id}</code></td>
-                                <td>
-                                    <div style="font-weight:600;">${e.source}</div>
-                                    <div style="font-size:0.7rem; color:var(--text-dim);">${e.resourceType}</div>
-                                </td>
-                                <td><span class="fw-status-badge">${e.provider || 'Multi-Cloud'}</span></td>
-                                <td>
-                                    <div class="control-badges-wrap">
-                                        ${e.controls.map(c => {
-                                            const [fw, id] = c.split(':');
-                                            const fwClass = fw === 'iso27001' ? 'iso' : fw;
-                                            return `<span class="rem-control-tag ${fwClass}" title="${c}">${fw[0].toUpperCase()}</span>`;
-                                        }).join('')}
-                                    </div>
-                                </td>
-                                <td><code style="font-size:0.65rem;">${e.hash.substring(0, 16)}...</code></td>
+                                <th>ID</th>
+                                <th>Resource</th>
+                                <th>Provider</th>
+                                <th>Controls Met</th>
+                                <th>Integrity Hash</th>
                             </tr>
-                        `).join('')}
-                    </tbody>
-                </table>
-            </div>
-
-            <div class="report-chain no-print">
-                <h4>🔐 Chain of Custody & Cryptographic Proof</h4>
-                <div class="chain-info">
-                    <span>Root Hash: <code>${evidenceData[0]?.hash || 'PENDING'}</code></span>
-                    <span>Validator: ComplianceFlow AI Governance Node</span>
-                    <span>State: <span class="chain-verified">✓ Cryptographically Verified</span></span>
+                        </thead>
+                        <tbody>
+                            ${evidenceData.map(e => `
+                                <tr>
+                                    <td><code>${e.id}</code></td>
+                                    <td>
+                                        <div style="font-weight:600;">${e.source}</div>
+                                        <div style="font-size:0.7rem; color:var(--text-dim);">${e.resourceType}</div>
+                                    </td>
+                                    <td><span class="fw-status-badge">${e.provider || 'Multi-Cloud'}</span></td>
+                                    <td>
+                                        <div class="control-badges-wrap">
+                                            ${e.controls.map(c => {
+                                                const fw = c.split(':')[0];
+                                                const fwClass = fw === 'iso27001' ? 'iso' : fw;
+                                                return `<span class="rem-control-tag ${fwClass}" title="${c}">${fw[0].toUpperCase()}</span>`;
+                                            }).join('')}
+                                        </div>
+                                    </td>
+                                    <td><code style="font-size:0.65rem;">${e.hash.substring(0, 16)}...</code></td>
+                                </tr>
+                            `).join('')}
+                        </tbody>
+                    </table>
                 </div>
-            </div>
-        `;
+            `;
+        }
     }
 
     function downloadJSON() {
@@ -228,6 +234,12 @@ window.Evidence = (() => {
         linkElement.click();
     }
 
-    return { captureFromScan, captureFromRemediation, generateReport, downloadJSON, refreshView };
+    function getEvidenceLog() {
+        return evidenceData;
+    }
+
+    load();
+
+    return { captureFromScan, captureFromRemediation, generateReport, downloadJSON, refreshView, getEvidenceLog };
 })();
 

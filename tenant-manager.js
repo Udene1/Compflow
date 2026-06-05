@@ -71,8 +71,12 @@ window.TenantManager = (() => {
         if (provider === 'aws') {
             container.innerHTML = `
                 <div class="input-group">
-                    <label>AWS Account ID</label>
-                    <input type="text" id="onboard-aws-account" placeholder="12-Digit Account ID (e.g. 123456789012)" maxlength="12" pattern="\\d{12}">
+                    <label>AWS Account ID <span style="color:var(--danger)">*</span></label>
+                    <input type="text" id="onboard-aws-account" placeholder="12-Digit Account ID" maxlength="12" oninput="TenantManager.updatePathPreview()">
+                </div>
+                <div id="arn-preview-wrap" style="background:rgba(0,0,0,0.2); padding:0.6rem; border-radius:4px; font-size:0.75rem; border:1px solid rgba(255,255,255,0.05); margin-top:0.5rem; display:none;">
+                    <div style="color:var(--text-dim); margin-bottom:4px; text-transform:uppercase; font-size:0.65rem;">Predicted Scanner ARN:</div>
+                    <code id="arn-preview" style="color:var(--primary); word-break:break-all;">arn:aws:iam::...:role/ComplianceFlow-AINS-Scanner</code>
                 </div>
             `;
         } else if (provider === 'gcp') {
@@ -108,6 +112,19 @@ window.TenantManager = (() => {
                     <input type="password" id="onboard-token" placeholder="Bearer Token...">
                 </div>
             `;
+        }
+    }
+
+    function updatePathPreview() {
+        const accId = document.getElementById('onboard-aws-account').value;
+        const wrap = document.getElementById('arn-preview-wrap');
+        const preview = document.getElementById('arn-preview');
+        
+        if (accId && accId.length === 12) {
+            wrap.style.display = 'block';
+            preview.textContent = `arn:aws:iam::${accId}:role/ComplianceFlow-AINS-Scanner`;
+        } else {
+            wrap.style.display = 'none';
         }
     }
 
@@ -256,7 +273,7 @@ window.TenantManager = (() => {
         } catch (e) { console.error(e); }
     }
 
-    return { init, openOnboarding, closeOnboarding, saveTenant, toggleAuto, runScan, removeTenant, updateOnboardFields };
+    return { init, openOnboarding, closeOnboarding, saveTenant, toggleAuto, runScan, removeTenant, updateOnboardFields, updatePathPreview };
 })();
 
 document.addEventListener('DOMContentLoaded', TenantManager.init);

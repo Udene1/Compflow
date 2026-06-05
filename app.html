@@ -468,8 +468,12 @@
                     <!-- Dynamic Fields Container -->
                     <div id="onboard-dynamic-fields">
                         <div class="input-group">
-                            <label>AWS Role ARN</label>
-                            <input type="text" id="onboard-role" placeholder="arn:aws:iam::...:role/ComplianceRole">
+                            <label>AWS Account ID <span style="color:var(--danger)">*</span></label>
+                            <input type="text" id="onboard-aws-account" placeholder="12-Digit Account ID" maxlength="12" oninput="TenantManager.updatePathPreview()">
+                        </div>
+                        <div id="arn-preview-wrap" style="background:rgba(0,0,0,0.2); padding:0.6rem; border-radius:4px; font-size:0.75rem; border:1px solid rgba(255,255,255,0.05); margin-top:0.5rem; display:none;">
+                            <div style="color:var(--text-dim); margin-bottom:4px; text-transform:uppercase; font-size:0.65rem;">Predicted Scanner ARN:</div>
+                            <code id="arn-preview" style="color:var(--primary); word-break:break-all;">arn:aws:iam::...:role/ComplianceFlow-AINS-Scanner</code>
                         </div>
                     </div>
 
