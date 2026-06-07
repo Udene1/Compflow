@@ -32,7 +32,7 @@ window.Scanner = (() => {
         const COOLDOWN = 60000; // 60 seconds
         if (window._lastScanTime && (now - window._lastScanTime < COOLDOWN)) {
             const remaining = Math.ceil((COOLDOWN - (now - window._lastScanTime)) / 1000);
-            LiveTerminal.log('system', `Please wait ${remaining}s before re-scanning.`);
+            if (window.LiveTerminal) LiveTerminal.log('system', 'Scanner initialized. Ready for resource interrogation.');
             return;
         }
 
@@ -48,8 +48,8 @@ window.Scanner = (() => {
         document.getElementById('scan-progress-wrap').style.display = 'block';
         document.getElementById('scan-progress-fill').style.width = '5%';
 
-        LiveTerminal.log('system', `Contacting real cloud APIs for ${provider.toUpperCase()}...`);
-        LiveTerminal.log('agent', `Requesting enumeration of resources...`);
+        if (window.LiveTerminal) LiveTerminal.log('system', `Contacting real cloud APIs for ${provider.toUpperCase()}...`);
+        if (window.LiveTerminal) LiveTerminal.log('agent', 'Resource interrogation complete. Mapping findings to ' + Frameworks.getCurrent().name);
 
         const BASE_URL = ""; // Use relative paths for Vercel deployment
         

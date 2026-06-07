@@ -153,8 +153,8 @@ window.TenantManager = (() => {
             externalId = 'CF-EXT-' + crypto.randomUUID().toUpperCase();
             const roleArn = `arn:aws:iam::${awsAccountId}:role/ComplianceFlow-AINS-Scanner`;
             
-            // USE CORRECT CASE and ENCODE for GitHub Raw URLs
-            const s3Url = "https://raw.githubusercontent.com/Udene1/Compflow/main/complianceflow-iam-setup.yaml";
+            // USE VERCEL HOSTED TEMPLATE (Case-Sensitive & Encoded)
+            const s3Url = "https://comp-flow.vercel.app/complianceflow-iam-setup.yaml";
             const encodedUrl = encodeURIComponent(s3Url);
             quickLink = `https://console.aws.amazon.com/cloudformation/home?region=us-east-1#/stacks/create/review?templateURL=${encodedUrl}&stackName=ComplianceFlow-Integration&param_ExternalId=${encodeURIComponent(externalId)}`;
             
@@ -188,14 +188,14 @@ window.TenantManager = (() => {
             });
 
             if (res.ok) {
-                showToast("Tenant onboarded successfully!");
-                closeOnboarding();
-                await loadTenants();
-                
                 if (provider === 'aws' && quickLink) {
                     window.open(quickLink, '_blank');
-                    showToast("Opening AWS Quick-Create Link... Please deploy the stack.");
+                    showToast("Redirecting to AWS for IAM configuration...");
                 }
+                
+                showToast("Environment registered in Governance Registry.");
+                closeOnboarding();
+                await loadTenants();
             }
         } catch (e) {
             showToast("Error saving tenant: " + e.message);
@@ -225,7 +225,7 @@ window.TenantManager = (() => {
         }
 
         showToast("Dispatching autonomous scan task...");
-        LiveTerminal.log('system', `Manual scan triggered for tenant: ${id}`);
+        if (window.LiveTerminal) LiveTerminal.log('system', `Manual scan triggered for tenant: ${id}`);
         window._lastTriggerTime[id] = now;
 
         try {
@@ -237,7 +237,7 @@ window.TenantManager = (() => {
 
             if (!triggerRes.ok) throw new Error("Failed to dispatch scan");
             
-            LiveTerminal.log('agent', `Scan queued for ${id}. Awaiting cloud agent results...`);
+            if (window.LiveTerminal) LiveTerminal.log('agent', `Scan queued for ${id}. Awaiting cloud agent results...`);
             
             // Poll for completion logs
             let attempts = 0;
@@ -245,7 +245,7 @@ window.TenantManager = (() => {
                 attempts++;
                 if (attempts > 30) {
                     clearInterval(poll);
-                    LiveTerminal.log('insight', `Scan for ${id} timed out. Check Background Tasks.`);
+                    if (window.LiveTerminal) LiveTerminal.log('insight', `Scan for ${id} timed out. Check Background Tasks.`);
                     return;
                 }
 
@@ -257,17 +257,17 @@ window.TenantManager = (() => {
                     const complete = logs.find(l => l.level === 'SCAN_COMPLETE' && new Date(l.timestamp).getTime() > now - 5000);
                     if (complete) {
                         clearInterval(poll);
-                        LiveTerminal.log('output', `✓ Scan Complete for ${id}: ${complete.message}`);
+                        if (window.LiveTerminal) LiveTerminal.log('output', `✓ Scan Complete for ${id}: ${complete.message}`);
                         if (complete.details && complete.details.summary) {
                             const s = complete.details.summary;
-                            LiveTerminal.log('insight', `Results: ${s.resolved} Fixed, ${s.escalated} Escalated.`);
+                            if (window.LiveTerminal) LiveTerminal.log('insight', `Results: ${s.resolved} Fixed, ${s.escalated} Escalated.`);
                         }
                     }
                 } catch (e) { console.warn("Poll error", e); }
             }, 3000);
 
         } catch (e) {
-            LiveTerminal.log('insight', `TRigger Failed: ${e.message}`);
+            if (window.LiveTerminal) LiveTerminal.log('insight', `Trigger Failed: ${e.message}`);
         }
     }
 

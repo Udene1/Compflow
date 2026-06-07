@@ -78,7 +78,7 @@ window.CloudConnect = (() => {
         state.credentials[provider] = data;
 
         closeSettings();
-        LiveTerminal.log('system', `Credentials saved for ${provider.toUpperCase()}. Ready to connect.`);
+        if (window.LiveTerminal) LiveTerminal.log('system', `Credentials saved for ${provider.toUpperCase()}. Ready to connect.`);
         
         // Find the card and trigger connect
         const card = document.querySelector(`.provider-card[data-provider="${provider}"]`);
@@ -106,12 +106,12 @@ window.CloudConnect = (() => {
             return div;
         });
 
-        LiveTerminal.log('system', `Initiating real connection to ${provider.toUpperCase()}...`);
+        if (window.LiveTerminal) LiveTerminal.log('system', `Initiating real connection to ${provider.toUpperCase()}...`);
 
         try {
             // Update UI to first step
             updateStepUI(0, stepEls, barEl);
-            LiveTerminal.log('agent', STEPS[0]);
+            if (window.LiveTerminal) LiveTerminal.log('agent', STEPS[0]);
 
             const response = await fetch(`/api/validate`, {
                 method: 'POST',
@@ -132,7 +132,7 @@ window.CloudConnect = (() => {
             for (let i = 1; i < STEPS.length; i++) {
                 await new Promise(r => setTimeout(r, 400));
                 updateStepUI(i, stepEls, barEl);
-                LiveTerminal.log('agent', STEPS[i]);
+                if (window.LiveTerminal) LiveTerminal.log('agent', STEPS[i]);
             }
 
             barEl.style.width = '100%';
@@ -142,8 +142,10 @@ window.CloudConnect = (() => {
             card.classList.add('connected');
 
             state.providers[provider] = true;
-            LiveTerminal.log('output', `${provider.toUpperCase()} Identity Verified: ${data.identity || 'Session Active'}`);
-            LiveTerminal.log('insight', `SUCCESS: Cloud environment connected and validated in real-time.`);
+            if (window.LiveTerminal) {
+                LiveTerminal.log('output', `${provider.toUpperCase()} Identity Verified: ${data.identity || 'Session Active'}`);
+                LiveTerminal.log('insight', `SUCCESS: Cloud environment connected and validated in real-time.`);
+            }
 
             updateChips();
 
@@ -177,7 +179,7 @@ window.CloudConnect = (() => {
             currentStep.classList.add('error');
             currentStep.querySelector('.check').textContent = '✕';
             
-            LiveTerminal.log('insight', `CONNECTION ERROR: ${err.message}`);
+            if (window.LiveTerminal) LiveTerminal.log('insight', `CONNECTION ERROR: ${err.message}`);
             showToast(`Connection failed: ${err.message}`);
 
             // If it was an auto-connect failure, clear the bad state to stop the loop
