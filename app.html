@@ -522,10 +522,12 @@
                     
                     <div class="input-group">
                         <label>Provider</label>
-                        <select id="setting-provider">
+                        <select id="setting-provider" onchange="CloudConnect.toggleAuthMethod()">
                             <option value="aws">Amazon Web Services (AWS)</option>
                             <option value="gcp">Google Cloud Platform (GCP)</option>
                             <option value="azure">Microsoft Azure</option>
+                            <option value="hetzner">Hetzner Cloud</option>
+                            <option value="digitalocean">DigitalOcean</option>
                         </select>
                     </div>
 
@@ -534,6 +536,7 @@
                         <select id="setting-auth-method" onchange="CloudConnect.toggleAuthMethod()" style="background:rgba(0,0,0,0.2); color:#fff; border:1px solid rgba(255,255,255,0.1); padding:0.5rem; border-radius:4px; width:100%">
                             <option value="keys">API Keys (Direct Access)</option>
                             <option value="role">IAM Role (Cross-Account Secure)</option>
+                            <option value="token">API Token (Provider Specific)</option>
                         </select>
                     </div>
 
@@ -556,6 +559,13 @@
                         <div class="input-group">
                             <label>External ID</label>
                             <input type="text" id="setting-external-id" placeholder="Your unique security handshake ID" value="CF-AINS-ONBOARDING-SECRET">
+                        </div>
+                    </div>
+
+                    <div id="token-group" style="display:none">
+                        <div class="input-group">
+                            <label id="token-label">API Token / Service Key</label>
+                            <input type="password" id="setting-token" placeholder="Paste your provider token here">
                         </div>
                     </div>
 

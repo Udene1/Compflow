@@ -61,6 +61,7 @@ window.CloudConnect = (() => {
         const secretAccessKey = document.getElementById('setting-secret-key').value;
         const roleArn = document.getElementById('setting-role-arn').value;
         const externalId = document.getElementById('setting-external-id').value;
+        const apiToken = document.getElementById('setting-token').value;
         const region = document.getElementById('setting-region').value;
         const reportEmail = document.getElementById('setting-report-email').value;
 
@@ -72,8 +73,12 @@ window.CloudConnect = (() => {
             alert('Please provide the Role ARN.');
             return;
         }
+        if (authMethod === 'token' && !apiToken) {
+            alert('Please provide the API Token.');
+            return;
+        }
 
-        const data = { authMethod, accessKeyId, secretAccessKey, roleArn, externalId, region, reportEmail };
+        const data = { authMethod, accessKeyId, secretAccessKey, roleArn, externalId, apiToken, region, reportEmail };
         localStorage.setItem('cf_aws_creds', JSON.stringify(data));
         state.credentials[provider] = data;
 
@@ -86,16 +91,27 @@ window.CloudConnect = (() => {
     }
 
     function toggleAuthMethod() {
-        const method = document.getElementById('setting-auth-method').value;
+        const provider = document.getElementById('setting-provider').value;
+        const method = document.getElementById('setting-auth-method');
         const keysGroup = document.getElementById('aws-keys-group');
         const roleGroup = document.getElementById('aws-role-group');
-        
-        if (method === 'keys') {
-            keysGroup.style.display = 'block';
-            roleGroup.style.display = 'none';
-        } else {
-            keysGroup.style.display = 'none';
-            roleGroup.style.display = 'block';
+        const tokenGroup = document.getElementById('token-group');
+        const tokenLabel = document.getElementById('token-label');
+
+        // Auto-select best method for provider
+        if (provider === 'hetzner' || provider === 'digitalocean') {
+            if (method.value !== 'token') method.value = 'token';
+        } else if (provider === 'aws' && method.value === 'token') {
+            method.value = 'keys';
+        }
+
+        const selectedMethod = method.value;
+        keysGroup.style.display = selectedMethod === 'keys' ? 'block' : 'none';
+        roleGroup.style.display = selectedMethod === 'role' ? 'block' : 'none';
+        tokenGroup.style.display = selectedMethod === 'token' ? 'block' : 'none';
+
+        if (selectedMethod === 'token') {
+            tokenLabel.textContent = (provider === 'gcp') ? 'Service Account JSON' : 'API Token';
         }
     }
 
@@ -257,6 +273,7 @@ window.CloudConnect = (() => {
             secretAccessKey: obfuscate(creds.secretAccessKey),
             roleArn: creds.roleArn,
             externalId: creds.externalId,
+            apiToken: obfuscate(creds.apiToken),
             region: creds.region,
             reportEmail: creds.reportEmail,
             isObfuscated: true
