@@ -153,11 +153,7 @@ window.CloudConnect = (() => {
             const tracker = document.getElementById('scheduled-scan-tracker');
             if (tracker) {
                 tracker.style.display = 'block';
-                
-                // Calculate next scan time (e.g. 2 hours from now for visual UI display)
-                const now = new Date();
-                now.setHours(now.getHours() + 2);
-                document.getElementById('next-scan-time').textContent = 'Next Scan: ' + now.toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'}) + ' UTC';
+                updateNextScanUI();
                 
                 const evidence = Evidence.getEvidenceLog();
                 const remediationCount = (evidence || []).filter(e => e.type === 'Remediation Action').length;
@@ -253,13 +249,28 @@ window.CloudConnect = (() => {
         };
     }
 
-    function getSettings() {
-        // Return first active provider's settings
-        const active = Object.keys(state.credentials)[0];
-        return state.credentials[active] || {};
+    function updateNextScanUI() {
+        const el = document.getElementById('next-scan-time');
+        if (!el) return;
+
+        // Calculate next occurrence of 12:00 PM UTC
+        const now = new Date();
+        const next = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate(), 12, 0, 0));
+        
+        // If 12:00 UTC already passed today, set to tomorrow
+        if (now >= next) {
+            next.setUTCDate(next.getUTCDate() + 1);
+        }
+
+        // Handle weekends (Cron is MON-FRI)
+        const day = next.getUTCDay();
+        if (day === 0) next.setUTCDate(next.getUTCDate() + 1); // Sun -> Mon
+        if (day === 6) next.setUTCDate(next.getUTCDate() + 2); // Sat -> Mon
+
+        el.textContent = 'Next Autonomous Scan: ' + next.toLocaleDateString([], { weekday: 'long' }) + ' at ' + next.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) + ' UTC';
     }
 
-    return { init, isConnected, getProviders, getCredentials, getSettings, openSettings, closeSettings, saveSettings };
+    return { init, isConnected, getProviders, getCredentials, getSettings, openSettings, closeSettings, saveSettings, updateNextScanUI };
 })();
 
 document.addEventListener('DOMContentLoaded', CloudConnect.init);

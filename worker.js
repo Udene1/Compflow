@@ -37,7 +37,7 @@ export const handler = async (event) => {
         if (client.provider === 'aws') {
             log.info(`[CREDENTIALS] Assuming AWS role ${client.roleArn}...`);
             await trackProgress('in_progress', 10, 'AGENT', `Assuming AWS role ${client.roleArn}...`);
-            credentials = await getClientCredentials(client.roleArn, client.id);
+            credentials = await getClientCredentials(client.roleArn, client.id, client.externalId);
             log.info(`[CREDENTIALS] ✓ AWS session established.`);
             await trackProgress('in_progress', 15, 'AGENT', '✓ AWS session established.');
         } else if (client.provider === 'gcp') {

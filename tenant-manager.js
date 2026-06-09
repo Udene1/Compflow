@@ -258,7 +258,14 @@ window.TenantManager = (() => {
                     if (complete) {
                         clearInterval(poll);
                         if (window.LiveTerminal) LiveTerminal.log('output', `✓ Scan Complete for ${id}: ${complete.message}`);
-                        if (complete.details && complete.details.summary) {
+                        
+                        // Populate UI with results if available in the log
+                        if (complete.details && complete.details.resources) {
+                            if (window.Scanner) {
+                                Scanner.displayResults(complete.details.resources);
+                                if (window.LiveTerminal) LiveTerminal.log('insight', `Dashboard populated with ${complete.details.resources.length} resources.`);
+                            }
+                        } else if (complete.details && complete.details.summary) {
                             const s = complete.details.summary;
                             if (window.LiveTerminal) LiveTerminal.log('insight', `Results: ${s.resolved} Fixed, ${s.escalated} Escalated.`);
                         }

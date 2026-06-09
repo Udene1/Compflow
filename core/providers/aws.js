@@ -781,16 +781,16 @@ export async function runScan(provider, credentials) {
                     const { items } = await apigw.send(new GetRestApisCommand({}));
                     for (const api of items || []) {
                         if (!api.disableExecuteApiEndpoint) {
-                            resources.push({ name: api.name, type: 'API Gateway', icon: '🚪', region: config.region, severity: 'warning', control: 'CC6.6', issue: 'Default execute-api endpoint enabled' });
+                            resources.push({ name: api.id, type: 'API Gateway', icon: '🚪', region: config.region, severity: 'warning', control: 'CC6.6', issue: `Default execute-api endpoint enabled for API "${api.name}"` });
                         }
                         try {
                             const { item: stages } = await apigw.send(new GetStagesCommand({ restApiId: api.id }));
                             for (const stage of stages || []) {
                                 if (!stage.webAclArn) {
-                                    resources.push({ name: `${api.name}/${stage.stageName}`, type: 'API Gateway Stage', icon: '🚪', region: config.region, severity: 'warning', control: 'CC6.6', issue: 'No WAF WebACL associated' });
+                                    resources.push({ name: `${api.id}/${stage.stageName}`, type: 'API Gateway Stage', icon: '🚪', region: config.region, severity: 'warning', control: 'CC6.6', issue: `No WAF WebACL associated with API "${api.name}" stage "${stage.stageName}"` });
                                 }
                                 if (!stage.tracingEnabled) {
-                                    resources.push({ name: `${api.name}/${stage.stageName}`, type: 'API Gateway Stage', icon: '🚪', region: config.region, severity: 'warning', control: 'CC7.2', issue: 'X-Ray Tracing disabled' });
+                                    resources.push({ name: `${api.id}/${stage.stageName}`, type: 'API Gateway Stage', icon: '🚪', region: config.region, severity: 'warning', control: 'CC7.2', issue: `X-Ray Tracing disabled for API "${api.name}" stage "${stage.stageName}"` });
                                 }
                             }
                         } catch(e) {}

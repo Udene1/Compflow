@@ -181,6 +181,7 @@ window.Scanner = (() => {
         LiveTerminal.log('output', `Scan complete: ${resources.length} resources found.`);
         updateStatsUI();
         updateScore();
+        if (window.CloudConnect) CloudConnect.updateNextScanUI();
         
         if (window.DriftEngine) DriftEngine.setBaseline(resources);
         if (window.Remediation) Remediation.buildFromScan(resources);
