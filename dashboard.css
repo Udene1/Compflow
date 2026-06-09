@@ -35,9 +35,9 @@ body {
 /* ─── Layout ─── */
 .app-layout {
     display: flex;
-    flex: 1;
     height: 100dvh;
     width: 100%;
+    overflow: hidden;
 }
 
 /* ─── Sidebar ─── */
@@ -1546,15 +1546,21 @@ input:checked + .slider:before { transform: translateX(16px); }
         position: fixed;
         left: -100%;
         top: 0; bottom: 0;
-        z-index: 1000;
-        transition: 0.3s cubic-bezier(0.16, 1, 0.3, 1);
-        width: 280px;
+        z-index: 1100; /* Higher than chat */
+        transition: 0.4s cubic-bezier(0.16, 1, 0.3, 1);
+        width: 85%;
+        max-width: 300px;
+        box-shadow: 20px 0 50px rgba(0,0,0,0.5);
     }
     
     .sidebar.open { left: 0; }
     .sidebar-overlay.active { display: block; }
     
-    .topbar { padding: 0 1rem; }
+    .topbar { 
+        padding: 0 1rem;
+        background: var(--bg);
+        border-bottom: 1px solid var(--glass-border);
+    }
     .topbar-actions { display: none; }
     
     .risk-meter { height: 30px !important; }
@@ -1724,6 +1730,20 @@ input:checked + .slider:before { transform: translateX(16px); }
     transition: all 0.3s;
 }
 
+@media (max-width: 768px) {
+    .chat-toggle {
+        width: 50px;
+        height: 50px;
+        padding: 0;
+        justify-content: center;
+        border-radius: 50%;
+        bottom: 1.5rem;
+        right: 1.5rem;
+    }
+    .chat-toggle .label { display: none; }
+    .chat-toggle .icon { font-size: 1.4rem; }
+}
+
 .chat-toggle:hover { transform: translateY(-3px); box-shadow: 0 15px 30px rgba(99, 102, 241, 0.6); }
 
 .chat-drawer {
@@ -1850,8 +1870,10 @@ input:checked + .slider:before { transform: translateX(16px); }
 @media (max-width: 768px) {
     .chat-drawer {
         bottom: 0; right: 0; left: 0;
-        width: 100%; height: 70vh;
-        border-radius: 20px 20px 0 0;
+        width: 100%; height: 85dvh;
+        border-radius: 24px 24px 0 0;
+        z-index: 2000;
+        box-shadow: 0 -10px 50px rgba(0,0,0,0.6);
     }
 }
 
