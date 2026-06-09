@@ -85,6 +85,20 @@ window.CloudConnect = (() => {
         if (card) connect(provider, card);
     }
 
+    function toggleAuthMethod() {
+        const method = document.getElementById('setting-auth-method').value;
+        const keysGroup = document.getElementById('aws-keys-group');
+        const roleGroup = document.getElementById('aws-role-group');
+        
+        if (method === 'keys') {
+            keysGroup.style.display = 'block';
+            roleGroup.style.display = 'none';
+        } else {
+            keysGroup.style.display = 'none';
+            roleGroup.style.display = 'block';
+        }
+    }
+
     async function connect(provider, card) {
         if (state.providers[provider]) return;
 
@@ -249,6 +263,12 @@ window.CloudConnect = (() => {
         };
     }
 
+    function getSettings() {
+        // Return first active provider's settings
+        const active = Object.keys(state.credentials)[0];
+        return state.credentials[active] || {};
+    }
+
     function updateNextScanUI() {
         const el = document.getElementById('next-scan-time');
         if (!el) return;
@@ -270,7 +290,7 @@ window.CloudConnect = (() => {
         el.textContent = 'Next Autonomous Scan: ' + next.toLocaleDateString([], { weekday: 'long' }) + ' at ' + next.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) + ' UTC';
     }
 
-    return { init, isConnected, getProviders, getCredentials, getSettings, openSettings, closeSettings, saveSettings, updateNextScanUI };
+    return { init, isConnected, getProviders, getCredentials, getSettings, openSettings, closeSettings, saveSettings, toggleAuthMethod, updateNextScanUI };
 })();
 
 document.addEventListener('DOMContentLoaded', CloudConnect.init);

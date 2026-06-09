@@ -611,6 +611,54 @@ Note: "ADVISORY — $3,000/mo subscription required"`
     grantControls:
       builtInControls: ["mfa"]`
             }
+        },
+        
+        // ── Hetzner Resource Diffs ──
+        'Hetzner Server': {
+            'No firewall applied': {
+                before: `Server: "my-gpu-server"
+  Firewalls: []
+  PublicIP: 95.217.xx.xx`,
+                after: `Server: "my-gpu-server"
+  Firewalls: ["compliance-fw-managed"]
+  PublicIP: 95.217.xx.xx
+  # Applied managed Hetzner firewall`
+            },
+            'Password login enabled': {
+                before: `SSH Config:
+  PasswordAuthentication: yes
+  PermitRootLogin: yes`,
+                after: `SSH Config:
+  PasswordAuthentication: no
+  PermitRootLogin: prohibit-password
+  # Enforced SSH Key-only access`
+            }
+        },
+
+        // ── DigitalOcean Resource Diffs ──
+        'DigitalOcean Droplet': {
+            'VPC isolation disabled': {
+                before: `Droplet: "web-portal"
+  VPC_ID: "default"
+  PrivateNetworking: disabled`,
+                after: `Droplet: "web-portal"
+  VPC_ID: "do-compliance-vpc-1"
+  PrivateNetworking: enabled
+  # Isolated to private compliance VPC`
+            }
+        },
+        'DigitalOcean Firewall': {
+            'Inbound port 22 open to world': {
+                before: `InboundRules:
+  - protocol: tcp
+    ports: "22"
+    sources: ["0.0.0.0/0", "::/0"]`,
+                after: `InboundRules:
+  - protocol: tcp
+    ports: "22"
+    sources: ["10.10.0.0/16"]
+    # Restricted to VPC CIDR`
+            }
         }
     };
 

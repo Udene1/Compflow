@@ -110,6 +110,13 @@ window.TenantManager = (() => {
                     <input type="text" id="onboard-azure-sub" placeholder="00000000-0000-...">
                 </div>
             `;
+        } else if (provider === 'hetzner' || provider === 'digitalocean') {
+            container.innerHTML = `
+                <div class="input-group">
+                    <label>${provider === 'hetzner' ? 'Hetzner API Token' : 'DigitalOcean Personal Access Token'} <span style="color:var(--danger)">*</span></label>
+                    <input type="password" id="onboard-token" placeholder="Bearer Token...">
+                </div>
+            `;
         } else {
             container.innerHTML = `
                 <div class="input-group">
@@ -154,7 +161,8 @@ window.TenantManager = (() => {
             const roleArn = `arn:aws:iam::${awsAccountId}:role/ComplianceFlow-AINS-Scanner`;
             
             // USE VERCEL HOSTED TEMPLATE (Case-Sensitive & Encoded)
-            const s3Url = "https://comp-flow.vercel.app/complianceflow-iam-setup.yaml";
+            // Updated to use the public folder for stronger support
+            const s3Url = "https://comp-flow.vercel.app/public/complianceflow-iam-setup.yaml";
             const encodedUrl = encodeURIComponent(s3Url);
             quickLink = `https://console.aws.amazon.com/cloudformation/home?region=us-east-1#/stacks/create/review?templateURL=${encodedUrl}&stackName=ComplianceFlow-Integration&param_ExternalId=${encodeURIComponent(externalId)}`;
             
