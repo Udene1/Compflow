@@ -27,10 +27,22 @@ async function provision() {
         await client.send(new CreateTableCommand({
             TableName: TABLE_NAME,
             AttributeDefinitions: [
-                { AttributeName: "jobId", AttributeType: "S" }
+                { AttributeName: "jobId", AttributeType: "S" },
+                { AttributeName: "clientId", AttributeType: "S" },
+                { AttributeName: "createdAt", AttributeType: "S" }
             ],
             KeySchema: [
                 { AttributeName: "jobId", KeyType: "HASH" }
+            ],
+            GlobalSecondaryIndexes: [
+                {
+                    IndexName: "clientId-index",
+                    KeySchema: [
+                        { AttributeName: "clientId", KeyType: "HASH" },
+                        { AttributeName: "createdAt", KeyType: "RANGE" }
+                    ],
+                    Projection: { ProjectionType: "ALL" }
+                }
             ],
             BillingMode: "PAY_PER_REQUEST"
         }));

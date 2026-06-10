@@ -474,6 +474,18 @@
                         </tbody>
                     </table>
                 </div>
+
+                <!-- Session History Section -->
+                <div class="card" style="margin-top: 1rem; padding: 1.5rem;">
+                    <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom: 1rem;">
+                        <h3 style="margin:0; font-size: 1rem;">Recent Sessions</h3>
+                        <button class="btn btn-secondary btn-sm" onclick="ScanHistory.refresh()">🔄 Refresh</button>
+                    </div>
+                    <div id="scan-history-list" class="history-list">
+                        <!-- History items will be injected here -->
+                        <div class="empty-state">No recent sessions found.</div>
+                    </div>
+                </div>
             </section>
         </main>
 
@@ -654,6 +666,7 @@
     <script src="evidence.js?v=2.1"></script>
     <script src="cloud-connect.js"></script>
     <script src="monitoring-ui.js"></script>
+    <script src="scan-history.js"></script>
     <script src="app.js"></script>
     <script src="remediation.js?v=2.1"></script>
     <script src="drift-engine.js?v=2.1"></script>

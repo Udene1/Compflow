@@ -1964,3 +1964,69 @@ input:checked + .slider:before { transform: translateX(16px); }
     font-family: var(--font-mono);
     color: var(--text-light);
 }
+
+/* ─── Scan History Styling ─── */
+.history-list {
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+}
+
+.history-item {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 0.75rem 1rem;
+    background: rgba(255, 255, 255, 0.02);
+    border: 1px solid rgba(255, 255, 255, 0.05);
+    border-radius: 8px;
+    cursor: pointer;
+    transition: all 0.2s ease;
+}
+
+.history-item:hover {
+    background: rgba(255, 255, 255, 0.08);
+    border-color: var(--primary-color);
+    transform: translateX(5px);
+}
+
+.history-item .meta {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+}
+
+.history-item .time {
+    font-size: 0.8rem;
+    color: var(--text-muted);
+}
+
+.history-item .job-type {
+    font-size: 0.65rem;
+    color: var(--primary-color);
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+}
+
+.history-item .status-tag {
+    font-size: 0.7rem;
+    font-weight: 600;
+    text-transform: uppercase;
+    padding: 2px 6px;
+    border-radius: 4px;
+}
+
+.status-tag.completed { background: rgba(0, 255, 136, 0.1); color: #00ff88; }
+.status-tag.failed { background: rgba(255, 68, 68, 0.1); color: #ff4444; }
+
+.replay-badge {
+    display: inline-block;
+    background: var(--primary-color);
+    color: white;
+    font-size: 0.6rem;
+    font-weight: 800;
+    padding: 1px 6px;
+    border-radius: 3px;
+    margin-left: 10px;
+    vertical-align: middle;
+}

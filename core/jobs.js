@@ -2,7 +2,7 @@
 // DynamoDB operations for the CompFlowJobsTable
 
 import { DynamoDBClient } from "@aws-sdk/client-dynamodb";
-import { DynamoDBDocumentClient, PutCommand, UpdateCommand, GetCommand } from "@aws-sdk/lib-dynamodb";
+import { DynamoDBDocumentClient, PutCommand, UpdateCommand, GetCommand, QueryCommand } from "@aws-sdk/lib-dynamodb";
 import { randomUUID } from "crypto";
 
 const clientConfig = { 
@@ -148,7 +148,29 @@ export async function getJob(jobId) {
         }));
         return response.Item || null;
     } catch (e) {
-        console.error(`[JOBS] Failed to get job ${jobId}:`, e.message);
-        return null;
+    }
+}
+
+/**
+ * Retrieves recent job history for a client.
+ * Uses the clientId-index GSI.
+ * @param {string} clientId
+ * @param {number} limit
+ * @returns {Promise<Array>}
+ */
+export async function getJobHistory(clientId, limit = 5) {
+    try {
+        const response = await docClient.send(new QueryCommand({
+            TableName: TABLE_NAME,
+            IndexName: "clientId-index",
+            KeyConditionExpression: "clientId = :c",
+            ExpressionAttributeValues: { ":c": clientId },
+            Limit: limit,
+            ScanIndexForward: false // Newest first
+        }));
+        return response.Items || [];
+    } catch (e) {
+        console.error(`[JOBS] Failed to fetch history for ${clientId}:`, e.message);
+        return [];
     }
 }
