@@ -1,10 +1,10 @@
-import { DynamoDBClient, CreateTableCommand, DescribeTableCommand, UpdateTimeToLiveCommand } from "@aws-sdk/client-dynamodb";
+import { DynamoDBClient, CreateTableCommand, DescribeTableCommand, UpdateTimeToLiveCommand, UpdateTableCommand } from "@aws-sdk/client-dynamodb";
 
 const client = new DynamoDBClient({ 
     region: process.env.AWS_REGION || "us-east-1",
     credentials: {
-        accessKeyId: process.env.PLATFORM_AWS_ACCESS_KEY_ID,
-        secretAccessKey: process.env.PLATFORM_AWS_SECRET_ACCESS_KEY
+        accessKeyId: process.env.AWS_ACCESS_KEY_ID || process.env.PLATFORM_AWS_ACCESS_KEY_ID,
+        secretAccessKey: process.env.AWS_SECRET_ACCESS_KEY || process.env.PLATFORM_AWS_SECRET_ACCESS_KEY
     }
 });
 
@@ -16,8 +16,35 @@ async function provision() {
     try {
         // 1. Check if table exists
         try {
-            await client.send(new DescribeTableCommand({ TableName: TABLE_NAME }));
-            console.log("✅ Table already exists.");
+            const { Table } = await client.send(new DescribeTableCommand({ TableName: TABLE_NAME }));
+            console.log("✅ Table exists. Checking GSIs...");
+            
+            const hasGsi = Table.GlobalSecondaryIndexes?.some(g => g.IndexName === 'clientId-index');
+            if (!hasGsi) {
+                console.log("⏳ Adding missing clientId-index GSI...");
+                await client.send(new UpdateTableCommand({
+                    TableName: TABLE_NAME,
+                    AttributeDefinitions: [
+                        { AttributeName: "clientId", AttributeType: "S" },
+                        { AttributeName: "createdAt", AttributeType: "S" }
+                    ],
+                    GlobalSecondaryIndexUpdates: [
+                        {
+                            Create: {
+                                IndexName: "clientId-index",
+                                KeySchema: [
+                                    { AttributeName: "clientId", KeyType: "HASH" },
+                                    { AttributeName: "createdAt", KeyType: "RANGE" }
+                                ],
+                                Projection: { ProjectionType: "ALL" }
+                            }
+                        }
+                    ]
+                }));
+                console.log("✅ GSI Update initiated.");
+            } else {
+                console.log("✅ GSI already exists.");
+            }
             return;
         } catch (e) {
             if (e.name !== 'ResourceNotFoundException') throw e;

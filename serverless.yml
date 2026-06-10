@@ -146,3 +146,19 @@ functions:
           path: /api/validate
           method: post
           cors: true
+
+  monitoring:
+    handler: api/lambda-monitoring.handler
+    events:
+      - http:
+          path: /api/monitoring
+          method: post
+          cors: true
+
+  jobs:
+    handler: api/lambda-jobs.handler
+    events:
+      - http:
+          path: /api/jobs
+          method: post
+          cors: true
