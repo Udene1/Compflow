@@ -73,9 +73,11 @@
                     <span class="badge-count" id="evidence-badge" style="display:none">0</span>
                 </a>
 
-                <div class="nav-section-label">Reports</div>
                 <a class="nav-item" data-panel="reports" id="nav-reports">
                     <span class="icon">📄</span> Audit Report
+                </a>
+                <a class="nav-item" data-panel="monitoring" id="nav-monitoring">
+                    <span class="icon">📈</span> System Health
                 </a>
             </nav>
             <div class="sidebar-footer">
@@ -429,6 +431,50 @@
                 </div>
 
             </div>
+            <!-- Monitoring Panel -->
+            <section id="panel-monitoring" class="content-panel" style="display:none">
+                <div class="panel-header">
+                    <h2>Governance Engine Health</h2>
+                    <p>Real-time monitoring of remediation jobs and failure rates.</p>
+                </div>
+
+                <div class="stats-grid">
+                    <div class="stat-card">
+                        <div class="stat-value" id="monitor-total-jobs">0</div>
+                        <div class="stat-label">Total Jobs (24h)</div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-value" id="monitor-success-rate">100%</div>
+                        <div class="stat-label">Success Rate</div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-value text-error" id="monitor-failed-jobs">0</div>
+                        <div class="stat-label">Failed Remediations</div>
+                    </div>
+                </div>
+
+                <div class="data-table-container" style="margin-top: 2rem;">
+                    <h3>Recent Failures & Incidents</h3>
+                    <table class="data-table">
+                        <thead>
+                            <tr>
+                                <th>Timestamp</th>
+                                <th>Provider</th>
+                                <th>Action</th>
+                                <th>Error Message</th>
+                                <th>Status</th>
+                            </tr>
+                        </thead>
+                        <tbody id="monitor-failure-list">
+                            <tr>
+                                <td colspan="5" style="text-align:center; padding: 2rem; color: var(--text-muted);">
+                                    No active incidents detected.
+                                </td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+            </section>
         </main>
 
         <!-- ══════ AI Chat Drawer (Floating) ══════ -->
@@ -541,12 +587,25 @@
 
                     <div id="aws-keys-group">
                         <div class="input-group">
-                            <label>AWS Access Key ID</label>
-                            <input type="text" id="setting-access-key" placeholder="AKIA...">
+                            <label id="key-id-label">Access Key ID / Client ID</label>
+                            <input type="text" id="setting-access-key" placeholder="AKIA... or Azure Client ID">
                         </div>
                         <div class="input-group">
-                            <label>AWS Secret Access Key</label>
-                            <input type="password" id="setting-secret-key" placeholder="••••••••••••••••">
+                            <label id="secret-key-label">Secret Access Key / Client Secret</label>
+                            <input type="password" id="setting-secret-key" placeholder="Your secret key">
+                        </div>
+                    </div>
+
+                    <div id="azure-gcp-group" style="display:none">
+                        <div class="input-group">
+                            <label id="project-id-label">Project ID / Subscription ID</label>
+                            <input type="text" id="setting-project-id" placeholder="my-gcp-project or azure-sub-id">
+                        </div>
+                        <div id="azure-tenant-group" style="display:none">
+                            <div class="input-group">
+                                <label>Tenant ID</label>
+                                <input type="text" id="setting-tenant-id" placeholder="Azure Tenant ID (GUID)">
+                            </div>
                         </div>
                     </div>
 
@@ -593,8 +652,9 @@
     <script src="tenant-manager.js?v=2.1"></script>
     <script src="frameworks.js?v=2.1"></script>
     <script src="evidence.js?v=2.1"></script>
-    <script src="cloud-connect.js?v=2.1"></script>
-    <script src="scanner.js?v=2.1"></script>
+    <script src="cloud-connect.js"></script>
+    <script src="monitoring-ui.js"></script>
+    <script src="app.js"></script>
     <script src="remediation.js?v=2.1"></script>
     <script src="drift-engine.js?v=2.1"></script>
 

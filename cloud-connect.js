@@ -62,6 +62,8 @@ window.CloudConnect = (() => {
         const roleArn = document.getElementById('setting-role-arn').value;
         const externalId = document.getElementById('setting-external-id').value;
         const apiToken = document.getElementById('setting-token').value;
+        const projectId = document.getElementById('setting-project-id').value;
+        const tenantId = document.getElementById('setting-tenant-id').value;
         const region = document.getElementById('setting-region').value;
         const reportEmail = document.getElementById('setting-report-email').value;
 
@@ -74,11 +76,11 @@ window.CloudConnect = (() => {
             return;
         }
         if (authMethod === 'token' && !apiToken) {
-            alert('Please provide the API Token.');
+            alert('Please provide the API Token / JSON Key.');
             return;
         }
 
-        const data = { authMethod, accessKeyId, secretAccessKey, roleArn, externalId, apiToken, region, reportEmail };
+        const data = { authMethod, accessKeyId, secretAccessKey, roleArn, externalId, apiToken, projectId, tenantId, region, reportEmail };
         localStorage.setItem('cf_aws_creds', JSON.stringify(data));
         state.credentials[provider] = data;
 
@@ -97,12 +99,15 @@ window.CloudConnect = (() => {
         const roleGroup = document.getElementById('aws-role-group');
         const tokenGroup = document.getElementById('token-group');
         const tokenLabel = document.getElementById('token-label');
+        const azGcpGroup = document.getElementById('azure-gcp-group');
+        const azTenantGroup = document.getElementById('azure-tenant-group');
+        const projectIdLabel = document.getElementById('project-id-label');
 
         // Auto-select best method for provider
-        if (provider === 'hetzner' || provider === 'digitalocean') {
-            if (method.value !== 'token') method.value = 'token';
-        } else if (provider === 'aws' && method.value === 'token') {
-            method.value = 'keys';
+        if (provider === 'hetzner' || provider === 'digitalocean' || provider === 'gcp') {
+            if (method.value !== 'token' && method.value !== 'keys') method.value = 'token';
+        } else if (provider === 'azure') {
+            if (method.value !== 'keys') method.value = 'keys';
         }
 
         const selectedMethod = method.value;
@@ -110,8 +115,13 @@ window.CloudConnect = (() => {
         roleGroup.style.display = selectedMethod === 'role' ? 'block' : 'none';
         tokenGroup.style.display = selectedMethod === 'token' ? 'block' : 'none';
 
+        // Azure/GCP specific field toggles
+        azGcpGroup.style.display = (provider === 'azure' || provider === 'gcp') ? 'block' : 'none';
+        azTenantGroup.style.display = (provider === 'azure') ? 'block' : 'none';
+        projectIdLabel.textContent = (provider === 'gcp') ? 'GCP Project ID' : 'Azure Subscription ID';
+
         if (selectedMethod === 'token') {
-            tokenLabel.textContent = (provider === 'gcp') ? 'Service Account JSON' : 'API Token';
+            tokenLabel.textContent = (provider === 'gcp') ? 'Service Account JSON Key' : 'API Token';
         }
     }
 

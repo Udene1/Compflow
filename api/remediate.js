@@ -12,13 +12,16 @@ import { APIGatewayClient, UpdateRestApiCommand, UpdateStageCommand } from "@aws
 import { CloudFrontClient, UpdateDistributionCommand, GetDistributionConfigCommand } from "@aws-sdk/client-cloudfront";
 import { SQSClient, SetQueueAttributesCommand } from "@aws-sdk/client-sqs";
 import { SNSClient, SetTopicAttributesCommand } from "@aws-sdk/client-sns";
+import { Monitoring } from '../core/monitoring.js';
+import { v4 as uuidv4 } from 'uuid';
 
 export default async function handler(req, res) {
     if (req.method !== 'POST') {
         return res.status(405).json({ error: 'Method Not Allowed' });
     }
 
-    const { credentials, provider, resourceType, resourceName, issue, dryRun } = req.body;
+    const { credentials, provider, resourceType, resourceName, issue, dryRun, clientId } = req.body;
+    const jobId = uuidv4();
 
     const XOR_KEY = 'CompFlow_Guard_2026';
     function deobfuscate(encoded) {
@@ -31,8 +34,13 @@ export default async function handler(req, res) {
         return out;
     }
 
-    if (!credentials || !credentials.accessKeyId || !credentials.secretAccessKey) {
-        return res.status(400).json({ error: 'Missing cloud credentials' });
+    // Flexible credential check
+    const hasKeys = credentials?.accessKeyId && credentials?.secretAccessKey;
+    const hasToken = credentials?.apiToken;
+    const hasRole = credentials?.authMethod === 'role';
+
+    if (!hasKeys && !hasToken && !hasRole) {
+        return res.status(400).json({ error: 'Missing or incomplete cloud credentials' });
     }
 
     try {
@@ -73,42 +81,45 @@ export default async function handler(req, res) {
             });
         }
 
-        const config = {
-            region: credentials.region || 'us-east-1',
-            credentials: {
-                accessKeyId: credentials.isObfuscated ? deobfuscate(credentials.accessKeyId) : credentials.accessKeyId,
-                secretAccessKey: credentials.isObfuscated ? deobfuscate(credentials.secretAccessKey) : credentials.secretAccessKey
-            }
-        };
+        // ── PHASE 1: Job Logging ──
+        await Monitoring.logJobStart(jobId, clientId || 'default', provider, issue);
 
         let result = { success: true, message: `Successfully remediated ${resourceName}` };
 
-        if (provider === 'aws') {
-            const { runRemediation } = await import('../core/providers/aws_remediator.js');
-            result = await runRemediation(provider, credentials, resourceType, resourceName, issue, dryRun);
-        } else if (provider === 'gcp') {
-            const { runRemediation } = await import('../core/providers/gcp_remediator.js');
-            result = await runRemediation(provider, credentials, resourceType, resourceName, issue);
-        } else if (provider === 'azure') {
-            const { runRemediation } = await import('../core/providers/azure_remediator.js');
-            result = await runRemediation(provider, credentials, resourceType, resourceName, issue);
-        } else if (provider === 'hetzner') {
-            const { runRemediation } = await import('../core/providers/hetzner_remediator.js');
-            result = await runRemediation(provider, credentials, resourceType, resourceName, issue);
-        } else if (provider === 'digitalocean') {
-            const { runRemediation } = await import('../core/providers/digitalocean_remediator.js');
-            result = await runRemediation(provider, credentials, resourceType, resourceName, issue);
-        } else {
-            result = {
-                success: true,
-                advisory: true,
-                message: `ADVISORY: Provider "${provider}" is not recognized. No automated remediation available.`
-            };
+        try {
+            if (provider === 'aws') {
+                const { runRemediation } = await import('../core/providers/aws_remediator.js');
+                result = await runRemediation(provider, credentials, resourceType, resourceName, issue, dryRun);
+            } else if (provider === 'gcp') {
+                const { runRemediation } = await import('../core/providers/gcp_remediator.js');
+                result = await runRemediation(provider, credentials, resourceType, resourceName, issue);
+            } else if (provider === 'azure') {
+                const { runRemediation } = await import('../core/providers/azure_remediator.js');
+                result = await runRemediation(provider, credentials, resourceType, resourceName, issue);
+            } else if (provider === 'hetzner') {
+                const { runRemediation } = await import('../core/providers/hetzner_remediator.js');
+                result = await runRemediation(provider, credentials, resourceType, resourceName, issue);
+            } else if (provider === 'digitalocean') {
+                const { runRemediation } = await import('../core/providers/digitalocean_remediator.js');
+                result = await runRemediation(provider, credentials, resourceType, resourceName, issue);
+            } else {
+                result = {
+                    success: false,
+                    message: `ADVISORY: Provider "${provider}" is not recognized. No automated remediation available.`
+                };
+            }
+
+            await Monitoring.logJobComplete(jobId, result.success, result.message, result);
+            res.status(200).json(result);
+
+        } catch (innerError) {
+            const userFriendly = Monitoring.standardizeError(innerError, provider);
+            await Monitoring.logJobComplete(jobId, false, userFriendly, { raw: innerError.message });
+            res.status(500).json({ success: false, error: userFriendly });
         }
 
-        res.status(200).json(result);
     } catch (error) {
-        console.error('Remediation Error:', error);
-        res.status(500).json({ error: error.message });
+        console.error('Fatal Remediation Error:', error);
+        res.status(500).json({ success: false, error: 'Internal system fault during remediation orchestration.' });
     }
 }
