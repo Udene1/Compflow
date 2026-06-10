@@ -73,7 +73,8 @@ const ChatEngine = {
         try {
             const context = this._getContext();
 
-            const res = await fetch(`/api/chat`, {
+            const BASE_URL = "https://x1ruejr9v8.execute-api.us-east-1.amazonaws.com/dev";
+            const res = await fetch(`${BASE_URL}/api/chat`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ query, context })

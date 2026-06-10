@@ -51,7 +51,7 @@ window.Scanner = (() => {
         if (window.LiveTerminal) LiveTerminal.log('system', `Contacting real cloud APIs for ${provider.toUpperCase()}...`);
         if (window.LiveTerminal) LiveTerminal.log('agent', 'Resource interrogation complete. Mapping findings to ' + Frameworks.getCurrent().name);
 
-        const BASE_URL = ""; // Use relative paths for Vercel deployment
+        const BASE_URL = "https://x1ruejr9v8.execute-api.us-east-1.amazonaws.com/dev";
         
         try {
             const clientId = 'adhoc_user';
