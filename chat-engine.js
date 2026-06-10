@@ -90,7 +90,8 @@ const ChatEngine = {
 
         } catch (error) {
             console.error("[CHAT] Error:", error);
-            this.updateMessage(loadingId, "⚠️ I'm having trouble accessing the reasoning engine. Please verify your Gemini API key and try again.");
+            const msg = error.message.includes('Unexpected token') ? 'Cloud Architect is temporarily down. Please try again.' : error.message;
+            this.updateMessage(loadingId, `⚠️ **Reasoning Error**: ${msg}`);
         }
     },
 
