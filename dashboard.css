@@ -2030,3 +2030,32 @@ input:checked + .slider:before { transform: translateX(16px); }
     margin-left: 10px;
     vertical-align: middle;
 }
+
+/* ─── AI Personality Styling ─── */
+.thinking-dots {
+    display: flex;
+    gap: 4px;
+    padding: 8px 0;
+}
+
+.thinking-dots span {
+    width: 6px;
+    height: 6px;
+    background: var(--primary-color);
+    border-radius: 50%;
+    display: inline-block;
+    animation: bounce 1.4s infinite ease-in-out both;
+}
+
+.thinking-dots span:nth-child(1) { animation-delay: -0.32s; }
+.thinking-dots span:nth-child(2) { animation-delay: -0.16s; }
+
+@keyframes bounce {
+    0%, 80%, 100% { transform: scale(0); opacity: 0.3; }
+    40% { transform: scale(1.0); opacity: 1; }
+}
+
+.chat-msg.ai.typing {
+    border-left: 2px solid var(--primary-color);
+    background: rgba(0, 255, 136, 0.05);
+}

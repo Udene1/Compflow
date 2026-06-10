@@ -68,7 +68,7 @@ const ChatEngine = {
 
         input.value = '';
         this.addMessage('user', query);
-        const loadingId = this.addMessage('ai', `<span class="spinner"></span> Analyzing infrastructure...`);
+        const loadingId = this.addMessage('ai', `<div class="thinking-dots"><span></span><span></span><span></span></div>`);
 
         try {
             const context = this._getContext();
@@ -83,9 +83,9 @@ const ChatEngine = {
             
             if (data.error) throw new Error(data.error);
 
-            // Simple markdown rendering
+            // Typewriter effect rendering
             const formatted = this._renderMarkdown(data.response);
-            this.updateMessage(loadingId, formatted);
+            await this.typewriter(loadingId, formatted);
 
         } catch (error) {
             console.error("[CHAT] Error:", error);
@@ -122,6 +122,31 @@ const ChatEngine = {
             const container = document.getElementById('chat-messages');
             container.scrollTop = container.scrollHeight;
         }
+    },
+
+    /**
+     * Renders text with a smooth typewriter effect
+     */
+    async typewriter(id, html) {
+        const el = document.getElementById(id);
+        if (!el) return;
+        
+        el.innerHTML = '';
+        el.classList.add('typing');
+        
+        // Split by words to keep it fast but smooth
+        const words = html.split(' ');
+        let current = '';
+        
+        for (const word of words) {
+            current += word + ' ';
+            el.innerHTML = current;
+            const container = document.getElementById('chat-messages');
+            container.scrollTop = container.scrollHeight;
+            await new Promise(r => setTimeout(r, 20 + Math.random() * 30));
+        }
+        
+        el.classList.remove('typing');
     }
 };
 

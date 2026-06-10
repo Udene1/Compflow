@@ -33,28 +33,34 @@ function sleep(ms) {
     return new Promise(resolve => setTimeout(resolve, ms));
 }
 
-export default async function handler(req, res) {
-    if (req.method !== 'POST') {
-        return res.status(405).json({ error: 'Method Not Allowed' });
+export const handler = async (event) => {
+    const isApiGateway = !!event.httpMethod;
+    const body = isApiGateway ? JSON.parse(event.body || '{}') : event;
+    const { query, context } = body;
+
+    const headers = {
+        'Content-Type': 'application/json',
+        'Access-Control-Allow-Origin': '*',
+        'Access-Control-Allow-Methods': 'POST, OPTIONS'
+    };
+
+    if (isApiGateway && event.httpMethod === 'OPTIONS') {
+        return { statusCode: 200, headers, body: '' };
     }
 
-    // Explicit production check to help debugging
-    if (!process.env.GEMINI_API_KEY && process.env.NODE_ENV === 'production') {
-        log.error("[CHAT] Missing GEMINI_API_KEY in production.");
-        return res.status(500).json({ 
-            error: "AI Configuration Error: GEMINI_API_KEY is missing. Please set it in Vercel environment variables." 
-        });
+    if (!process.env.GEMINI_API_KEY || process.env.GEMINI_API_KEY === 'your-gemini-api-key-here') {
+        return {
+            statusCode: 500,
+            headers,
+            body: JSON.stringify({ error: "Missing or invalid GEMINI_API_KEY in backend environment." })
+        };
     }
-
-    const { query, context } = req.body;
 
     if (!query) {
-        return res.status(400).json({ error: 'Missing query' });
+        return { statusCode: 400, headers, body: JSON.stringify({ error: 'Missing query' }) };
     }
 
     try {
-        log.info(`[CHAT] Query: "${query.substring(0, 80)}..."`);
-
         const model = genAI.getGenerativeModel({ 
             model: "gemini-2.0-flash",
             systemInstruction: {
@@ -63,7 +69,6 @@ export default async function handler(req, res) {
             }
         });
 
-        // Build context-enriched prompt
         const contextBlock = context ? `
 ## Current Infrastructure State
 - **Provider(s)**: ${context.providers || 'Not connected'}
@@ -100,7 +105,6 @@ ${JSON.stringify((context.resources || []).slice(0, 20), null, 2)}
                 const isRetryable = error.status === 429 || error.status >= 500 || error.message?.includes('rate');
                 if (isRetryable && attempt < MAX_RETRIES) {
                     const delay = BASE_DELAY_MS * Math.pow(2, attempt - 1);
-                    log.warn(`[CHAT] Attempt ${attempt}/${MAX_RETRIES} failed. Retrying in ${delay}ms...`);
                     await sleep(delay);
                 } else {
                     throw error;
@@ -108,20 +112,18 @@ ${JSON.stringify((context.resources || []).slice(0, 20), null, 2)}
             }
         }
 
-        log.info(`[CHAT] Response generated (${responseText.length} chars)`);
-        res.status(200).json({ response: responseText });
+        return {
+            statusCode: 200,
+            headers,
+            body: JSON.stringify({ response: responseText })
+        };
 
     } catch (error) {
-        log.error("[CHAT] Gemini error:", error);
-        
-        // Provide more helpful error messages for common issues
-        let userMessage = error.message;
-        if (error.message?.includes('API key not valid')) {
-            userMessage = "The provided GEMINI_API_KEY is invalid. Please check your configuration.";
-        } else if (error.message?.includes('quota')) {
-            userMessage = "AI rate limit exceeded. Please try again in a moment.";
-        }
-
-        res.status(500).json({ error: 'AI reasoning failed: ' + userMessage });
+        console.error("[CHAT] Error:", error);
+        return {
+            statusCode: 500,
+            headers,
+            body: JSON.stringify({ error: 'AI reasoning failed: ' + error.message })
+        };
     }
-}
+};

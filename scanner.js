@@ -173,6 +173,13 @@ window.Scanner = (() => {
             
             if (res.severity === 'critical') {
                 LiveTerminal.log('insight', `CRITICAL: ${res.type} "${res.name}" — ${res.issue}`);
+                // Proactive AI Hook
+                if (window.ChatEngine && !window._aiPrompted) {
+                    window._aiPrompted = true;
+                    setTimeout(() => {
+                        ChatEngine.addMessage('ai', `<strong>Proactive Intervention</strong>: I've detected a critical vulnerability: <code>${res.issue}</code> on resource <code>${res.name}</code>. Should I apply a security patch for you?`);
+                    }, 2000);
+                }
             } else if (res.severity === 'warning') {
                 LiveTerminal.log('agent', `Warning: ${res.type} "${res.name}" — ${res.issue}`);
             }

@@ -162,3 +162,11 @@ functions:
           path: /api/jobs
           method: post
           cors: true
+
+  chat:
+    handler: api/chat.handler
+    events:
+      - http:
+          path: /api/chat
+          method: post
+          cors: true
