@@ -23,7 +23,10 @@ export const handler = async (event) => {
 
         return {
             statusCode: 200,
-            headers: { "Access-Control-Allow-Origin": "*" },
+            headers: { 
+                "Access-Control-Allow-Origin": "*",
+                "Access-Control-Allow-Headers": "Content-Type, Authorization" 
+            },
             body: JSON.stringify({
                 totalJobs: total,
                 successRate: `${successRate}%`,
@@ -40,7 +43,10 @@ export const handler = async (event) => {
     } catch (e) {
         return {
             statusCode: 500,
-            headers: { "Access-Control-Allow-Origin": "*" },
+            headers: { 
+                "Access-Control-Allow-Origin": "*",
+                "Access-Control-Allow-Headers": "Content-Type, Authorization" 
+            },
             body: JSON.stringify({ error: e.message })
         };
     }

@@ -5,6 +5,13 @@ export default async function handler(req, res) {
     const { method } = req;
 
     try {
+        res.setHeader('Access-Control-Allow-Origin', '*');
+        res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PATCH, OPTIONS');
+        res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
+
+        if (method === 'OPTIONS') {
+            return res.status(200).end();
+        }
         if (method === 'GET') {
             const tenants = await loadClients();
             return res.status(200).json({ tenants });
@@ -40,7 +47,7 @@ export default async function handler(req, res) {
             return res.status(200).json({ success: true });
         }
 
-        res.setHeader('Allow', ['GET', 'POST', 'PATCH']);
+        res.setHeader('Allow', ['GET', 'POST', 'PATCH', 'OPTIONS']);
         res.status(405).end(`Method ${method} Not Allowed`);
 
     } catch (e) {

@@ -2,7 +2,7 @@
  * Health Monitor UI Logic
  */
 const HealthMonitor = {
-    API_URL: 'https://x1ruejr9v8.execute-api.us-east-1.amazonaws.com/dev/api/monitoring',
+    API_URL: window.COMPLIANCE_API_URL + '/api/monitoring',
 
     async refresh() {
         try {

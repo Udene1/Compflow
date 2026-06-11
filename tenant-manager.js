@@ -9,7 +9,7 @@ window.TenantManager = (() => {
 
     async function loadTenants() {
         try {
-            const res = await fetch(`/api/tenants`);
+            const res = await fetch(`${window.COMPLIANCE_API_URL}/api/tenants`);
             const data = await res.json();
             tenants = data.tenants || [];
             renderTenants();
@@ -189,7 +189,7 @@ window.TenantManager = (() => {
         if (!email) return alert("A reporting email is required for scan report delivery.");
 
         try {
-            const res = await fetch(`/api/tenants`, {
+            const res = await fetch(`${window.COMPLIANCE_API_URL}/api/tenants`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ provider, name, email, autoRemediate, ...credentials })
@@ -212,7 +212,7 @@ window.TenantManager = (() => {
 
     async function toggleAuto(id, enabled) {
         try {
-            await fetch(`/api/tenants/toggle`, {
+            await fetch(`${window.COMPLIANCE_API_URL}/api/tenants/toggle`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ id, autoRemediate: enabled })
@@ -237,7 +237,7 @@ window.TenantManager = (() => {
         window._lastTriggerTime[id] = now;
 
         try {
-            const triggerRes = await fetch(`/api/trigger`, {
+            const triggerRes = await fetch(`${window.COMPLIANCE_API_URL}/api/trigger`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ clientId: id })
@@ -258,7 +258,7 @@ window.TenantManager = (() => {
                 }
 
                 try {
-                    const logRes = await fetch(`/api/audit?clientId=${id}`);
+                    const logRes = await fetch(`${window.COMPLIANCE_API_URL}/api/audit?clientId=${id}`);
                     const logs = await logRes.json();
                     
                     // Look for the completion log

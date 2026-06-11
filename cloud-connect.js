@@ -153,7 +153,7 @@ window.CloudConnect = (() => {
             updateStepUI(0, stepEls, barEl);
             if (window.LiveTerminal) LiveTerminal.log('agent', STEPS[0]);
 
-            const response = await fetch(`/api/validate`, {
+            const response = await fetch(`${window.COMPLIANCE_API_URL}/api/validate`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ 

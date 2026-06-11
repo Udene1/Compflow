@@ -2,7 +2,7 @@
  * Scan History & Terminal Replay Engine
  */
 const ScanHistory = {
-    API_URL: 'https://x1ruejr9v8.execute-api.us-east-1.amazonaws.com/dev/api/jobs',
+    API_URL: window.COMPLIANCE_API_URL + '/api/jobs',
 
     async refresh() {
         const list = document.getElementById('scan-history-list');

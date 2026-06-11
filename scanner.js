@@ -51,7 +51,7 @@ window.Scanner = (() => {
         if (window.LiveTerminal) LiveTerminal.log('system', `Contacting real cloud APIs for ${provider.toUpperCase()}...`);
         if (window.LiveTerminal) LiveTerminal.log('agent', 'Resource interrogation complete. Mapping findings to ' + Frameworks.getCurrent().name);
 
-        const BASE_URL = "https://x1ruejr9v8.execute-api.us-east-1.amazonaws.com/dev";
+        const BASE_URL = window.COMPLIANCE_API_URL;
         
         try {
             const clientId = 'adhoc_user';
@@ -201,7 +201,7 @@ window.Scanner = (() => {
         const provider = providers[0];
         const credentials = CloudConnect.getCredentials(provider);
 
-        const BASE_URL = "";
+        const BASE_URL = window.COMPLIANCE_API_URL;
         try {
             const res = await fetch(`${BASE_URL}/api/scan`, {
                 method: 'POST',

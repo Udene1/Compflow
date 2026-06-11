@@ -779,7 +779,7 @@ Note: "ADVISORY — $3,000/mo subscription required"`
 
         LiveTerminal.log('action', `EXECUTING REAL FIX: ${issue.type} "${issue.name}" — ${issue.issue}`);
 
-        fetch(`/api/remediate`, {
+        fetch(`${window.COMPLIANCE_API_URL}/api/remediate`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ 
