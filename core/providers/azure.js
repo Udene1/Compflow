@@ -1,17 +1,20 @@
 import { log } from '../logger.js';
 
 /**
- * Azure Provider Adapter
- * Audits Azure VMs, NSGs, Storage, and SQL Databases.
+ * Azure Provider Adapter — Expanded v2
+ * Audits 22 Azure service categories with detailed compliance checks.
+ * 
+ * Architecture: Simulated scans reflecting real-world Azure SDK patterns.
+ * In production: swap push() calls with @azure/arm-* SDK calls.
  */
 export async function runScan(provider, credentials) {
-    log.info("➤ Starting Azure Hyperscale Scan...");
-    
+    log.info("➤ Starting Azure Hyperscale Scan (v2 - Expanded)...");
+
     const resources = [];
     const location = 'eastus';
 
     try {
-        // 1. Network Security Groups (NSG)
+        // ─── 1. Network Security Groups ───────────────────────────────────
         resources.push({
             name: 'web-front-nsg',
             type: 'Azure NSG',
@@ -19,10 +22,21 @@ export async function runScan(provider, credentials) {
             region: location,
             severity: 'critical',
             technicalId: 'SG_OPEN_SSH',
-            issue: 'Inbound rule "AllowAnyCustom" allows 0.0.0.0/0'
+            issue: 'Inbound rule "AllowAnyCustom" allows 0.0.0.0/0',
+            recommendation: 'Remove wildcard inbound rules; restrict SSH/RDP to Azure Bastion or specific CIDR ranges.'
+        });
+        resources.push({
+            name: 'backend-api-nsg',
+            type: 'Azure NSG',
+            icon: '🛡️',
+            region: location,
+            severity: 'warning',
+            technicalId: 'SG_OPEN_RDP',
+            issue: 'RDP (port 3389) open to 0.0.0.0/0',
+            recommendation: 'Block RDP from internet. Enable Azure Bastion for secure remote access.'
         });
 
-        // 2. Virtual Machines
+        // ─── 2. Virtual Machines ──────────────────────────────────────────
         resources.push({
             name: 'finance-vm-prod',
             type: 'Azure VM',
@@ -30,10 +44,21 @@ export async function runScan(provider, credentials) {
             region: location,
             severity: 'warning',
             technicalId: 'EC2_IMDS',
-            issue: 'Managed Identity not assigned (using keys instead)'
+            issue: 'Managed Identity not assigned — credentials stored in app environment',
+            recommendation: 'Enable System-Assigned Managed Identity and replace app credentials with RBAC roles.'
+        });
+        resources.push({
+            name: 'analytics-vm-01',
+            type: 'Azure VM',
+            icon: '💻',
+            region: 'westeurope',
+            severity: 'warning',
+            technicalId: 'EC2_PUBLIC_IP',
+            issue: 'Public IP directly assigned — VM exposed without WAF or load balancer',
+            recommendation: 'Remove public IP and route traffic through Azure Application Gateway or Azure Firewall.'
         });
 
-        // 3. Storage Accounts
+        // ─── 3. Storage Accounts ──────────────────────────────────────────
         resources.push({
             name: 'cfauditstorage99',
             type: 'Azure Storage',
@@ -41,10 +66,21 @@ export async function runScan(provider, credentials) {
             region: location,
             severity: 'critical',
             technicalId: 'S3_PUBLIC',
-            issue: 'Public blob access enabled'
+            issue: 'Public blob access enabled — containers readable without authentication',
+            recommendation: 'Set allowBlobPublicAccess=false and enforce minimum TLS 1.2.'
+        });
+        resources.push({
+            name: 'datalakelogs01',
+            type: 'Azure Storage',
+            icon: '🗄️',
+            region: location,
+            severity: 'warning',
+            technicalId: 'S3_NO_HTTPS',
+            issue: 'HTTP traffic allowed — data in transit not encrypted',
+            recommendation: 'Enable "Secure transfer required" on the storage account.'
         });
 
-        // 4. Azure SQL
+        // ─── 4. Azure SQL ─────────────────────────────────────────────────
         resources.push({
             name: 'cf-prod-sqlserver',
             type: 'Azure SQL',
@@ -52,10 +88,21 @@ export async function runScan(provider, credentials) {
             region: location,
             severity: 'critical',
             technicalId: 'RDS_PUBLIC',
-            issue: 'Firewall allows 0.0.0.0 — open to all Azure services'
+            issue: 'Firewall allows 0.0.0.0 — open to all Azure services without VNet restriction',
+            recommendation: 'Remove "Allow Azure Services" rule and configure VNet Service Endpoints.'
+        });
+        resources.push({
+            name: 'legacy-sqlserver-01',
+            type: 'Azure SQL',
+            icon: '🗃️',
+            region: location,
+            severity: 'warning',
+            technicalId: 'RDS_NO_AUDIT',
+            issue: 'SQL Auditing disabled — database access not logged',
+            recommendation: 'Enable Azure SQL Auditing with 90-day retention in Log Analytics.'
         });
 
-        // 5. Key Vault
+        // ─── 5. Key Vault ─────────────────────────────────────────────────
         resources.push({
             name: 'cf-keyvault-prod',
             type: 'Azure KeyVault',
@@ -63,10 +110,11 @@ export async function runScan(provider, credentials) {
             region: location,
             severity: 'warning',
             technicalId: 'KMS_NO_ROTATION',
-            issue: 'Soft delete disabled — keys at risk of permanent deletion'
+            issue: 'Soft delete disabled — keys at risk of permanent deletion',
+            recommendation: 'Enable soft delete (90 days) and purge protection on Key Vault.'
         });
 
-        // 6. Activity Log
+        // ─── 6. Monitor & Diagnostics ─────────────────────────────────────
         resources.push({
             name: 'subscription-logs',
             type: 'Azure Monitor',
@@ -74,10 +122,11 @@ export async function runScan(provider, credentials) {
             region: 'global',
             severity: 'warning',
             technicalId: 'CLOUDTRAIL_DISABLED',
-            issue: 'No diagnostic settings configured — audit logs not exported'
+            issue: 'No diagnostic settings configured — audit logs not exported',
+            recommendation: 'Create diagnostic settings to export Activity Logs to Log Analytics with 365-day retention.'
         });
 
-        // 7. Azure AD / Entra ID
+        // ─── 7. Azure AD / Entra ID ───────────────────────────────────────
         resources.push({
             name: 'admin-group',
             type: 'Azure AD',
@@ -85,174 +134,302 @@ export async function runScan(provider, credentials) {
             region: 'global',
             severity: 'critical',
             technicalId: 'IAM_NO_MFA',
-            issue: 'Conditional Access MFA not enforced for admin accounts'
+            issue: 'Conditional Access MFA not enforced for admin accounts',
+            recommendation: 'Create Conditional Access policy requiring MFA for all Global Administrators.'
         });
 
-        return { resources };
+        // ─── 8. App Services / Web Apps ───────────────────────────────────
+        resources.push({
+            name: 'compflow-webapp-prod',
+            type: 'Azure App Service',
+            icon: '🌐',
+            region: location,
+            severity: 'critical',
+            technicalId: 'APP_HTTP',
+            issue: 'HTTPS-only not enforced — app accessible over HTTP',
+            recommendation: 'Set httpsOnly=true on App Service. Redirect all HTTP traffic to HTTPS.'
+        });
+        resources.push({
+            name: 'api-gateway-app',
+            type: 'Azure App Service',
+            icon: '🌐',
+            region: location,
+            severity: 'warning',
+            technicalId: 'APP_TLS_OLD',
+            issue: 'Minimum TLS version is 1.0 — vulnerable to POODLE/BEAST attacks',
+            recommendation: 'Set minimum TLS version to 1.2 or higher in App Service configuration.'
+        });
+        resources.push({
+            name: 'admin-portal-app',
+            type: 'Azure App Service',
+            icon: '🌐',
+            region: location,
+            severity: 'warning',
+            technicalId: 'APP_AUTH_DISABLED',
+            issue: 'Authentication / Authorization (EasyAuth) not configured',
+            recommendation: 'Enable App Service Authentication and configure Azure AD as identity provider.'
+        });
+
+        // ─── 9. Azure Functions ───────────────────────────────────────────
+        resources.push({
+            name: 'cf-worker-function',
+            type: 'Azure Function',
+            icon: '⚡',
+            region: location,
+            severity: 'warning',
+            technicalId: 'LAMBDA_ENV_SECRETS',
+            issue: 'Connection strings and API keys stored in Application Settings (plaintext)',
+            recommendation: 'Move secrets to Azure Key Vault and reference via Key Vault references in Function config.'
+        });
+        resources.push({
+            name: 'event-processor-fn',
+            type: 'Azure Function',
+            icon: '⚡',
+            region: location,
+            severity: 'pass',
+            technicalId: 'FN_NO_VNET',
+            issue: null,
+            recommendation: null
+        });
+
+        // ─── 10. Cosmos DB ────────────────────────────────────────────────
+        resources.push({
+            name: 'cf-cosmosdb-prod',
+            type: 'Azure Cosmos DB',
+            icon: '🌌',
+            region: location,
+            severity: 'critical',
+            technicalId: 'COSMOS_PUBLIC',
+            issue: 'Public network access enabled — Cosmos DB reachable from internet',
+            recommendation: 'Disable public network access and configure Private Endpoint for Cosmos DB.'
+        });
+        resources.push({
+            name: 'cf-cosmosdb-analytics',
+            type: 'Azure Cosmos DB',
+            icon: '🌌',
+            region: location,
+            severity: 'warning',
+            technicalId: 'COSMOS_NO_CMK',
+            issue: 'Customer-Managed Key (CMK) encryption not configured',
+            recommendation: 'Enable CMK via Azure Key Vault for data-at-rest encryption control.'
+        });
+
+        // ─── 11. AKS (Kubernetes) ─────────────────────────────────────────
+        resources.push({
+            name: 'cf-aks-prod-cluster',
+            type: 'Azure AKS',
+            icon: '☸️',
+            region: location,
+            severity: 'critical',
+            technicalId: 'K8S_PUBLIC_API',
+            issue: 'Kubernetes API server publicly accessible — no authorized IP ranges configured',
+            recommendation: 'Enable API server authorized IP ranges or use Private Cluster mode.'
+        });
+        resources.push({
+            name: 'cf-aks-prod-cluster',
+            type: 'Azure AKS',
+            icon: '☸️',
+            region: location,
+            severity: 'warning',
+            technicalId: 'K8S_RBAC',
+            issue: 'Azure AD RBAC integration not enabled — using local Kubernetes auth',
+            recommendation: 'Enable Azure AD integration for Kubernetes RBAC to manage access via Entra ID.'
+        });
+
+        // ─── 12. Private Endpoints ────────────────────────────────────────
+        resources.push({
+            name: 'storage-public-endpoint',
+            type: 'Azure Private Endpoint',
+            icon: '🔒',
+            region: location,
+            severity: 'warning',
+            technicalId: 'PRIVATE_EP_MISSING',
+            issue: 'Storage account and SQL server lacking private endpoints — using public endpoints',
+            recommendation: 'Deploy Azure Private Endpoints for all PaaS services to eliminate public internet exposure.'
+        });
+
+        // ─── 13. Microsoft Defender for Cloud ────────────────────────────
+        resources.push({
+            name: 'subscription-defender',
+            type: 'Azure Defender',
+            icon: '🔰',
+            region: 'global',
+            severity: 'critical',
+            technicalId: 'DEFENDER_DISABLED',
+            issue: 'Microsoft Defender for Servers and Storage not enabled',
+            recommendation: 'Enable Defender for Cloud plans for Servers, Storage, SQL, and Containers.'
+        });
+        resources.push({
+            name: 'subscription-secure-score',
+            type: 'Azure Defender',
+            icon: '🔰',
+            region: 'global',
+            severity: 'warning',
+            technicalId: 'DEFENDER_LOW_SCORE',
+            issue: 'Secure Score below 60% — multiple high-severity recommendations unaddressed',
+            recommendation: 'Review and remediate all Defender for Cloud high-severity recommendations.'
+        });
+
+        // ─── 14. API Management Services ─────────────────────────────────
+        resources.push({
+            name: 'cf-apim-gateway',
+            type: 'Azure API Management',
+            icon: '🔌',
+            region: location,
+            severity: 'warning',
+            technicalId: 'APIM_NO_AUTH',
+            issue: 'APIs exposed without subscription key or OAuth2 policy',
+            recommendation: 'Enforce subscription key validation or OAuth2/JWT policies on all API operations.'
+        });
+        resources.push({
+            name: 'cf-apim-gateway',
+            type: 'Azure API Management',
+            icon: '🔌',
+            region: location,
+            severity: 'warning',
+            technicalId: 'APIM_NO_HTTPS',
+            issue: 'HTTP protocol enabled on API Management gateway',
+            recommendation: 'Disable HTTP protocol and enforce HTTPS-only communication.'
+        });
+
+        // ─── 15. Container Registry (ACR) ─────────────────────────────────
+        resources.push({
+            name: 'cfregistry',
+            type: 'Azure Container Registry',
+            icon: '📦',
+            region: location,
+            severity: 'critical',
+            technicalId: 'ACR_ANON_PULL',
+            issue: 'Anonymous pull access enabled — images publicly downloadable',
+            recommendation: 'Disable anonymous pull. Enforce authentication for all registry operations.'
+        });
+        resources.push({
+            name: 'cfregistry',
+            type: 'Azure Container Registry',
+            icon: '📦',
+            region: location,
+            severity: 'warning',
+            technicalId: 'ACR_NO_SCAN',
+            issue: 'Vulnerability scanning (Defender for Containers) not enabled on registry',
+            recommendation: 'Enable Microsoft Defender for Containers for automated image vulnerability scanning.'
+        });
+
+        // ─── 16. Logic Apps ───────────────────────────────────────────────
+        resources.push({
+            name: 'cf-compliance-workflow',
+            type: 'Azure Logic App',
+            icon: '📋',
+            region: location,
+            severity: 'warning',
+            technicalId: 'LOGICAPP_HTTP_TRIGGER',
+            issue: 'HTTP trigger enabled without IP restriction or SAS token validation',
+            recommendation: 'Add IP allowlist or restrict trigger access using SAS tokens and managed identities.'
+        });
+
+        // ─── 17. Front Door / CDN ─────────────────────────────────────────
+        resources.push({
+            name: 'cf-frontdoor-global',
+            type: 'Azure Front Door',
+            icon: '🚀',
+            region: 'global',
+            severity: 'warning',
+            technicalId: 'AFD_NO_WAF',
+            issue: 'WAF policy not associated with Front Door endpoint',
+            recommendation: 'Attach a WAF policy in Prevention mode with OWASP Core Rule Set 3.2.'
+        });
+
+        // ─── 18. Application Insights ─────────────────────────────────────
+        resources.push({
+            name: 'cf-appinsights',
+            type: 'Azure App Insights',
+            icon: '📈',
+            region: location,
+            severity: 'pass',
+            technicalId: null,
+            issue: null,
+            recommendation: null
+        });
+        resources.push({
+            name: 'api-appinsights',
+            type: 'Azure App Insights',
+            icon: '📈',
+            region: location,
+            severity: 'warning',
+            technicalId: 'APPINSIGHTS_RETENTION',
+            issue: 'Data retention set to 30 days — insufficient for compliance audit trails',
+            recommendation: 'Increase App Insights data retention to 90+ days or export to Log Analytics.'
+        });
+
+        // ─── 19. Role Assignments (IAM) ───────────────────────────────────
+        resources.push({
+            name: 'subscription-iam',
+            type: 'Azure Role Assignment',
+            icon: '👤',
+            region: 'global',
+            severity: 'critical',
+            technicalId: 'IAM_OWNER_EXCESS',
+            issue: '7 users assigned Owner role at subscription scope — violates least privilege',
+            recommendation: 'Reduce Owner assignments. Use custom roles or Contributor with JIT PIM access.'
+        });
+        resources.push({
+            name: 'subscription-iam',
+            type: 'Azure Role Assignment',
+            icon: '👤',
+            region: 'global',
+            severity: 'warning',
+            technicalId: 'IAM_STALE',
+            issue: '3 role assignments for deprovisioned/guest accounts still active',
+            recommendation: 'Remove stale role assignments for inactive users using Azure AD Access Reviews.'
+        });
+
+        // ─── 20. Virtual Network Peering ──────────────────────────────────
+        resources.push({
+            name: 'hub-spoke-peering',
+            type: 'Azure VNet Peering',
+            icon: '🔗',
+            region: location,
+            severity: 'warning',
+            technicalId: 'VNET_PEERING_GATEWAY',
+            issue: 'VNet peering allows gateway transit without traffic inspection',
+            recommendation: 'Route peered traffic through Azure Firewall or NVA for inspection and logging.'
+        });
+
+        // ─── 21. Backup Vaults ────────────────────────────────────────────
+        resources.push({
+            name: 'cf-backup-vault',
+            type: 'Azure Backup',
+            icon: '💾',
+            region: location,
+            severity: 'critical',
+            technicalId: 'BACKUP_DISABLED',
+            issue: 'No backup policy configured for production VMs and databases',
+            recommendation: 'Configure Azure Backup policy with daily snapshots and 35-day retention.'
+        });
+
+        // ─── 22. VPC Service Controls (DDoS) ──────────────────────────────
+        resources.push({
+            name: 'subscription-ddos',
+            type: 'Azure DDoS Protection',
+            icon: '🛡️',
+            region: 'global',
+            severity: 'warning',
+            technicalId: 'DDOS_NOT_ENABLED',
+            issue: 'Azure DDoS Protection Standard not enabled on VNet',
+            recommendation: 'Enable DDoS Protection Standard plan for production VNets to guard against volumetric attacks.'
+        });
+
+        const summary = {
+            total: resources.length,
+            critical: resources.filter(r => r.severity === 'critical').length,
+            warning: resources.filter(r => r.severity === 'warning').length,
+            pass: resources.filter(r => r.severity === 'pass').length
+        };
+
+        log.info(`Azure Scan complete: ${summary.total} resources, ${summary.critical} critical, ${summary.warning} warnings`);
+        return { resources, summary };
+
     } catch (e) {
         log.error("Azure Scan failed:", e);
         throw e;
     }
-}
-
-/**
- * Azure Production Remediation Engine
- * Handles automated fixes for Azure infrastructure.
- */
-export async function runRemediation(provider, credentials, type, name, issue) {
-    log.info(`⚡ Azure Auto-Remediation: ${type} "${name}" — ${issue}`);
-    
-    // In production, use @azure/* SDKs:
-    // import { NetworkManagementClient } from "@azure/arm-network";
-    // import { StorageManagementClient } from "@azure/arm-storage";
-
-    // ── Azure NSG (Network Security Groups) ──
-    if (type === 'Azure NSG') {
-        if (issue.includes('0.0.0.0/0') || issue.includes('AllowAny')) {
-            log.info(`[AZ-FIX] Restricting NSG rule on "${name}"`);
-            return {
-                success: true,
-                message: `NSG "${name}": Removed wildcard inbound rule "AllowAnyCustom". Replaced with VNet-only access (10.0.0.0/8). SSH restricted to bastion subnet.`
-            };
-        }
-        if (issue.includes('RDP') || issue.includes('3389')) {
-            log.info(`[AZ-FIX] Restricting RDP access on NSG "${name}"`);
-            return {
-                success: true,
-                message: `NSG "${name}": RDP (3389) restricted from 0.0.0.0/0 to Azure Bastion subnet only. Consider using Azure Bastion for secure RDP access.`
-            };
-        }
-    }
-
-    // ── Azure Virtual Machines ──
-    if (type === 'Azure VM') {
-        if (issue.includes('Managed Identity')) {
-            log.info(`[AZ-FIX] Assigning Managed Identity to VM "${name}"`);
-            return {
-                success: true,
-                message: `VM "${name}": System-assigned Managed Identity enabled. Migrate from access keys to RBAC-based authentication.`
-            };
-        }
-        if (issue.includes('disk encryption') || issue.includes('Encryption')) {
-            return {
-                success: true,
-                message: `VM "${name}": Azure Disk Encryption (ADE) enabled with platform-managed keys. OS and data disks now encrypted at rest.`
-            };
-        }
-        if (issue.includes('public IP')) {
-            return {
-                success: true,
-                advisory: true,
-                message: `ADVISORY: VM "${name}" has a public IP. Disassociate via Portal > VM > Networking > Dissociate Public IP. Use Azure Bastion or VPN for access.`
-            };
-        }
-    }
-
-    // ── Azure Storage Accounts ──
-    if (type === 'Azure Storage') {
-        if (issue.includes('Public blob') || issue.includes('public access')) {
-            log.info(`[AZ-FIX] Disabling public blob access on storage "${name}"`);
-            return {
-                success: true,
-                message: `Storage account "${name}": Public blob access disabled. AllowBlobPublicAccess set to false. All containers now require authentication.`
-            };
-        }
-        if (issue.includes('HTTPS') || issue.includes('HTTP')) {
-            log.info(`[AZ-FIX] Enforcing HTTPS on storage "${name}"`);
-            return {
-                success: true,
-                message: `Storage account "${name}": supportsHttpsTrafficOnly enabled. Minimum TLS version set to 1.2.`
-            };
-        }
-        if (issue.includes('soft delete')) {
-            log.info(`[AZ-FIX] Enabling soft delete on storage "${name}"`);
-            return {
-                success: true,
-                message: `Storage account "${name}": Blob soft delete enabled with 14-day retention. Container soft delete enabled.`
-            };
-        }
-    }
-
-    // ── Azure SQL Database ──
-    if (type === 'Azure SQL') {
-        if (issue.includes('0.0.0.0') || issue.includes('open to all')) {
-            log.info(`[AZ-FIX] Restricting Azure SQL firewall on "${name}"`);
-            return {
-                success: true,
-                message: `Azure SQL "${name}": Removed "Allow Azure Services" firewall rule (0.0.0.0). Access now restricted to specific VNet subnets via Service Endpoints.`
-            };
-        }
-        if (issue.includes('TDE') || issue.includes('encryption')) {
-            return {
-                success: true,
-                message: `Azure SQL "${name}": Transparent Data Encryption (TDE) enabled with service-managed key. Data at rest is now encrypted.`
-            };
-        }
-        if (issue.includes('Auditing') || issue.includes('auditing')) {
-            return {
-                success: true,
-                message: `Azure SQL "${name}": SQL Auditing enabled. Logs exported to Log Analytics workspace with 90-day retention.`
-            };
-        }
-        if (issue.includes('Threat')) {
-            return {
-                success: true,
-                message: `Azure SQL "${name}": Advanced Threat Protection enabled with email alerts for anomalous database activities.`
-            };
-        }
-    }
-
-    // ── Azure Key Vault ──
-    if (type === 'Azure KeyVault') {
-        if (issue.includes('Soft delete') || issue.includes('soft delete')) {
-            log.info(`[AZ-FIX] Enabling soft delete on Key Vault "${name}"`);
-            return {
-                success: true,
-                message: `Key Vault "${name}": Soft delete enabled with 90-day retention. Purge protection activated to prevent permanent key deletion.`
-            };
-        }
-        if (issue.includes('rotation') || issue.includes('expiry')) {
-            return {
-                success: true,
-                advisory: true,
-                message: `ADVISORY: Key Vault "${name}" contains keys/secrets without expiry dates. Configure rotation policies via Portal > Key Vault > Keys > Rotation Policy.`
-            };
-        }
-    }
-
-    // ── Azure Monitor / Activity Logs ──
-    if (type === 'Azure Monitor') {
-        if (issue.includes('diagnostic') || issue.includes('audit logs')) {
-            log.info(`[AZ-FIX] Configuring diagnostic settings for "${name}"`);
-            return {
-                success: true,
-                message: `Activity Log diagnostic setting created: Exporting Administrative, Security, Alert, and Policy logs to Log Analytics workspace with 365-day retention.`
-            };
-        }
-    }
-
-    // ── Azure AD / Entra ID ──
-    if (type === 'Azure AD') {
-        if (issue.includes('MFA') || issue.includes('Conditional Access')) {
-            return {
-                success: true,
-                advisory: true,
-                message: `ADVISORY: MFA enforcement for "${name}" requires a Conditional Access policy in Entra ID > Security > Conditional Access. Create a policy requiring MFA for all admin roles.`
-            };
-        }
-        if (issue.includes('Guest') || issue.includes('external')) {
-            return {
-                success: true,
-                advisory: true,
-                message: `ADVISORY: Review guest user access in Entra ID > Users > Guest users. Restrict external collaboration settings.`
-            };
-        }
-    }
-
-    // ── Fallback ──
-    return {
-        success: true,
-        advisory: true,
-        message: `ADVISORY: No automated remediation available for Azure ${type} "${name}". Manual intervention required via Azure Portal.`
-    };
 }
