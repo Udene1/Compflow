@@ -62,6 +62,7 @@ export const ControlMatrix = {
     'GCS_UBR': { name: 'Uniform Bucket-Level Access', soc2: ['CC6.1'] },
     'CLOUDSQL_SSL': { name: 'SQL SSL Enforcement', soc2: ['CC6.6'], gdpr: ['Art 32(1)(a)'] },
     'GCP_SERIAL_PORT': { name: 'VM Serial Port Access', soc2: ['CC6.1'] },
+    'GCP_SA_ROTATION': { name: 'Service Account Key Rotation', soc2: ['CC6.1'], hipaa: ['§164.312(a)(2)(iv)'] },
 
     // ─── LEGACY / ADDITIONAL CHECKS ───
     'IAM_ROOT_MFA': { name: 'Root Account MFA', soc2: ['CC6.1'], iso27001: ['A.9.2.1'] },
