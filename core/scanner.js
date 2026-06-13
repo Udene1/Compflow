@@ -1,8 +1,3 @@
-import { runScan as scanAWS } from './providers/aws.js';
-import { runScan as scanHetzner } from './providers/hetzner.js';
-import { runScan as scanDO } from './providers/digitalocean.js';
-import { runScan as scanGCP } from './providers/gcp.js';
-import { runScan as scanAzure } from './providers/azure.js';
 import { ControlMatrix } from './controls.js';
 import { log } from './logger.js';
 
@@ -11,22 +6,32 @@ export async function runScan(provider, credentials) {
 
     let result;
     switch (provider.toLowerCase()) {
-        case 'aws':
+        case 'aws': {
+            const { runScan: scanAWS } = await import('./providers/aws.js');
             result = await scanAWS(provider, credentials);
             break;
-        case 'hetzner':
+        }
+        case 'hetzner': {
+            const { runScan: scanHetzner } = await import('./providers/hetzner.js');
             result = await scanHetzner(provider, credentials);
             break;
+        }
         case 'digitalocean':
-        case 'do':
+        case 'do': {
+            const { runScan: scanDO } = await import('./providers/digitalocean.js');
             result = await scanDO(provider, credentials);
             break;
-        case 'gcp':
+        }
+        case 'gcp': {
+            const { runScan: scanGCP } = await import('./providers/gcp.js');
             result = await scanGCP(provider, credentials);
             break;
-        case 'azure':
+        }
+        case 'azure': {
+            const { runScan: scanAzure } = await import('./providers/azure.js');
             result = await scanAzure(provider, credentials);
             break;
+        }
         default:
             throw new Error(`Unsupported cloud provider: ${provider}`);
     }
