@@ -42,6 +42,8 @@ export const ControlMatrix = {
     'AZ_DIAG_SETTINGS': { name: 'Diagnostic Logs Export', soc2: ['CC7.2'], gdpr: ['Art 30'] },
     'AZ_UNMANAGED_DISK': { name: 'VM Unmanaged Disks', soc2: ['CC6.1'] },
     'AZ_VM_PUBLIC_IP': { name: 'VM Public IP', soc2: ['CC6.6'] },
+    'AZ_BUS_ENCRYPT': { name: 'Service Bus Encryption', soc2: ['CC6.7'], hipaa: ['§164.312(a)(2)(iv)'] },
+    'AZ_POLICY_HEALTH': { name: 'Azure Policy Compliance', soc2: ['CC6.1'], iso27001: ['A.18.2.1'] },
 
     // ─── GCP SPECIFIC CONTROLS ───────────────────────────────────────────────
     'GKE_MASTER_NETWORKS': { name: 'GKE Master Authorized Networks', soc2: ['CC6.6'], gdpr: ['Art 32'] },
