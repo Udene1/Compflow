@@ -53,6 +53,28 @@ export async function runRemediation(provider, credentials, type, name, issue, d
     const credential = new ClientSecretCredential(tenantId, clientId, clientSecret);
 
     try {
+        // ── Phase 1: Blast Radius Control (Auto-Fix Whitelist) ──
+        const SAFE_WHITELIST = {
+            'Azure App Service': ['HTTPS', 'TLS'],
+            'Azure KeyVault': ['Soft delete'],
+            'Azure Storage': ['HTTPS', 'public access'],
+            'Azure VM': ['Managed Disks', 'encryption'],
+            'Azure AKS': ['RBAC'], // Adding RBAC as safe-ish
+            'Azure Recovery Vault': ['Soft delete']
+        };
+
+        const isSafeParams = SAFE_WHITELIST[type] && 
+                             SAFE_WHITELIST[type].some(safeWord => issue.includes(safeWord));
+
+        if (!isSafeParams && !dryRun) {
+            log.info(`[BLAST RADIUS] Auto-fix blocked and escalated for ${type} "${name}": ${issue}`);
+            return {
+                success: true,
+                advisory: true,
+                message: `ADVISORY: Issue "${issue}" on ${type} is outside the strict auto-fix whitelist. Escalated for human review.`
+            };
+        }
+
         // ─── 1. APP SERVICE REMEDIATIONS ──────────────────────────────────────
         if (type === 'Azure App Service') {
             const webClient = new WebSiteManagementClient(credential, subscriptionId);
@@ -129,7 +151,24 @@ export async function runRemediation(provider, credentials, type, name, issue, d
             }
         }
 
-        // ─── 4. ADVISORY FALLBACK ──────────────────────────────────────────────
+        // ─── 4. RECOVERY VAULT REMEDIATIONS ───────────────────────────────────
+        if (type === 'Azure Recovery Vault') {
+            const rsClient = new RecoveryServicesManagementClient(credential, subscriptionId);
+            let rgName = '';
+            for await (const vault of rsClient.vaults.listBySubscriptionId()) {
+                if (vault.name === name) {
+                    rgName = vault.id.split('/')[4];
+                    break;
+                }
+            }
+            if (rgName && issue.includes('Soft delete')) {
+                // Not all vault updates are easy via SDK update, but we can try
+                // For now, return advisory if complex, or implement here
+                return { success: true, advisory: true, message: `ADVISORY: Enable soft delete via Vault > Properties > Security Settings.` };
+            }
+        }
+
+        // ─── 5. ADVISORY FALLBACK ──────────────────────────────────────────────
         // For complex networking or high-risk architectural changes, return an advisory message
         return {
             success: true,

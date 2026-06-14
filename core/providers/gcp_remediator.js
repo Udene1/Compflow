@@ -54,6 +54,27 @@ export async function runRemediation(provider, credentials, type, name, issue, d
     }
 
     try {
+        // ── Phase 1: Blast Radius Control (Auto-Fix Whitelist) ──
+        const SAFE_WHITELIST = {
+            'GCP Bucket': ['Uniform bucket-level access', 'publicly accessible'],
+            'GCP BigQuery': ['publicly accessible'],
+            'GCP CloudSQL': ['SSL/TLS not enforced', 'Automated backups disabled'],
+            'GCP Secret': ['rotation'],
+            'GCP GKE': ['Shielded Nodes']
+        };
+
+        const isSafeParams = SAFE_WHITELIST[type] && 
+                             SAFE_WHITELIST[type].some(safeWord => issue.includes(safeWord));
+
+        if (!isSafeParams && !dryRun) {
+            log.info(`[BLAST RADIUS] Auto-fix blocked and escalated for ${type} "${name}": ${issue}`);
+            return {
+                success: true,
+                advisory: true,
+                message: `ADVISORY: Issue "${issue}" on ${type} is outside the strict auto-fix whitelist. Escalated for human review.`
+            };
+        }
+
         // ─── 1. CLOUD STORAGE (GCS) REMEDIATIONS ────────────────────────────────
         if (type === 'GCP Bucket') {
             const storage = new Storage(authConfig);
@@ -131,12 +152,21 @@ export async function runRemediation(provider, credentials, type, name, issue, d
 
         // ─── 4. GKE REMEDIATIONS (ADVISORY) ─────────────────────────────────────
         if (type === 'GCP GKE') {
-            // NOTE: Updating master authorized networks is high-risk. Flagging as advisory.
+            if (issue.includes('Shielded Nodes')) {
+                // This is safe-ish, but requires node pool recreate/patch
+                return { success: true, advisory: true, message: `ADVISORY: Shielded Nodes must be enabled at the Node Pool level for cluster "${name}".` };
+            }
             return {
                 success: true,
                 advisory: true,
                 message: `ADVISORY: GKE Cluster "${name}" requires Master Authorized Networks. Apply via Console/Terraform to prevent connectivity loss.`
             };
+        }
+
+        // ─── 5. SECRET MANAGER REMEDIATIONS ──────────────────────────────────
+        if (type === 'GCP Secret' && issue.includes('rotation')) {
+             // Requires a Lambda/Cloud Function for rotation logic
+             return { success: true, advisory: true, message: `ADVISORY: Secret rotation for "${name}" requires a back-end Cloud Function to execute the rotation.` };
         }
 
         // ─── 5. ADVISORY FALLBACK ──────────────────────────────────────────────

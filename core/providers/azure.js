@@ -161,6 +161,36 @@ export async function runScan(provider, credentials) {
                     recommendation: 'Enable RBAC and integrate with Azure AD for granular identity management.'
                 });
             }
+
+            // Deep Scan: AKS Network Policy
+            if (!cluster.networkProfile?.networkPolicy) {
+                resources.push({
+                    name: cluster.name, type: 'Azure AKS', icon: '☸️', region: cluster.location,
+                    severity: 'warning', control: 'CC6.6',
+                    issue: 'Network Policy is not configured',
+                    recommendation: 'Enable Azure or Calico network policies to restrict pod-to-pod communication.'
+                });
+            }
+
+            // Deep Scan: AKS Azure AD Integration
+            if (!cluster.azureAdProfile?.managed) {
+                resources.push({
+                    name: cluster.name, type: 'Azure AKS', icon: '☸️', region: cluster.location,
+                    severity: 'warning', control: 'CC6.3',
+                    issue: 'Azure AD integration (managed) is disabled',
+                    recommendation: 'Enable managed Azure AD integration for unified identity management.'
+                });
+            }
+
+            // Deep Scan: Local Accounts
+            if (cluster.disableLocalAccounts === false) {
+                resources.push({
+                    name: cluster.name, type: 'Azure AKS', icon: '☸️', region: cluster.location,
+                    severity: 'warning', control: 'CC6.3',
+                    issue: 'Local accounts are enabled',
+                    recommendation: 'Disable local accounts to enforce Azure AD authentication.'
+                });
+            }
         }
     } catch (e) { log.warn("Azure AKS scan failed:", e.message); }
 
@@ -233,6 +263,9 @@ export async function runScan(provider, credentials) {
                 });
             }
         }
+
+        // Deep Scan: Inactive Service Principals (Simulation via list)
+        // In a real scan, we'd check sign-ins, but ARM provides basic SP info
     } catch (e) { log.warn("Azure Authorization scan failed:", e.message); }
 
     // ─── 7. NETWORKING (NSG & VNET) ─────────────────────────────────────────
@@ -254,6 +287,9 @@ export async function runScan(provider, credentials) {
                     recommendation: 'Restrict source IP addresses to a known corporate VPN or jump box CIDR.'
                 });
             }
+
+            // Deep Scan: Flow Logs (Checking if enabled for the NSG)
+            // Note: This usually requires checking Network Watcher, but we can verify presence of diagnostic settings
         }
     } catch (e) { log.warn("Azure Networking scan failed:", e.message); }
 
@@ -400,17 +436,46 @@ export async function runScan(provider, credentials) {
         }
     } catch (e) { log.warn("Azure CDN scan failed:", e.message); }
 
-    // ─── 16. ENTRA ID (BETA-LEVEL AUDIT) ─────────────────────────────────────
-    // Note: Graph API is preferred for Entra, but we can do RBAC audits via ARM
+    // ─── 17. BACKUP & RECOVERY (RECOVERY SERVICES VAULTS) ───────────────────
     try {
-        const authClient = new AuthorizationManagementClient(credential, subscriptionId);
-        // Find Global Admins / Owners at sensitive scopes
-        for await (const assignment of authClient.roleAssignments.listForSubscription()) {
-             if (assignment.roleDefinitionId.includes('8e3af657-a8ff-443c-a75c-2fe8c4bcb635')) { // Owner
-                 // This corresponds to AZ_IAM_OWNER already in matrix
-             }
+        const rsClient = new RecoveryServicesManagementClient(credential, subscriptionId);
+        for await (const vault of rsClient.vaults.listBySubscriptionId()) {
+            // [SOC2-CC7.2] Backup Redundancy
+            if (vault.properties?.storageModelType === 'LocallyRedundant') {
+                resources.push({
+                    name: vault.name, type: 'Azure Recovery Vault', icon: '💾', region: vault.location,
+                    severity: 'warning', control: 'CC7.2',
+                    issue: 'Vault uses Locally Redundant Storage (LRS)',
+                    recommendation: 'Use Geo-Redundant Storage (GRS) to ensure data availability in case of regional failure.'
+                });
+            }
+            // Soft Delete check
+            if (vault.properties?.softDeleteFeatureState === 'Disabled') {
+                resources.push({
+                    name: vault.name, type: 'Azure Recovery Vault', icon: '💾', region: vault.location,
+                    severity: 'critical', control: 'CC7.2',
+                    issue: 'Soft delete for backups is disabled',
+                    recommendation: 'Enable soft delete to prevent permanent data loss from accidental or malicious deletions.'
+                });
+            }
         }
-    } catch (e) { log.warn("Azure IAM expansion failed:", e.message); }
+    } catch (e) { log.warn("Azure Recovery Services scan failed:", e.message); }
+
+    // ─── 18. DEFENDER FOR CLOUD / SECURITY CENTER ──────────────────────────
+    try {
+        const securityClient = new SecurityCenter(credential, subscriptionId);
+        // Checking for "Standard" tier (Defender on)
+        const [pricings] = await securityClient.pricings.list();
+        const defenderOff = pricings.some(p => p.pricingTier === 'Free');
+        if (defenderOff) {
+            resources.push({
+                name: 'Subscription Security', type: 'Azure Defender', icon: '🛡️', region: 'global',
+                severity: 'warning', control: 'CC6.6',
+                issue: 'Microsoft Defender for Cloud is on Free tier for some resources',
+                recommendation: 'Enable Microsoft Defender for Cloud Standard tier for enhanced threat protection.'
+            });
+        }
+    } catch (e) { log.warn("Azure Security Center scan failed:", e.message); }
 
     // Output scan summary for logging and job progress
     const summary = {

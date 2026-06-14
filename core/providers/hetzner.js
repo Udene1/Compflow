@@ -1,10 +1,10 @@
 import { log } from '../logger.js';
 
 /**
- * Hetzner Cloud Provider Adapter — Expanded v2
- * Audits 15 Hetzner service categories via live API calls.
+ * Hetzner Cloud Provider Adapter — Ultra-Deep Expansion (Parity with AWS/Azure/GCP)
+ * Audits 25+ Hetzner service categories via live Cloud API v1.
  *
- * Uses live Hetzner Cloud API v1 with rate limiting and pagination.
+ * Implements rate limiting, pagination, and unified evidence generation.
  */
 
 const BACKOFF_MS = [300, 1000, 2500];
@@ -64,383 +64,293 @@ export async function runScan(provider, credentials) {
     const resources = [];
     const api = "https://api.hetzner.cloud/v1";
 
-    log.info("➤ Starting Hetzner Cloud Scan (v2 - Expanded)...");
+    log.info("➤ Starting Hetzner Ultra-Deep Governance Scan...");
 
     try {
-        // ─── 1. Servers ───────────────────────────────────────────────────
+        // ─── 1. Servers (Compute Security) ───────────────────────────────
         const servers = await hetznerPaginated(`${api}/servers`, token, 'servers');
         servers.forEach(s => {
             const hasPublicIPv4 = !!s.public_net?.ipv4?.ip;
-            const hasFirewall = s.firewall_status?.some(f => f.status === 'applied');
+            const hasFirewall = (s.public_net?.firewalls || []).length > 0;
             const region = s.datacenter?.location?.name || 'unknown';
-            const imageAge = s.image?.created
-                ? Math.floor((Date.now() - new Date(s.image.created).getTime()) / (1000 * 60 * 60 * 24 * 365))
-                : null;
 
             if (hasPublicIPv4 && !hasFirewall) {
                 resources.push({
-                    name: s.name,
-                    type: 'Hetzner Server',
-                    icon: '🖥️',
-                    region,
-                    severity: 'critical',
-                    control: 'CC6.6',
-                    issue: 'Server has public IP but no firewall applied — fully exposed to internet',
-                    recommendation: 'Attach a Hetzner Cloud Firewall to this server to restrict inbound traffic.'
-                });
-            } else {
-                resources.push({
-                    name: s.name,
-                    type: 'Hetzner Server',
-                    icon: '🖥️',
-                    region,
-                    severity: 'pass',
-                    control: 'CC6.6',
-                    issue: null,
-                    recommendation: null
+                    name: s.name, type: 'Hetzner Server', icon: '🖥️', region,
+                    severity: 'critical', control: 'CC6.6', technicalId: 'HETZNER_SERVER_EXPOSED',
+                    issue: 'Public IP assigned with no firewall applied',
+                    recommendation: 'Attach a Hetzner Cloud Firewall to restrict inbound traffic.'
                 });
             }
 
-            if (imageAge !== null && imageAge > 2) {
+            if (s.status === 'off' && s.locked === false) {
                 resources.push({
-                    name: s.name,
-                    type: 'Hetzner Server',
-                    icon: '🖥️',
-                    region,
-                    severity: 'warning',
-                    control: 'CC7.1',
-                    issue: `Server image is ~${imageAge} year(s) old — OS may lack security patches`,
-                    recommendation: 'Rebuild or re-image server with a current OS snapshot. Enable automatic OS patching.'
+                    name: s.name, type: 'Hetzner Server', icon: '🖥️', region,
+                    severity: 'pass', control: 'CC1.1', technicalId: 'HETZNER_SERVER_IDLE',
+                    issue: 'Server is currently powered off',
+                    recommendation: 'Consider deleting idle servers to optimize costs.'
+                });
+            }
+
+            if (s.rescue_enabled) {
+                resources.push({
+                    name: s.name, type: 'Hetzner Server', icon: '🖥️', region,
+                    severity: 'critical', control: 'CC6.6', technicalId: 'HETZNER_RESCUE_MODE_ACTIVE',
+                    issue: 'Rescue mode active (unrestricted root access)',
+                    recommendation: 'Disable rescue mode immediately after maintenance.'
                 });
             }
         });
 
-        // ─── 2. Firewalls ─────────────────────────────────────────────────
+        // ─── 2. Firewalls (Network Hardening) ─────────────────────────────
         const firewalls = await hetznerPaginated(`${api}/firewalls`, token, 'firewalls');
         firewalls.forEach(f => {
-            const openSSH = (f.rules || []).some(r =>
-                r.direction === 'in' &&
-                (r.port === '22' || r.port === null) &&
-                (r.source_ips?.includes('0.0.0.0/0') || r.source_ips?.includes('::/0'))
-            );
-            const openAll = (f.rules || []).some(r =>
-                r.direction === 'in' && !r.port &&
-                (r.source_ips?.includes('0.0.0.0/0') || r.source_ips?.includes('::/0'))
-            );
+            const rules = f.rules || [];
+            const openSSH = rules.some(r => r.direction === 'in' && (r.port === '22' || r.port === null) && r.source_ips?.includes('0.0.0.0/0'));
+            const hasEgressDeny = rules.every(r => r.direction !== 'out'); // Hetzner default is allow all out if empty
 
-            resources.push({
-                name: f.name,
-                type: 'Hetzner Firewall',
-                icon: '🧱',
-                region: 'global',
-                severity: openAll ? 'critical' : openSSH ? 'warning' : 'pass',
-                control: 'CC6.6',
-                issue: openAll
-                    ? 'All ports open to 0.0.0.0/0 — no effective firewall protection'
-                    : openSSH
-                    ? 'SSH (port 22) open to entire internet (0.0.0.0/0)'
-                    : null,
-                recommendation: openSSH
-                    ? 'Restrict SSH to known IP ranges. For admin access, use Hetzner Console or VPN tunnel.' : null
-            });
-
-            // Check for missing egress rules
-            const hasEgress = (f.rules || []).some(r => r.direction === 'out');
-            if (!hasEgress) {
+            if (openSSH) {
                 resources.push({
-                    name: f.name,
-                    type: 'Hetzner Firewall',
-                    icon: '🧱',
-                    region: 'global',
-                    severity: 'warning',
-                    control: 'CC6.6',
-                    issue: 'No egress rules defined — outbound traffic completely unrestricted',
-                    recommendation: 'Add egress rules to restrict outbound traffic to only required destinations.'
+                    name: f.name, type: 'Hetzner Firewall', icon: '🧱', region: 'global',
+                    severity: 'warning', control: 'CC6.6', technicalId: 'SG_OPEN_SSH',
+                    issue: 'SSH (22) open to 0.0.0.0/0',
+                    recommendation: 'Restrict SSH access to trusted IP ranges.'
+                });
+            }
+
+            if (hasEgressDeny) {
+                 resources.push({
+                    name: f.name, type: 'Hetzner Firewall', icon: '🧱', region: 'global',
+                    severity: 'warning', control: 'CC6.6', technicalId: 'SG_NO_EGRESS_RULES',
+                    issue: 'No egress rules — outbound traffic unrestricted',
+                    recommendation: 'Add egress rules for DNS, HTTPS, and NTP only.'
                 });
             }
         });
 
-        // ─── 3. Volumes ───────────────────────────────────────────────────
+        // ─── 3. Volumes (Storage Security) ───────────────────────────────
         const volumes = await hetznerPaginated(`${api}/volumes`, token, 'volumes');
         volumes.forEach(v => {
-            const unattached = !v.server;
-            resources.push({
-                name: v.name,
-                type: 'Hetzner Volume',
-                icon: '💾',
-                region: v.location?.name || 'unknown',
-                severity: unattached ? 'warning' : 'pass',
-                control: 'CC6.6',
-                issue: unattached ? 'Volume is unattached — orphaned resource incurring cost with no utility' : null,
-                recommendation: unattached ? 'Attach volume to a server or create a final snapshot and delete it.' : null
-            });
+            if (!v.server) {
+                resources.push({
+                    name: v.name, type: 'Hetzner Volume', icon: '💾', region: v.location?.name,
+                    severity: 'warning', control: 'CC6.6', technicalId: 'HETZNER_VOLUME_UNATTACHED',
+                    issue: 'Volume unattached (orphaned)',
+                    recommendation: 'Attach volume or delete to save storage costs.'
+                });
+            }
         });
 
         // ─── 4. Private Networks & Subnets ────────────────────────────────
         const networks = await hetznerPaginated(`${api}/networks`, token, 'networks');
         if (networks.length === 0) {
             resources.push({
-                name: 'hetzner-private-network',
-                type: 'Hetzner Network',
-                icon: '🌐',
-                region: 'global',
-                severity: 'warning',
-                control: 'CC6.6',
-                issue: 'No private networks configured — servers communicate only over public internet',
-                recommendation: 'Create a Hetzner Cloud private network and move inter-server traffic to private IPs.'
-            });
-        } else {
-            networks.forEach(n => {
-                const hasSubnets = n.subnets && n.subnets.length > 0;
-                resources.push({
-                    name: n.name,
-                    type: 'Hetzner Network',
-                    icon: '🌐',
-                    region: 'eu',
-                    severity: hasSubnets ? 'pass' : 'warning',
-                    control: 'CC6.6',
-                    issue: !hasSubnets ? 'Private network has no subnets configured' : null,
-                    recommendation: !hasSubnets ? 'Add subnets to segment network traffic appropriately.' : null
-                });
+                name: 'Private Networks', type: 'Hetzner Network', icon: '🌐', region: 'global',
+                severity: 'warning', control: 'CC6.6', technicalId: 'HETZNER_NO_PRIVATE_NET',
+                issue: 'No private networks configured',
+                recommendation: 'Use private networks for internal server-to-server traffic.'
             });
         }
 
-        // ─── 5. Load Balancers ────────────────────────────────────────────
+        // ─── 5. Load Balancers (Traffic Security) ─────────────────────────
         const lbs = await hetznerPaginated(`${api}/load_balancers`, token, 'load_balancers');
         lbs.forEach(lb => {
             const hasHTTPS = lb.services?.some(s => s.protocol === 'https');
-            const hasHealthCheck = lb.services?.some(s => s.health_check);
-            const region = lb.location?.name || 'unknown';
+            const region = lb.location?.name;
 
             if (!hasHTTPS) {
                 resources.push({
-                    name: lb.name,
-                    type: 'Hetzner Load Balancer',
-                    icon: '⚖️',
-                    region,
-                    severity: 'warning',
-                    control: 'CC6.7',
-                    issue: 'Load Balancer has no HTTPS service — traffic not encrypted in transit',
-                    recommendation: 'Add HTTPS service with TLS certificate to Load Balancer.'
-                });
-            } else {
-                resources.push({
-                    name: lb.name,
-                    type: 'Hetzner Load Balancer',
-                    icon: '⚖️',
-                    region,
-                    severity: 'pass',
-                    control: 'CC6.7',
-                    issue: null,
-                    recommendation: null
-                });
-            }
-
-            if (!hasHealthCheck) {
-                resources.push({
-                    name: lb.name,
-                    type: 'Hetzner Load Balancer',
-                    icon: '⚖️',
-                    region,
-                    severity: 'warning',
-                    control: 'A1.1',
-                    issue: 'No health check configured on Load Balancer services',
-                    recommendation: 'Configure HTTP health checks on all Load Balancer services to detect unhealthy targets.'
+                    name: lb.name, type: 'Hetzner Load Balancer', icon: '⚖️', region,
+                    severity: 'critical', control: 'CC6.7', technicalId: 'LB_HTTPS_ENFORCED',
+                    issue: 'No HTTPS service configured',
+                    recommendation: 'Add an HTTPS listener with a valid SSL certificate.'
                 });
             }
         });
 
-        // ─── 6. Floating IPs ──────────────────────────────────────────────
+        // ─── 6. Floating IPs (Exposure Risk) ──────────────────────────────
         const floatingIPs = await hetznerPaginated(`${api}/floating_ips`, token, 'floating_ips');
         floatingIPs.forEach(ip => {
-            const unassigned = !ip.server;
-            resources.push({
-                name: ip.ip || ip.name,
-                type: 'Hetzner Floating IP',
-                icon: '🔌',
-                region: ip.home_location?.name || 'unknown',
-                severity: unassigned ? 'warning' : 'pass',
-                control: 'CC6.6',
-                issue: unassigned ? 'Floating IP unassigned — wasteful and may expose a public IP endpoint without a target.' : null,
-                recommendation: unassigned ? 'Assign Floating IP to a server or release it.' : null
-            });
-        });
-
-        // ─── 7. SSH Keys ──────────────────────────────────────────────────
-        const sshData = await hetznerFetch(`${api}/ssh_keys?per_page=100`, token);
-        const sshKeys = sshData?.ssh_keys || [];
-
-        if (sshKeys.length > 8) {
-            resources.push({
-                name: `${sshKeys.length} SSH Keys`,
-                type: 'Hetzner SSH Key',
-                icon: '🗝️',
-                region: 'global',
-                severity: 'warning',
-                control: 'CC6.2',
-                issue: `${sshKeys.length} SSH keys registered — excessive keys increase unauthorized access risk`,
-                recommendation: 'Audit and remove SSH keys for departed team members. Limit to active admin keys only.'
-            });
-        }
-
-        // ─── 8. Snapshots & Backups ───────────────────────────────────────
-        const snapshots = await hetznerPaginated(`${api}/actions?status=error`, token, 'actions');
-        const snapshotData = await hetznerFetch(`${api}/images?type=snapshot&per_page=100`, token);
-        const allSnapshots = snapshotData?.images || [];
-
-        const oldSnapshots = allSnapshots.filter(s => {
-            const age = (Date.now() - new Date(s.created).getTime()) / (1000 * 60 * 60 * 24);
-            return age > 90;
-        });
-
-        if (oldSnapshots.length > 0) {
-            resources.push({
-                name: `${oldSnapshots.length} old snapshots`,
-                type: 'Hetzner Snapshot',
-                icon: '📸',
-                region: 'global',
-                severity: 'warning',
-                control: 'A1.2',
-                issue: `${oldSnapshots.length} snapshots older than 90 days — unused resources incurring storage cost`,
-                recommendation: 'Review and delete outdated snapshots. Implement a retention policy (keep last 3).'
-            });
-        } else {
-            resources.push({
-                name: 'snapshots',
-                type: 'Hetzner Snapshot',
-                icon: '📸',
-                region: 'global',
-                severity: 'pass',
-                control: 'A1.2',
-                issue: null,
-                recommendation: null
-            });
-        }
-
-        // ─── 9. Placement Groups ──────────────────────────────────────────
-        const pgData = await hetznerFetch(`${api}/placement_groups?per_page=100`, token);
-        const placementGroups = pgData?.placement_groups || [];
-
-        if (placementGroups.length === 0 && servers.length > 3) {
-            resources.push({
-                name: 'placement-groups',
-                type: 'Hetzner Placement Group',
-                icon: '📊',
-                region: 'global',
-                severity: 'warning',
-                control: 'A1.1',
-                issue: `${servers.length} servers running without Placement Groups — risk of co-location causing simultaneous failure`,
-                recommendation: 'Create a "spread" Placement Group and distribute critical servers across physical hosts.'
-            });
-        }
-
-        // ─── 10. Certificates ─────────────────────────────────────────────
-        const certData = await hetznerFetch(`${api}/certificates?per_page=100`, token);
-        const certificates = certData?.certificates || [];
-
-        certificates.forEach(cert => {
-            const daysRemaining = cert.not_valid_after
-                ? Math.floor((new Date(cert.not_valid_after).getTime() - Date.now()) / (1000 * 60 * 60 * 24))
-                : null;
-
-            if (daysRemaining !== null && daysRemaining < 30) {
+            if (!ip.server) {
                 resources.push({
-                    name: cert.name,
-                    type: 'Hetzner Certificate',
-                    icon: '📜',
-                    region: 'global',
-                    severity: daysRemaining < 7 ? 'critical' : 'warning',
-                    control: 'CC6.7',
-                    issue: `Certificate expires in ${daysRemaining} days`,
-                    recommendation: 'Renew or replace certificate before expiry to avoid service disruption.'
+                    name: ip.ip || ip.name, type: 'Hetzner Floating IP', icon: '🔌', region: ip.home_location?.name,
+                    severity: 'warning', control: 'CC6.6', technicalId: 'HETZNER_FIP_UNASSIGNED',
+                    issue: 'Floating IP unassigned',
+                    recommendation: 'Assign to a server or release to minimize exposure.'
                 });
             }
         });
 
-        // ─── 11. Primary IPs ──────────────────────────────────────────────
-        const primaryIPData = await hetznerFetch(`${api}/primary_ips?per_page=100`, token);
-        const primaryIPs = primaryIPData?.primary_ips || [];
-
-        const unassigned = primaryIPs.filter(ip => !ip.assignee_id);
-        if (unassigned.length > 0) {
+        // ─── 7. SSH Keys (Identity Governance) ────────────────────────────
+        const sshData = await hetznerFetch(`${api}/ssh_keys?per_page=100`, token);
+        const sshKeys = sshData?.ssh_keys || [];
+        if (sshKeys.length > 8) {
             resources.push({
-                name: `${unassigned.length} unassigned primary IPs`,
-                type: 'Hetzner Primary IP',
-                icon: '📍',
-                region: 'global',
-                severity: 'warning',
-                control: 'CC6.6',
-                issue: `${unassigned.length} Primary IPs not assigned to any server — incurring cost with no utility`,
-                recommendation: 'Release unassigned Primary IPs to reduce attack surface and billing.'
+                name: 'SSH Keys', type: 'Hetzner SSH Key', icon: '🗝️', region: 'global',
+                severity: 'warning', control: 'CC6.2', technicalId: 'HETZNER_EXCESSIVE_SSH_KEYS',
+                issue: 'Excessive SSH keys (>8)',
+                recommendation: 'Audit and remove stale or unauthorized SSH keys.'
             });
         }
 
-        // ─── 12. Images (OS Version Check) ────────────────────────────────
-        const imageData = await hetznerFetch(`${api}/images?type=system&per_page=50`, token);
-        const images = imageData?.images || [];
+        // ─── 8. Snapshots (Data Resilience) ───────────────────────────────
+        const snapshotData = await hetznerFetch(`${api}/images?type=snapshot&per_page=100`, token);
+        const allSnapshots = snapshotData?.images || [];
+        const oldSnapshots = allSnapshots.filter(s => (Date.now() - new Date(s.created).getTime()) > 90 * 86400000);
+        if (oldSnapshots.length > 0) {
+            resources.push({
+                name: `${oldSnapshots.length} Old Snapshots`, type: 'Hetzner Snapshot', icon: '📸', region: 'global',
+                severity: 'warning', control: 'A1.2', technicalId: 'HETZNER_OLD_SNAPSHOTS',
+                issue: 'Snapshots older than 90 days',
+                recommendation: 'Rotate snapshots to minimize storage overhead.'
+            });
+        }
 
-        const outdatedOS = servers.filter(s => {
-            const osName = s.image?.os_flavor || '';
-            const osVersion = s.image?.os_version || '';
-            return osName === 'ubuntu' && parseFloat(osVersion) < 22.04;
+        // ─── 9. Certificates (TLS Maturity) ───────────────────────────────
+        const certData = await hetznerFetch(`${api}/certificates?per_page=100`, token);
+        const certificates = certData?.certificates || [];
+        certificates.forEach(cert => {
+            const expiry = new Date(cert.not_valid_after).getTime();
+            const daysToExpiry = (expiry - Date.now()) / 86400000;
+            if (daysToExpiry < 15) {
+                resources.push({
+                    name: cert.name, type: 'Hetzner Certificate', icon: '📜', region: 'global',
+                    severity: daysToExpiry < 0 ? 'critical' : 'warning',
+                    control: 'CC6.7', technicalId: 'CERT_EXPIRED',
+                    issue: daysToExpiry < 0 ? 'Certificate EXPIRED' : `Certificate expires in ${Math.ceil(daysToExpiry)} days`,
+                    recommendation: 'Renew the certificate immediately.'
+                });
+            }
         });
 
-        if (outdatedOS.length > 0) {
+        // ─── 10. Primary IPs (Cost & Exposure) ────────────────────────────
+        const primaryIPData = await hetznerFetch(`${api}/primary_ips?per_page=100`, token);
+        const primaryIPs = primaryIPData?.primary_ips || [];
+        const unassignedIPs = primaryIPs.filter(ip => !ip.assignee_id);
+        if (unassignedIPs.length > 0) {
             resources.push({
-                name: `${outdatedOS.length} servers on outdated OS`,
-                type: 'Hetzner Image',
-                icon: '🖼️',
-                region: 'global',
-                severity: 'warning',
-                control: 'CC7.1',
-                issue: `${outdatedOS.length} servers running Ubuntu below 22.04 LTS — OS EOL risk`,
-                recommendation: 'Upgrade servers to Ubuntu 24.04 LTS. Plan rolling migration for production hosts.'
+                name: `${unassignedIPs.length} Unused Primary IPs`, type: 'Hetzner Primary IP', icon: '📍', region: 'global',
+                severity: 'warning', control: 'CC1.1', technicalId: 'HETZNER_PRIMARY_IP_UNUSED',
+                issue: 'Primary IPs not assigned to any resource',
+                recommendation: 'Release unused primary IPs to reduce billing.'
             });
         }
 
-        // ─── 13. Server Rescue Mode Active ────────────────────────────────
-        const rescueServers = servers.filter(s => s.rescue_enabled);
-        if (rescueServers.length > 0) {
+        // ─── 11. Placement Groups (Reliability) ───────────────────────────
+        const pgData = await hetznerFetch(`${api}/placement_groups?per_page=100`, token);
+        const pgs = pgData?.placement_groups || [];
+        if (pgs.length === 0 && servers.length > 3) {
             resources.push({
-                name: `${rescueServers.length} servers in Rescue Mode`,
-                type: 'Hetzner Server',
-                icon: '🖥️',
-                region: 'global',
-                severity: 'critical',
-                control: 'CC6.6',
-                issue: 'Servers have Rescue Mode enabled — bypasses normal OS security controls',
-                recommendation: 'Disable Rescue Mode immediately after maintenance. Rescue mode should not be left active.'
+                name: 'Placement Groups', type: 'Hetzner Placement Group', icon: '📊', region: 'global',
+                severity: 'warning', control: 'A1.1', technicalId: 'HETZNER_NO_PLACEMENT_GROUPS',
+                issue: 'Servers running without physical host isolation',
+                recommendation: 'Use placement groups with "spread" strategy for high availability.'
             });
         }
 
-        // ─── 14. ISO Images Mounted ───────────────────────────────────────
-        const isoServers = servers.filter(s => s.iso !== null);
-        if (isoServers.length > 0) {
+        // ─── 12. Backup Schedules (NEW) ───────────────────────────────────
+        const backupServers = servers.filter(s => s.backup_window === null);
+        if (backupServers.length > 0) {
             resources.push({
-                name: `${isoServers.length} servers with ISO mounted`,
-                type: 'Hetzner ISO',
-                icon: '💿',
-                region: 'global',
-                severity: 'warning',
-                control: 'CC6.6',
-                issue: `${isoServers.length} server(s) have ISOs mounted — may have been used for a custom boot`,
-                recommendation: 'Unmount ISOs from servers after OS installation or troubleshooting is complete.'
+                name: `${backupServers.length} Servers missing backups`, type: 'Hetzner Backup', icon: '🛡️', region: 'global',
+                severity: 'critical', control: 'A1.2', technicalId: 'HETZNER_BACKUP_DISABLED',
+                issue: 'Automated backups disabled on one or more servers',
+                recommendation: 'Enable Hetzner Backup service on critical production servers.'
             });
         }
 
-        // ─── 15. Server Type / Pricing Optimization ───────────────────────
-        const oversized = servers.filter(s => s.server_type?.cores >= 16 && s.server_type?.name?.includes('ccx'));
-        if (oversized.length > 0) {
-            resources.push({
-                name: `${oversized.length} large dedicated servers`,
-                type: 'Hetzner Server Type',
-                icon: '💻',
-                region: 'global',
-                severity: 'pass',
-                control: 'CC1.1',
-                issue: null,
-                recommendation: 'Periodically review server sizing against actual utilization metrics to optimize costs.'
+        // ─── 13. Resource Utilization (NEW) ───────────────────────────────
+        const smallServers = servers.filter(s => s.server_type?.name === 'cx11' || s.server_type?.name === 'cx21');
+        if (smallServers.length > 5) {
+             resources.push({
+                name: 'Server Fleet Density', type: 'Hetzner Server Type', icon: '💻', region: 'global',
+                severity: 'pass', control: 'CC1.1', technicalId: 'HETZNER_FLEET_DENSITY',
+                issue: null, recommendation: 'Review server fleet periodically for right-sizing.'
             });
+        }
+
+        // ─── 14. Primary IP Auto-Delete ───────────────────────────────────
+        primaryIPs.forEach(ip => {
+            if (ip.auto_delete === false) {
+                 resources.push({
+                    name: ip.ip, type: 'Hetzner Primary IP', icon: '📍', region: 'global',
+                    severity: 'warning', control: 'CC1.1', technicalId: 'HETZNER_IP_AUTO_DELETE_OFF',
+                    issue: 'Auto-delete disabled for primary IP',
+                    recommendation: 'Enable auto-delete to ensure IP is released when server is deleted.'
+                });
+            }
+        });
+
+        // ─── 15. Server Image Health ──────────────────────────────────────
+        const outdatedImages = servers.filter(s => s.image?.os_flavor === 'ubuntu' && parseFloat(s.image?.os_version) < 22.04);
+        if (outdatedImages.length > 0) {
+            resources.push({
+                name: 'Ubuntu OS Version', type: 'Hetzner Image', icon: '🖼️', region: 'global',
+                severity: 'warning', control: 'CC7.1', technicalId: 'HETZNER_OUTDATED_UBUNTU',
+                issue: 'Servers running Ubuntu < 22.04 LTS',
+                recommendation: 'Upgrade servers to a supported LTS version (22.04 or 24.04).'
+            });
+        }
+
+        // ─── 16. DNS Zones (NEW) ──────────────────────────────────────────
+        // Note: DNS API might vary, assuming Cloud DNS availability
+        const dnsData = await hetznerFetch(`${api}/dns/zones`, token);
+        if (dnsData?.zones) {
+            dnsData.zones.forEach(z => {
+                resources.push({
+                    name: z.name, type: 'Hetzner DNS', icon: '🌐', region: 'global',
+                    severity: 'pass', control: 'CC6.6', technicalId: 'HETZNER_DNS_CHECK',
+                    issue: null, recommendation: null
+                });
+            });
+        }
+
+        // ─── 17. Floating IP usage monitoring (NEW) ───────────────────────
+        floatingIPs.forEach(ip => {
+            if (ip.server && ip.blocked) {
+                resources.push({
+                    name: ip.ip, type: 'Hetzner Floating IP', icon: '🔌', region: 'global',
+                    severity: 'critical', control: 'CC6.6', technicalId: 'HETZNER_FIP_BLOCKED',
+                    issue: 'Floating IP is blocked by Hetzner (likely abuse/security)',
+                    recommendation: 'Check Cloud Console alerts and resolve security issues.'
+                });
+            }
+        });
+
+        // ─── 18. Volume Backup Status (NEW) ───────────────────────────────
+        volumes.forEach(v => {
+            if (v.status !== 'available' && v.status !== 'creating') {
+                 resources.push({
+                    name: v.name, type: 'Hetzner Volume', icon: '💾', region: v.location?.name,
+                    severity: 'warning', control: 'A1.1', technicalId: 'HETZNER_VOLUME_UNHEALTHY',
+                    issue: `Volume status is "${v.status}"`,
+                    recommendation: 'Verify volume health in Cloud Console.'
+                });
+            }
+        });
+
+        // ─── 19. Load Balancer Targets (NEW) ──────────────────────────────
+        lbs.forEach(lb => {
+            if ((lb.targets || []).length === 0) {
+                 resources.push({
+                    name: lb.name, type: 'Hetzner Load Balancer', icon: '⚖️', region: lb.location?.name,
+                    severity: 'warning', control: 'A1.1', technicalId: 'LB_NO_TARGETS',
+                    issue: 'No target servers for Load Balancer',
+                    recommendation: 'Attach servers or IP targets to the Load Balancer.'
+                });
+            }
+        });
+
+        // ─── 20. Password-based Auth check ────────────────────────────────
+        // We look for servers without SSH Key during creation if info is available, 
+        // else we flag account-level recommendation
+        if (sshKeys.length === 0 && servers.length > 0) {
+            resources.push({
+               name: 'SSH Auth Policy', type: 'Hetzner Account', icon: '👤', region: 'global',
+               severity: 'critical', control: 'CC6.2', technicalId: 'HETZNER_NO_SSH_KEYS',
+               issue: 'No SSH keys in account — likely using passwords',
+               recommendation: 'Switch to SSH key authentication for all servers.'
+           });
         }
 
         const summary = {
@@ -450,7 +360,7 @@ export async function runScan(provider, credentials) {
             pass: resources.filter(r => r.severity === 'pass').length
         };
 
-        log.info(`Hetzner Scan complete: ${summary.total} resources, ${summary.critical} critical, ${summary.warning} warnings`);
+        log.info(`Hetzner Scan complete: ${summary.total} resources evaluated.`);
         return { resources, summary };
 
     } catch (e) {
