@@ -235,7 +235,10 @@ window.Scanner = (() => {
 
         tr.innerHTML = `
             <td><div class="resource-name">${res.icon} ${res.name}</div>
-                <div style="font-size:0.72rem; color:var(--text-dim); margin-top:2px;">${res.issue || 'No issues'}</div></td>
+                <div style="font-size:0.72rem; color:var(--text-dim); margin-top:2px;">
+                    ${res.issue || 'No issues'}
+                    ${res.requires_legal_review ? `<div class="legal-tag" title="${res.legal_review_reason}">⚠️ Legal Review</div>` : ''}
+                </div></td>
             <td><span class="resource-type">${res.type}</span></td>
             <td style="color:var(--text-muted); font-size:0.82rem;">${res.region}</td>
             <td><span class="severity-badge ${sevClass}">${sevLabel}</span></td>

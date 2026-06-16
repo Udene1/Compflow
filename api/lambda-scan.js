@@ -4,6 +4,7 @@ import { saveAuditLog } from '../core/audit.js';
 import { updateJobProgress, completeJob } from '../core/jobs.js';
 import * as reporter from '../core/reporter.js';
 import { getClientCredentials } from '../core/credentials.js';
+import { enrichFinding } from '../core/compliance_mapper.js';
 
 
 /**
@@ -80,6 +81,11 @@ export const handler = async (event) => {
         }
 
         const result = await runScan(provider, activeCredentials);
+
+        // ── Step 3.1: Intelligent Multi-Framework Enrichment ──
+        if (result.resources) {
+            result.resources = result.resources.map(r => enrichFinding(r));
+        }
 
         if (jobId) {
             const resourceCount = result.resources?.length || 0;

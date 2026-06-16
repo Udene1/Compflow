@@ -789,6 +789,20 @@ body {
 .severity-badge.warning { background: rgba(245,158,11,0.12); color: var(--warning); }
 .severity-badge.critical { background: rgba(239,68,68,0.12); color: var(--danger); }
 
+.legal-tag {
+    display: inline-block;
+    padding: 2px 8px;
+    background: rgba(245, 158, 11, 0.15);
+    color: var(--warning);
+    border: 1px solid rgba(245, 158, 11, 0.4);
+    border-radius: 4px;
+    font-size: 0.6rem;
+    font-weight: 700;
+    text-transform: uppercase;
+    margin-top: 4px;
+    cursor: help;
+}
+
 .scan-progress-bar {
     height: 6px;
     background: rgba(255,255,255,0.05);
