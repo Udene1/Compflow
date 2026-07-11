@@ -1,5 +1,35 @@
 service: comp-flow-ains
 
+build:
+  esbuild:
+    bundle: true
+    minify: true
+    sourcemap: true
+    exclude:
+      - '@aws-sdk/*'
+      - '@azure/*'
+      - '@google-cloud/*'
+      - '@google/generative-ai'
+      - 'pdfkit'
+      - 'nodemailer'
+
+package:
+  individually: true
+
+plugins:
+  - serverless-domain-manager
+
+custom:
+  customDomain:
+    domainName: api.compflow.icu
+    stage: ${opt:stage, 'dev'}
+    certificateName: api.compflow.icu
+    createRoute53Record: false # Hosted outside AWS (Namecheap)
+    endpointType: 'regional'
+    securityPolicy: tls_1_2
+    apiType: rest
+    autoDomain: true
+
 provider:
   name: aws
   runtime: nodejs20.x
@@ -47,6 +77,12 @@ provider:
 
 resources:
   Resources:
+    ApiCertificate:
+      Type: AWS::CertificateManager::Certificate
+      Properties:
+        DomainName: api.compflow.icu
+        ValidationMethod: DNS
+
     # ─── DATABASE ───
     ClientsTable:
       Type: AWS::DynamoDB::Table

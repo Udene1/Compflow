@@ -1,0 +1,29 @@
+# Ignore backend and local dev folders
+node_modules
+.serverless
+.git
+.github
+api
+core
+tests
+scripts
+
+# Ignore backend-only configuration and scripts
+serverless.yml
+package.json
+package-lock.json
+migrate_to_dynamo.js
+provision_table.js
+provision_jobs_table.js
+deploy_honeypot.js
+debug_gemini.js
+debug_shield.js
+setup_ses.js
+test_ses.js
+request_acm.js
+check_acm.js
+worker.js
+scheduler.js
+real_scan_report.js
+trigger_test.js
+test_executive_report.pdf
