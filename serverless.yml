@@ -8,8 +8,10 @@ build:
     exclude:
       - '@aws-sdk/*'
       - '@azure/*'
+      - '@azure-rest/*'
       - '@google-cloud/*'
       - '@google/generative-ai'
+      - 'hcloud-js'
       - 'pdfkit'
       - 'nodemailer'
 
@@ -24,7 +26,7 @@ custom:
     domainName: api.compflow.icu
     stage: ${opt:stage, 'dev'}
     certificateName: api.compflow.icu
-    createRoute53Record: false # Hosted outside AWS (Namecheap)
+    createRoute53Record: false
     endpointType: 'regional'
     securityPolicy: tls_1_2
     apiType: rest
@@ -34,7 +36,7 @@ provider:
   name: aws
   runtime: nodejs20.x
   region: us-east-1
-  timeout: 900 # 15 minutes max
+  timeout: 900
   memorySize: 1024
   environment:
     # Set these in your AWS Lambda environment variables later, or securely via SSM

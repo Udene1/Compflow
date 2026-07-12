@@ -1,5 +1,6 @@
 import { Storage } from '@google-cloud/storage';
-import { CloudSqlClient } from '@google-cloud/sql';
+import sqlPkg from '@google-cloud/sql';
+const { CloudSqlClient } = sqlPkg;
 import { BigQuery } from '@google-cloud/bigquery';
 import { ClusterManagerClient } from '@google-cloud/container';
 import { log } from '../logger.js';

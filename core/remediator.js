@@ -1,6 +1,6 @@
 import { runRemediation as remediateAWS } from './providers/aws_remediator.js';
-import { runRemediation as remediateGCP } from './providers/gcp.js';
-import { runRemediation as remediateAzure } from './providers/azure.js';
+import { runRemediation as remediateGCP } from './providers/gcp_remediator.js';
+import { runRemediation as remediateAzure } from './providers/azure_remediator.js';
 import { log } from './logger.js';
 
 export async function runRemediation(provider, credentials, resourceType, resourceName, issue) {
