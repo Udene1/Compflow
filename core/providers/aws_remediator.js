@@ -42,7 +42,10 @@ export async function runRemediation(provider, credentials, resourceType, resour
             'Log Group': ['retention', '< 365'],
             'API Gateway Stage': ['X-Ray'],
             'EC2 Instance': ['IMDSv2'],
-            'Threat Detection': ['disabled']
+            'Threat Detection': ['disabled'],
+            'Security Group': ['port 22', 'RDP', '3389', 'HTTP', 'port 80', 'Unused Security Group'],
+            'Elastic IP': ['Unassociated'],
+            'RDS Database': ['Backup retention', 'Multi-AZ', 'Publicly accessible']
         };
 
         const isSafeParams = SAFE_WHITELIST[resourceType] && 
