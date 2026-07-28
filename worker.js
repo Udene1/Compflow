@@ -9,64 +9,78 @@ import { updateJobProgress, completeJob } from './core/jobs.js';
 
 /**
  * Worker Handler
- * Triggered by SQS to process a SINGLE tenant scan and remediation.
- * Writes progressive updates to the Jobs table.
+ * Triggered by BullMQ (or legacy SQS event) to process a SINGLE tenant scan and remediation.
+ * Writes progressive updates to PostgreSQL jobs table and emits SSE events.
  */
-export const handler = async (event) => {
-    // 1. Parse SQS Message (BatchSize is 1)
-    const messageBody = JSON.parse(event.Records[0].body);
-    const { jobId, ...client } = messageBody;
-    const executionId = event.Records[0].messageId;
+export const handler = async (payload) => {
+    // Standardize job payload format
+    let jobData = payload;
+    if (payload?.Records?.[0]?.body) {
+        jobData = typeof payload.Records[0].body === 'string' 
+            ? JSON.parse(payload.Records[0].body) 
+            : payload.Records[0].body;
+    }
+
+    const { jobId, ...client } = jobData;
+    const clientId = client.id || client.clientId || 'adhoc_user';
+    const clientName = client.name || clientId;
+    const provider = client.provider || 'aws';
+
+    const executionId = jobId || `exec-${Date.now()}`;
     
     // Initialize context-aware logger
-    const log = new Logger({ clientId: client.id, executionId });
+    const log = new Logger({ clientId, executionId });
 
-    log.info(`➤ WORKER START: Processing tenant ${client.name} (Job: ${jobId || 'untracked'})`);
+    log.info(`➤ WORKER START: Processing tenant ${clientName} (Job: ${jobId || 'untracked'})`);
 
-    // Helper to update job if jobId exists
+    // Helper to update job progress if jobId exists
     const trackProgress = async (status, progress, level, message) => {
         if (jobId) await updateJobProgress(jobId, status, progress, level, message);
     };
 
     try {
-        await trackProgress('in_progress', 5, 'SYSTEM', `Worker started for ${client.name}`);
+        await trackProgress('in_progress', 5, 'SYSTEM', `Worker started for ${clientName}`);
 
-        let credentials = {};
+        let credentials = client.credentials || {};
         
-        // Step 1: Resolve Credentials based on Provider
-        if (client.provider === 'aws') {
-            log.info(`[CREDENTIALS] Assuming AWS role ${client.roleArn}...`);
-            await trackProgress('in_progress', 10, 'AGENT', `Assuming AWS role ${client.roleArn}...`);
-            credentials = await getClientCredentials(client.roleArn, client.id, client.externalId);
-            log.info(`[CREDENTIALS] ✓ AWS session established.`);
-            await trackProgress('in_progress', 15, 'AGENT', '✓ AWS session established.');
-        } else if (client.provider === 'gcp') {
-            log.info(`[CREDENTIALS] Loading GCP Service Account...`);
-            credentials = { serviceAccountJson: client.serviceAccountJson };
-            await trackProgress('in_progress', 15, 'AGENT', 'GCP credentials loaded.');
-        } else if (client.provider === 'azure') {
-            log.info(`[CREDENTIALS] Loading Azure Service Principal...`);
-            credentials = { 
-                tenantId: client.tenantId, 
-                clientId: client.clientId, 
-                clientSecret: client.clientSecret, 
-                subscriptionId: client.subscriptionId 
-            };
-            await trackProgress('in_progress', 15, 'AGENT', 'Azure credentials loaded.');
+        // Step 1: Resolve Credentials based on Provider if not pre-provided
+        if (!client.credentials || Object.keys(client.credentials).length === 0) {
+            if (provider === 'aws' && client.roleArn) {
+                log.info(`[CREDENTIALS] Assuming AWS role ${client.roleArn}...`);
+                await trackProgress('in_progress', 10, 'AGENT', `Assuming AWS role ${client.roleArn}...`);
+                credentials = await getClientCredentials(client.roleArn, clientId, client.externalId);
+                log.info(`[CREDENTIALS] ✓ AWS session established.`);
+                await trackProgress('in_progress', 15, 'AGENT', '✓ AWS session established.');
+            } else if (provider === 'gcp' && client.serviceAccountJson) {
+                log.info(`[CREDENTIALS] Loading GCP Service Account...`);
+                credentials = { serviceAccountJson: client.serviceAccountJson };
+                await trackProgress('in_progress', 15, 'AGENT', 'GCP credentials loaded.');
+            } else if (provider === 'azure' && client.tenantId) {
+                log.info(`[CREDENTIALS] Loading Azure Service Principal...`);
+                credentials = { 
+                    tenantId: client.tenantId, 
+                    clientId: client.clientId, 
+                    clientSecret: client.clientSecret, 
+                    subscriptionId: client.subscriptionId 
+                };
+                await trackProgress('in_progress', 15, 'AGENT', 'Azure credentials loaded.');
+            } else if (client.apiToken) {
+                log.info(`[CREDENTIALS] Using ${provider.toUpperCase()} API Token...`);
+                credentials = { apiToken: client.apiToken };
+                await trackProgress('in_progress', 15, 'AGENT', `${provider.toUpperCase()} credentials loaded.`);
+            }
         } else {
-            log.info(`[CREDENTIALS] Using ${client.provider.toUpperCase()} API Token...`);
-            credentials = { apiToken: client.apiToken };
-            await trackProgress('in_progress', 15, 'AGENT', `${client.provider.toUpperCase()} credentials loaded.`);
+            await trackProgress('in_progress', 15, 'AGENT', `${provider.toUpperCase()} credentials loaded.`);
         }
 
         // Step 2: Scan
-        log.info(`[SCANNER] Executing deep ${client.provider.toUpperCase()} scan...`);
-        await trackProgress('in_progress', 25, 'SYSTEM', `Executing deep ${client.provider.toUpperCase()} scan...`);
+        log.info(`[SCANNER] Executing deep ${provider.toUpperCase()} scan...`);
+        await trackProgress('in_progress', 25, 'SYSTEM', `Executing deep ${provider.toUpperCase()} scan...`);
 
-        const { resources } = await runScan(client.provider, credentials);
-        const anomalies = resources.filter(r => r.severity !== 'pass');
+        const { resources } = await runScan(provider, credentials);
+        const anomalies = (resources || []).filter(r => r.severity !== 'pass');
         log.info(`[SCANNER] Found ${anomalies.length} anomalies.`);
-        await trackProgress('in_progress', 50, 'OUTPUT', `Scan complete: ${resources.length} resources, ${anomalies.length} anomalies.`);
+        await trackProgress('in_progress', 50, 'OUTPUT', `Scan complete: ${(resources || []).length} resources, ${anomalies.length} anomalies.`);
 
         // Log critical findings
         for (const r of anomalies.slice(0, 10)) {
@@ -95,7 +109,7 @@ export const handler = async (event) => {
                 await trackProgress('in_progress', progress, 'ACTION', `⚡ Auto-fixing: ${anomaly.name}`);
                 
                 try {
-                    const result = await runRemediation(client.provider, credentials, anomaly.type, anomaly.name, anomaly.issue);
+                    const result = await runRemediation(provider, credentials, anomaly.type, anomaly.name, anomaly.issue);
                     if (result.advisory) {
                         log.warn(`[AGENT] Advisory: ${result.message}`);
                         escalatedCount++;
@@ -121,11 +135,11 @@ export const handler = async (event) => {
             }
         }
 
-        // Step 4: Save results for frontend polling
-        log.info(`[REPORTER] Generating results for polling...`);
+        // Step 4: Save audit log
+        log.info(`[REPORTER] Generating results for audit log...`);
         await trackProgress('in_progress', 85, 'SYSTEM', 'Persisting results to audit trail...');
 
-        await saveAuditLog(client.id, 'SCAN_COMPLETE', `Scan completed for ${client.name}`, { 
+        await saveAuditLog(clientId, 'SCAN_COMPLETE', `Scan completed for ${clientName}`, { 
             resources, 
             executionId,
             jobId,
@@ -133,25 +147,27 @@ export const handler = async (event) => {
         });
 
         // Step 5: Generate & Send Report
-        log.info(`[REPORTER] Generating email report...`);
-        await trackProgress('in_progress', 90, 'SYSTEM', 'Generating compliance report...');
-
-        const summary = { resolved: resolvedCount, escalated: escalatedCount, details: remediationDetails };
-        const reportHtml = generateReport(client.name, resources, summary);
-
         if (client.email) {
+            log.info(`[REPORTER] Generating email report for ${client.email}...`);
+            await trackProgress('in_progress', 90, 'SYSTEM', 'Generating compliance report...');
+
+            const summary = { resolved: resolvedCount, escalated: escalatedCount, details: remediationDetails };
+            const reportHtml = generateReport(clientName, resources, summary);
+
             await trackProgress('in_progress', 95, 'SYSTEM', `Sending report to ${client.email}...`);
-            await sendReport(client.email, client.name, reportHtml);
+            await sendReport(client.email, clientName, reportHtml);
             log.info(`[REPORTER] ✓ Report delivered to ${client.email}`);
         }
 
         // Step 6: Complete the job
-        await completeJob(jobId, 'completed', resources);
-        log.info(`✨ WORKER COMPLETE for ${client.name}.`);
-        return { success: true, clientId: client.id, jobId };
+        if (jobId) {
+            await completeJob(jobId, 'completed', resources);
+        }
+        log.info(`✨ WORKER COMPLETE for ${clientName}.`);
+        return { success: true, clientId, jobId };
 
     } catch (e) {
-        log.error(`❌ WORKER CRASHED for ${client.name}:`, e);
+        log.error(`❌ WORKER CRASHED for ${clientName}:`, e);
         if (jobId) await completeJob(jobId, 'failed', [], e.message);
         throw e;
     }

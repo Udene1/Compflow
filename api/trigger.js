@@ -1,20 +1,6 @@
-import { SQSClient, SendMessageCommand } from "@aws-sdk/client-sqs";
 import { getClient } from '../core/registry.js';
-
-const clientConfig = { 
-    region: process.env.AWS_REGION || "us-east-1"
-};
-
-if (process.env.PLATFORM_AWS_ACCESS_KEY_ID && process.env.PLATFORM_AWS_SECRET_ACCESS_KEY) {
-    clientConfig.credentials = {
-        accessKeyId: process.env.PLATFORM_AWS_ACCESS_KEY_ID,
-        secretAccessKey: process.env.PLATFORM_AWS_SECRET_ACCESS_KEY
-    };
-}
-
-const sqs = new SQSClient(clientConfig);
-
-const QUEUE_URL = process.env.SCAN_QUEUE_URL || "https://sqs.us-east-1.amazonaws.com/716563790683/CompFlowScanQueue";
+import { createJob } from '../core/jobs.js';
+import { enqueueJob } from '../core/queue.js';
 
 export default async function handler(req, res) {
     if (req.method !== 'POST') return res.status(405).end();
@@ -28,15 +14,18 @@ export default async function handler(req, res) {
 
         console.log(`[API] Triggering manual scan for ${client.name}...`);
 
-        const result = await sqs.send(new SendMessageCommand({
-            QueueUrl: QUEUE_URL,
-            MessageBody: JSON.stringify({ ...client, credentials: { ...client } }) // Pass client as creds for now, adapter will map it
-        }));
+        const jobId = await createJob(clientId, 'on_demand');
+
+        const job = await enqueueJob({
+            ...client,
+            jobId
+        });
 
         return res.status(200).json({ 
             success: true, 
             message: "Scan dispatched to queue.",
-            messageId: result.MessageId // Used for polling
+            jobId,
+            messageId: job.id
         });
 
     } catch (e) {

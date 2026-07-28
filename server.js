@@ -1,25 +1,25 @@
 import express from 'express';
 import cors from 'cors';
-import { SQSClient, ReceiveMessageCommand, DeleteMessageCommand } from '@aws-sdk/client-sqs';
 
-// Import handlers
+// Import handlers & core modules
 import { handler as schedulerHandler } from './scheduler.js';
 import tenantsHandler from './api/tenants.js';
-import { handler as scanHandler } from './api/lambda-scan.js';
+import scanHandler from './api/scan.js';
 import validateHandler from './api/validate.js';
 import { handler as monitoringHandler } from './api/lambda-monitoring.js';
 import { handler as jobsHandler } from './api/lambda-jobs.js';
 import { handler as chatHandler } from './api/chat.js';
+import jobStatusHandler from './api/job-status.js';
+import jobStreamHandler from './api/job-stream.js';
 import { handler as workerHandler } from './worker.js';
+import { listenWorkerQueue } from './core/queue.js';
+import { initDb } from './core/db.js';
 
 const app = express();
 app.use(cors());
 app.use(express.json());
 
-// Express port and environment configuration
 const PORT = process.env.PORT || 3000;
-const QUEUE_URL = process.env.SCAN_QUEUE_URL;
-const REGION = process.env.AWS_REGION || 'us-east-1';
 
 // Lambda Adapter to run lambda handlers natively in Express
 function lambdaAdapter(handler) {
@@ -68,10 +68,12 @@ function lambdaAdapter(handler) {
 app.post('/api/trigger', lambdaAdapter(schedulerHandler));
 app.all('/api/tenants', tenantsHandler);
 app.all('/api/tenants/toggle', tenantsHandler);
-app.post('/api/scan', lambdaAdapter(scanHandler));
+app.post('/api/scan', scanHandler);
 app.all('/api/validate', validateHandler);
 app.post('/api/monitoring', lambdaAdapter(monitoringHandler));
 app.post('/api/jobs', lambdaAdapter(jobsHandler));
+app.get('/api/job-status', jobStatusHandler);
+app.get('/api/job-stream', jobStreamHandler);
 app.post('/api/chat', lambdaAdapter(chatHandler));
 
 // Health Check Route
@@ -79,66 +81,18 @@ app.get('/health', (req, res) => {
     res.json({ status: 'OK', timestamp: new Date().toISOString() });
 });
 
-// SQS Worker Background Loop
-const sqs = new SQSClient({ region: REGION });
+// Initialize Database & Start Worker Daemon
+async function startApp() {
+    await initDb();
+    
+    // Start BullMQ Redis Queue Listener
+    listenWorkerQueue(workerHandler);
 
-async function startWorkerPoll() {
-    if (!QUEUE_URL) {
-        console.warn('[SQS WORKER] SCAN_QUEUE_URL environment variable is not defined. SQS polling is disabled.');
-        return;
-    }
-
-    console.log(`[SQS WORKER] Starting polling loop on ${QUEUE_URL} in region ${REGION}...`);
-
-    while (true) {
-        try {
-            const response = await sqs.send(new ReceiveMessageCommand({
-                QueueUrl: QUEUE_URL,
-                MaxNumberOfMessages: 1,
-                WaitTimeSeconds: 20, // Long polling
-                VisibilityTimeout: 900 // match 15 min handler timeout
-            }));
-
-            if (response.Messages && response.Messages.length > 0) {
-                const message = response.Messages[0];
-                console.log(`[SQS WORKER] Received message ID: ${message.MessageId}`);
-
-                // Construct mock SQS Lambda trigger event
-                const sqsEvent = {
-                    Records: [
-                        {
-                            body: message.Body,
-                            messageId: message.MessageId
-                        }
-                    ]
-                };
-
-                try {
-                    // Execute the worker scan and remediation
-                    await workerHandler(sqsEvent);
-                    
-                    // Successfully processed, delete from queue
-                    await sqs.send(new DeleteMessageCommand({
-                        QueueUrl: QUEUE_URL,
-                        ReceiptHandle: message.ReceiptHandle
-                    }));
-                    console.log(`[SQS WORKER] Successfully processed and deleted message ID: ${message.MessageId}`);
-                } catch (workerErr) {
-                    console.error(`[SQS WORKER] Processing failed for message ID: ${message.MessageId}:`, workerErr);
-                    // On failure, let VisibilityTimeout expire so message will be retried (or sent to DLQ by SQS policy)
-                }
-            }
-        } catch (pollErr) {
-            console.error('[SQS WORKER] Error polling from SQS:', pollErr);
-            // Brief backoff on SQS network errors
-            await new Promise(resolve => setTimeout(resolve, 5000));
-        }
-    }
+    app.listen(PORT, () => {
+        console.log(`[HTTP SERVER] ComplianceFlow API server listening on port ${PORT}`);
+    });
 }
 
-// Start API Server
-app.listen(PORT, () => {
-    console.log(`[HTTP SERVER] ComplianceFlow API wrapper listening on port ${PORT}`);
-    // Start SQS worker daemon
-    startWorkerPoll();
+startApp().catch(err => {
+    console.error('Failed to initialize server:', err);
 });

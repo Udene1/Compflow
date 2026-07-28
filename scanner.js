@@ -85,8 +85,8 @@ window.Scanner = (() => {
 
             LiveTerminal.log('system', `Scan job created (ID: ${jobId.slice(0, 8)}...). Streaming progress...`);
 
-            // ── Step 2: Poll job status ──
-            const results = await pollJobStatus(jobId, BASE_URL);
+            // ── Step 2: Stream job status via Server-Sent Events (SSE) ──
+            const results = await streamJobStatus(jobId, BASE_URL);
             if (!results) throw new Error("Scan timed out or failed on backend.");
 
             scannedResources = results;
@@ -105,54 +105,93 @@ window.Scanner = (() => {
     }
 
     /**
-     * Polls /api/job-status for progressive updates.
+     * Connects to /api/job-stream via SSE for real-time terminal progress updates.
      * Streams logs to terminal and updates progress bar in real-time.
      */
-    async function pollJobStatus(jobId, baseUrl) {
-        const MAX_POLL_MS = 15 * 60 * 1000; // 15 minute timeout
-        const POLL_INTERVAL = 3000; // 3 seconds
+    function streamJobStatus(jobId, baseUrl) {
+        return new Promise((resolve, reject) => {
+            const streamUrl = `${baseUrl || ''}/api/job-stream?jobId=${jobId}`;
+            console.log(`[SSE] Connecting to live job stream at ${streamUrl}...`);
+
+            const eventSource = new EventSource(streamUrl);
+            let logIndex = 0;
+
+            eventSource.onmessage = async (event) => {
+                try {
+                    const data = JSON.parse(event.data);
+                    
+                    // Stream new logs to terminal
+                    if (data.logs && data.logs.length > logIndex) {
+                        logIndex = LiveTerminal.logBatch(data.logs, logIndex);
+                    } else if (data.newLog) {
+                        logIndex = LiveTerminal.logBatch([data.newLog], 0);
+                    }
+
+                    // Update progress bar
+                    if (typeof data.progress === 'number' && data.progress > 0) {
+                        document.getElementById('scan-progress-fill').style.width = `${Math.min(data.progress, 99)}%`;
+                    }
+
+                    // Check terminal states
+                    if (data.status === 'completed') {
+                        eventSource.close();
+                        resolve(data.resources || []);
+                    } else if (data.status === 'failed') {
+                        eventSource.close();
+                        reject(new Error(data.errorMessage || 'Scan failed on backend.'));
+                    }
+                } catch (err) {
+                    console.error('[SSE] Error parsing SSE event:', err);
+                }
+            };
+
+            eventSource.onerror = (err) => {
+                console.warn('[SSE] EventSource connection error, falling back to polling...', err);
+                eventSource.close();
+                pollJobStatus(jobId, baseUrl, logIndex).then(resolve).catch(reject);
+            };
+        });
+    }
+
+    /**
+     * Fallback polling if SSE is unsupported or blocked by network proxies.
+     */
+    async function pollJobStatus(jobId, baseUrl, initialLogIndex = 0) {
+        const MAX_POLL_MS = 15 * 60 * 1000;
+        const POLL_INTERVAL = 3000;
         const start = Date.now();
-        let logIndex = 0; // Track which logs we've already rendered
+        let logIndex = initialLogIndex;
 
         while (Date.now() - start < MAX_POLL_MS) {
             await new Promise(r => setTimeout(r, POLL_INTERVAL));
 
             try {
                 const res = await fetch(`${baseUrl}/api/job-status?jobId=${jobId}`);
-                if (!res.ok) {
-                    console.warn(`[POLL] HTTP ${res.status}`);
-                    continue;
-                }
+                if (!res.ok) continue;
 
                 const job = await res.json();
 
-                // Stream new logs to terminal
                 if (job.logs && job.logs.length > logIndex) {
                     logIndex = LiveTerminal.logBatch(job.logs, logIndex);
                 }
 
-                // Update progress bar
                 if (job.progress > 0) {
                     document.getElementById('scan-progress-fill').style.width = `${Math.min(job.progress, 99)}%`;
                 }
 
-                // Check terminal states
                 if (job.status === 'completed') {
-                    await displayResults(job.resources || []);
                     return job.resources || [];
                 }
 
                 if (job.status === 'failed') {
                     throw new Error(job.errorMessage || 'Scan failed on backend.');
                 }
-
             } catch (e) {
                 if (e.message.includes('failed')) throw e;
-                console.warn("[POLL] Error:", e.message);
             }
         }
 
-        return null; // Timeout
+        return null;
     }
 
     async function displayResults(resources) {

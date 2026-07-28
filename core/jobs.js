@@ -1,59 +1,62 @@
-// ─── ComplianceFlow AI: Job Manager ───
-// DynamoDB operations for the CompFlowJobsTable
+// ─── ComplianceFlow AI: Job Manager (PostgreSQL + EventEmitter) ───
 
-import { DynamoDBClient } from "@aws-sdk/client-dynamodb";
-import { DynamoDBDocumentClient, PutCommand, UpdateCommand, GetCommand, QueryCommand } from "@aws-sdk/lib-dynamodb";
-import { randomUUID } from "crypto";
+import pool, { initDb } from './db.js';
+import { EventEmitter } from 'events';
+import { randomUUID } from 'crypto';
 
-const clientConfig = { 
-    region: process.env.AWS_REGION || "us-east-1"
-};
+export const jobEvents = new EventEmitter();
+jobEvents.setMaxListeners(100);
 
-if (process.env.PLATFORM_AWS_ACCESS_KEY_ID && process.env.PLATFORM_AWS_SECRET_ACCESS_KEY) {
-    clientConfig.credentials = {
-        accessKeyId: process.env.PLATFORM_AWS_ACCESS_KEY_ID,
-        secretAccessKey: process.env.PLATFORM_AWS_SECRET_ACCESS_KEY
-    };
-}
+// Initialize DB schema on module load
+initDb();
 
-const client = new DynamoDBClient(clientConfig);
-const docClient = DynamoDBDocumentClient.from(client);
-
-const TABLE_NAME = process.env.JOBS_TABLE || "CompFlowJobsTable";
-const MAX_LOGS = 200;
 const TTL_DAYS = 7;
 
 /**
- * Creates a new job record. Returns the jobId.
+ * Creates a new job record in PostgreSQL. Returns the jobId.
  * @param {string} clientId - The tenant/client ID
  * @param {string} scanType - 'on_demand' or 'scheduled'
  * @returns {Promise<string>} jobId
  */
 export async function createJob(clientId, scanType = 'on_demand') {
     const jobId = randomUUID();
-    const now = new Date().toISOString();
+    const now = new Date();
     const expiresAt = Math.floor(Date.now() / 1000) + (TTL_DAYS * 86400);
 
-    await docClient.send(new PutCommand({
-        TableName: TABLE_NAME,
-        Item: {
-            jobId,
-            clientId,
-            scanType,
-            status: 'queued',
-            progress: 0,
-            logs: [{ timestamp: now, level: 'SYSTEM', message: `Job created (${scanType})` }],
-            createdAt: now,
-            updatedAt: now,
-            expiresAt
-        }
-    }));
+    const initialLog = { timestamp: now.toISOString(), level: 'SYSTEM', message: `Job created (${scanType})` };
+
+    const query = `
+        INSERT INTO jobs (job_id, client_id, scan_type, status, progress, logs, resources, created_at, updated_at, expires_at)
+        VALUES ($1, $2, $3, $4, $5, $6::jsonb, $7::jsonb, $8, $8, $9)
+        RETURNING job_id;
+    `;
+
+    await pool.query(query, [
+        jobId,
+        clientId,
+        scanType,
+        'queued',
+        0,
+        JSON.stringify([initialLog]),
+        JSON.stringify([]),
+        now,
+        expiresAt
+    ]);
+
+    // Emit initial event for SSE listeners
+    jobEvents.emit('update', jobId, {
+        jobId,
+        status: 'queued',
+        progress: 0,
+        logs: [initialLog],
+        resources: []
+    });
 
     return jobId;
 }
 
 /**
- * Updates job progress, status, and appends a log entry.
+ * Updates job progress, status, and appends a log entry in PostgreSQL.
  * @param {string} jobId
  * @param {string} status - 'queued' | 'in_progress' | 'completed' | 'failed'
  * @param {number} progress - 0-100
@@ -61,114 +64,160 @@ export async function createJob(clientId, scanType = 'on_demand') {
  * @param {string} message - log message
  */
 export async function updateJobProgress(jobId, status, progress, level, message) {
-    const now = new Date().toISOString();
-    const logEntry = { timestamp: now, level, message };
+    const now = new Date();
+    const logEntry = { timestamp: now.toISOString(), level, message };
 
     try {
-        await docClient.send(new UpdateCommand({
-            TableName: TABLE_NAME,
-            Key: { jobId },
-            UpdateExpression: 'SET #status = :status, progress = :progress, updatedAt = :now, logs = list_append(if_not_exists(logs, :empty), :log)',
-            ExpressionAttributeNames: { '#status': 'status' },
-            ExpressionAttributeValues: {
-                ':status': status,
-                ':progress': progress,
-                ':now': now,
-                ':log': [logEntry],
-                ':empty': []
-            }
-        }));
+        const query = `
+            UPDATE jobs
+            SET status = $1,
+                progress = $2,
+                updated_at = $3,
+                logs = logs || $4::jsonb
+            WHERE job_id = $5
+            RETURNING *;
+        `;
+
+        const res = await pool.query(query, [
+            status,
+            progress,
+            now,
+            JSON.stringify([logEntry]),
+            jobId
+        ]);
+
+        const updatedJob = res.rows[0];
+        if (updatedJob) {
+            // Broadcast live update to SSE subscribers
+            jobEvents.emit('update', jobId, {
+                jobId,
+                status: updatedJob.status,
+                progress: updatedJob.progress,
+                newLog: logEntry,
+                logs: updatedJob.logs
+            });
+        }
     } catch (e) {
         console.error(`[JOBS] Failed to update job ${jobId}:`, e.message);
     }
 }
 
 /**
- * Marks a job as completed or failed, stores final resources.
+ * Marks a job as completed or failed, stores final resources in PostgreSQL.
  * @param {string} jobId
  * @param {'completed'|'failed'} status
  * @param {Array} resources - scan results (only on completed)
  * @param {string} [errorMessage] - error message (only on failed)
  */
 export async function completeJob(jobId, status, resources = [], errorMessage = null) {
-    const now = new Date().toISOString();
+    const now = new Date();
     const finalLog = {
-        timestamp: now,
+        timestamp: now.toISOString(),
         level: status === 'completed' ? 'OUTPUT' : 'INSIGHT',
-        message: status === 'completed' 
+        message: status === 'completed'
             ? `Scan completed. ${resources.length} resources found.`
             : `Scan failed: ${errorMessage}`
     };
 
-    const updateExpr = [
-        '#status = :status',
-        'progress = :progress',
-        'updatedAt = :now',
-        'completedAt = :now',
-        'logs = list_append(if_not_exists(logs, :empty), :log)',
-        'resources = :resources'
-    ];
-    const exprValues = {
-        ':status': status,
-        ':progress': status === 'completed' ? 100 : -1,
-        ':now': now,
-        ':log': [finalLog],
-        ':empty': [],
-        ':resources': resources
-    };
-
-    if (errorMessage) {
-        updateExpr.push('errorMessage = :err');
-        exprValues[':err'] = errorMessage;
-    }
+    const finalProgress = status === 'completed' ? 100 : -1;
 
     try {
-        await docClient.send(new UpdateCommand({
-            TableName: TABLE_NAME,
-            Key: { jobId },
-            UpdateExpression: `SET ${updateExpr.join(', ')}`,
-            ExpressionAttributeNames: { '#status': 'status' },
-            ExpressionAttributeValues: exprValues
-        }));
+        const query = `
+            UPDATE jobs
+            SET status = $1,
+                progress = $2,
+                updated_at = $3,
+                completed_at = $3,
+                logs = logs || $4::jsonb,
+                resources = $5::jsonb,
+                error_message = $6
+            WHERE job_id = $7
+            RETURNING *;
+        `;
+
+        const res = await pool.query(query, [
+            status,
+            finalProgress,
+            now,
+            JSON.stringify([finalLog]),
+            JSON.stringify(resources),
+            errorMessage,
+            jobId
+        ]);
+
+        const updatedJob = res.rows[0];
+        if (updatedJob) {
+            jobEvents.emit('update', jobId, {
+                jobId,
+                status: updatedJob.status,
+                progress: updatedJob.progress,
+                newLog: finalLog,
+                logs: updatedJob.logs,
+                resources: updatedJob.resources,
+                errorMessage: updatedJob.error_message,
+                completedAt: updatedJob.completed_at
+            });
+        }
     } catch (e) {
         console.error(`[JOBS] Failed to complete job ${jobId}:`, e.message);
     }
 }
 
 /**
- * Reads the current state of a job (lightweight).
+ * Reads the current state of a job from PostgreSQL.
  * @param {string} jobId
  * @returns {Promise<Object|null>}
  */
 export async function getJob(jobId) {
     try {
-        const response = await docClient.send(new GetCommand({
-            TableName: TABLE_NAME,
-            Key: { jobId }
-        }));
-        return response.Item || null;
+        const res = await pool.query('SELECT * FROM jobs WHERE job_id = $1', [jobId]);
+        if (res.rows.length === 0) return null;
+
+        const row = res.rows[0];
+        return {
+            jobId: row.job_id,
+            clientId: row.client_id,
+            scanType: row.scan_type,
+            status: row.status,
+            progress: row.progress,
+            logs: row.logs || [],
+            resources: row.resources || [],
+            errorMessage: row.error_message || null,
+            createdAt: row.created_at,
+            updatedAt: row.updated_at,
+            completedAt: row.completed_at
+        };
     } catch (e) {
+        console.error(`[JOBS] Failed to get job ${jobId}:`, e.message);
+        return null;
     }
 }
 
 /**
  * Retrieves recent job history for a client.
- * Uses the clientId-index GSI.
  * @param {string} clientId
  * @param {number} limit
  * @returns {Promise<Array>}
  */
 export async function getJobHistory(clientId, limit = 5) {
     try {
-        const response = await docClient.send(new QueryCommand({
-            TableName: TABLE_NAME,
-            IndexName: "clientId-index",
-            KeyConditionExpression: "clientId = :c",
-            ExpressionAttributeValues: { ":c": clientId },
-            Limit: limit,
-            ScanIndexForward: false // Newest first
+        const res = await pool.query(
+            'SELECT * FROM jobs WHERE client_id = $1 ORDER BY created_at DESC LIMIT $2',
+            [clientId, limit]
+        );
+        return res.rows.map(row => ({
+            jobId: row.job_id,
+            clientId: row.client_id,
+            scanType: row.scan_type,
+            status: row.status,
+            progress: row.progress,
+            logs: row.logs || [],
+            resources: row.resources || [],
+            errorMessage: row.error_message || null,
+            createdAt: row.created_at,
+            updatedAt: row.updated_at,
+            completedAt: row.completed_at
         }));
-        return response.Items || [];
     } catch (e) {
         console.error(`[JOBS] Failed to fetch history for ${clientId}:`, e.message);
         return [];
