@@ -1,0 +1,257 @@
+{
+  "id": "/subscriptions/f828653f-fe32-433f-be6e-383400598a25/resourceGroups/compflow-org/providers/Microsoft.Resources/deployments/CreateVm-canonical.ubuntu-24_04-lts-server-20260729204433",
+  "name": "CreateVm-canonical.ubuntu-24_04-lts-server-20260729204433",
+  "type": "Microsoft.Resources/deployments",
+  "properties": {
+    "templateHash": "3823039522719554639",
+    "parameters": {
+      "location": {
+        "type": "String",
+        "value": "westus"
+      },
+      "networkInterfaceName": {
+        "type": "String",
+        "value": "compflow-backend644"
+      },
+      "networkSecurityGroupName": {
+        "type": "String",
+        "value": "compflow-backend-nsg"
+      },
+      "networkSecurityGroupRules": {
+        "type": "Array",
+        "value": [
+          {
+            "name": "SSH",
+            "properties": {
+              "priority": 300,
+              "protocol": "TCP",
+              "access": "Allow",
+              "direction": "Inbound",
+              "sourceAddressPrefix": "*",
+              "sourcePortRange": "*",
+              "destinationAddressPrefix": "*",
+              "destinationPortRange": "22"
+            }
+          },
+          {
+            "name": "HTTP",
+            "properties": {
+              "priority": 320,
+              "protocol": "TCP",
+              "access": "Allow",
+              "direction": "Inbound",
+              "sourceAddressPrefix": "*",
+              "sourcePortRange": "*",
+              "destinationAddressPrefix": "*",
+              "destinationPortRange": "80"
+            }
+          },
+          {
+            "name": "HTTPS",
+            "properties": {
+              "priority": 340,
+              "protocol": "TCP",
+              "access": "Allow",
+              "direction": "Inbound",
+              "sourceAddressPrefix": "*",
+              "sourcePortRange": "*",
+              "destinationAddressPrefix": "*",
+              "destinationPortRange": "443"
+            }
+          }
+        ]
+      },
+      "subnetName": {
+        "type": "String",
+        "value": "default"
+      },
+      "virtualNetworkName": {
+        "type": "String",
+        "value": "compflow-backend-vnet"
+      },
+      "addressPrefixes": {
+        "type": "Array",
+        "value": [
+          "10.0.0.0/16"
+        ]
+      },
+      "subnets": {
+        "type": "Array",
+        "value": [
+          {
+            "name": "default",
+            "properties": {
+              "addressPrefix": "10.0.0.0/24"
+            }
+          }
+        ]
+      },
+      "publicIpAddressName": {
+        "type": "String",
+        "value": "compflow-backend-ip"
+      },
+      "publicIpAddressType": {
+        "type": "String",
+        "value": "Static"
+      },
+      "publicIpAddressSku": {
+        "type": "String",
+        "value": "Standard"
+      },
+      "pipDeleteOption": {
+        "type": "String",
+        "value": "Delete"
+      },
+      "virtualMachineName": {
+        "type": "String",
+        "value": "compflow-backend"
+      },
+      "virtualMachineComputerName": {
+        "type": "String",
+        "value": "compflow-backend"
+      },
+      "virtualMachineRG": {
+        "type": "String",
+        "value": "compflow-org"
+      },
+      "osDiskType": {
+        "type": "String",
+        "value": "Premium_LRS"
+      },
+      "osDiskSizeGiB": {
+        "type": "Int",
+        "value": 64
+      },
+      "osDiskDeleteOption": {
+        "type": "String",
+        "value": "Delete"
+      },
+      "virtualMachineSize": {
+        "type": "String",
+        "value": "Standard_DC1ds_v3"
+      },
+      "nicDeleteOption": {
+        "type": "String",
+        "value": "Delete"
+      },
+      "hibernationEnabled": {
+        "type": "Bool",
+        "value": false
+      },
+      "adminUsername": {
+        "type": "String",
+        "value": "azureuser"
+      },
+      "adminPublicKey": {
+        "type": "SecureString"
+      },
+      "enablePeriodicAssessment": {
+        "type": "String",
+        "value": "ImageDefault"
+      },
+      "securityType": {
+        "type": "String",
+        "value": "TrustedLaunch"
+      },
+      "secureBoot": {
+        "type": "Bool",
+        "value": true
+      },
+      "vTPM": {
+        "type": "Bool",
+        "value": true
+      }
+    },
+    "mode": "Incremental",
+    "debugSetting": {
+      "detailLevel": "None"
+    },
+    "provisioningState": "Running",
+    "timestamp": "2026-07-30T00:55:36.548159Z",
+    "duration": "PT16.4172527S",
+    "correlationId": "c3d9be7e-7b84-443f-9364-98cd6cf5be57",
+    "providers": [
+      {
+        "namespace": "Microsoft.Network",
+        "resourceTypes": [
+          {
+            "resourceType": "networkInterfaces",
+            "locations": [
+              "westus"
+            ]
+          },
+          {
+            "resourceType": "networkSecurityGroups",
+            "locations": [
+              "westus"
+            ]
+          },
+          {
+            "resourceType": "virtualNetworks",
+            "locations": [
+              "westus"
+            ]
+          },
+          {
+            "resourceType": "publicIpAddresses",
+            "locations": [
+              "westus"
+            ]
+          }
+        ]
+      },
+      {
+        "namespace": "Microsoft.Compute",
+        "resourceTypes": [
+          {
+            "resourceType": "virtualMachines",
+            "locations": [
+              "westus"
+            ]
+          }
+        ]
+      }
+    ],
+    "dependencies": [
+      {
+        "dependsOn": [
+          {
+            "id": "/subscriptions/f828653f-fe32-433f-be6e-383400598a25/resourceGroups/compflow-org/providers/Microsoft.Network/networkSecurityGroups/compflow-backend-nsg",
+            "resourceType": "Microsoft.Network/networkSecurityGroups",
+            "resourceName": "compflow-backend-nsg"
+          },
+          {
+            "id": "/subscriptions/f828653f-fe32-433f-be6e-383400598a25/resourceGroups/compflow-org/providers/Microsoft.Network/virtualNetworks/compflow-backend-vnet",
+            "resourceType": "Microsoft.Network/virtualNetworks",
+            "resourceName": "compflow-backend-vnet"
+          },
+          {
+            "id": "/subscriptions/f828653f-fe32-433f-be6e-383400598a25/resourceGroups/compflow-org/providers/Microsoft.Network/publicIpAddresses/compflow-backend-ip",
+            "resourceType": "Microsoft.Network/publicIpAddresses",
+            "resourceName": "compflow-backend-ip"
+          }
+        ],
+        "id": "/subscriptions/f828653f-fe32-433f-be6e-383400598a25/resourceGroups/compflow-org/providers/Microsoft.Network/networkInterfaces/compflow-backend644",
+        "resourceType": "Microsoft.Network/networkInterfaces",
+        "resourceName": "compflow-backend644"
+      },
+      {
+        "dependsOn": [
+          {
+            "id": "/subscriptions/f828653f-fe32-433f-be6e-383400598a25/resourceGroups/compflow-org/providers/Microsoft.Network/networkInterfaces/compflow-backend644",
+            "resourceType": "Microsoft.Network/networkInterfaces",
+            "resourceName": "compflow-backend644"
+          }
+        ],
+        "id": "/subscriptions/f828653f-fe32-433f-be6e-383400598a25/resourceGroups/compflow-org/providers/Microsoft.Compute/virtualMachines/compflow-backend",
+        "resourceType": "Microsoft.Compute/virtualMachines",
+        "resourceName": "compflow-backend"
+      }
+    ],
+    "validationLevel": "Template"
+  },
+  "tags": {
+    "primaryResourceId": "/subscriptions/f828653f-fe32-433f-be6e-383400598a25/resourcegroups/compflow-org/providers/Microsoft.Compute/virtualMachines/compflow-backend",
+    "provisioningHash": "SolutionProvider"
+  }
+}

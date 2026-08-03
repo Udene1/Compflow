@@ -4,11 +4,11 @@ FROM --platform=$TARGETPLATFORM node:20-alpine AS base
 WORKDIR /usr/src/app
 
 # Install build dependencies if needed
-RUN apk add --no-libc-dev --no-cache python3 make g++
+RUN apk add --no-cache python3 make g++
 
 # Copy package descriptors and install production dependencies
 COPY package*.json ./
-RUN npm ci --omit=dev
+RUN npm install --omit=dev
 
 # Copy application source code and assets
 COPY . .

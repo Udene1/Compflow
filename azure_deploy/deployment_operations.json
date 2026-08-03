@@ -1,0 +1,87 @@
+[
+  {
+    "id": "/subscriptions/f828653f-fe32-433f-be6e-383400598a25/resourceGroups/compflow-org/providers/Microsoft.Resources/deployments/CreateVm-canonical.ubuntu-24_04-lts-server-20260729204433/operations/E9C852AB61EF9C30",
+    "operationId": "E9C852AB61EF9C30",
+    "properties": {
+      "provisioningOperation": "Create",
+      "provisioningState": "Running",
+      "timestamp": "2026-07-30T00:55:46.8575184Z",
+      "duration": "PT6.2550278S",
+      "trackingId": "e3d00a93-0b67-44ec-b807-3a1df76c5d45",
+      "statusCode": "Created",
+      "targetResource": {
+        "id": "/subscriptions/f828653f-fe32-433f-be6e-383400598a25/resourceGroups/compflow-org/providers/Microsoft.Compute/virtualMachines/compflow-backend",
+        "resourceType": "Microsoft.Compute/virtualMachines",
+        "resourceName": "compflow-backend"
+      }
+    }
+  },
+  {
+    "id": "/subscriptions/f828653f-fe32-433f-be6e-383400598a25/resourceGroups/compflow-org/providers/Microsoft.Resources/deployments/CreateVm-canonical.ubuntu-24_04-lts-server-20260729204433/operations/6307DDF24DF3864A",
+    "operationId": "6307DDF24DF3864A",
+    "properties": {
+      "provisioningOperation": "Create",
+      "provisioningState": "Succeeded",
+      "timestamp": "2026-07-30T00:55:46.8575184Z",
+      "duration": "PT4.8331229S",
+      "trackingId": "6a768288-c71a-47b6-9c2c-395f90658af5",
+      "statusCode": "OK",
+      "targetResource": {
+        "id": "/subscriptions/f828653f-fe32-433f-be6e-383400598a25/resourceGroups/compflow-org/providers/Microsoft.Network/networkInterfaces/compflow-backend644",
+        "resourceType": "Microsoft.Network/networkInterfaces",
+        "resourceName": "compflow-backend644"
+      }
+    }
+  },
+  {
+    "id": "/subscriptions/f828653f-fe32-433f-be6e-383400598a25/resourceGroups/compflow-org/providers/Microsoft.Resources/deployments/CreateVm-canonical.ubuntu-24_04-lts-server-20260729204433/operations/7ABA515632361F85",
+    "operationId": "7ABA515632361F85",
+    "properties": {
+      "provisioningOperation": "Create",
+      "provisioningState": "Succeeded",
+      "timestamp": "2026-07-30T00:55:37.9677384Z",
+      "duration": "PT8.1084673S",
+      "trackingId": "4e8cb87b-b8f5-414f-8e48-52dc0f4989fb",
+      "statusCode": "OK",
+      "targetResource": {
+        "id": "/subscriptions/f828653f-fe32-433f-be6e-383400598a25/resourceGroups/compflow-org/providers/Microsoft.Network/virtualNetworks/compflow-backend-vnet",
+        "resourceType": "Microsoft.Network/virtualNetworks",
+        "resourceName": "compflow-backend-vnet"
+      }
+    }
+  },
+  {
+    "id": "/subscriptions/f828653f-fe32-433f-be6e-383400598a25/resourceGroups/compflow-org/providers/Microsoft.Resources/deployments/CreateVm-canonical.ubuntu-24_04-lts-server-20260729204433/operations/40856772AB26AE55",
+    "operationId": "40856772AB26AE55",
+    "properties": {
+      "provisioningOperation": "Create",
+      "provisioningState": "Succeeded",
+      "timestamp": "2026-07-30T00:55:37.9677384Z",
+      "duration": "PT8.8339291S",
+      "trackingId": "0f78c3aa-ce98-402b-8196-a450da8a5c9f",
+      "statusCode": "OK",
+      "targetResource": {
+        "id": "/subscriptions/f828653f-fe32-433f-be6e-383400598a25/resourceGroups/compflow-org/providers/Microsoft.Network/publicIpAddresses/compflow-backend-ip",
+        "resourceType": "Microsoft.Network/publicIpAddresses",
+        "resourceName": "compflow-backend-ip"
+      }
+    }
+  },
+  {
+    "id": "/subscriptions/f828653f-fe32-433f-be6e-383400598a25/resourceGroups/compflow-org/providers/Microsoft.Resources/deployments/CreateVm-canonical.ubuntu-24_04-lts-server-20260729204433/operations/3BDE5E13E595764E",
+    "operationId": "3BDE5E13E595764E",
+    "properties": {
+      "provisioningOperation": "Create",
+      "provisioningState": "Succeeded",
+      "timestamp": "2026-07-30T00:55:37.9677384Z",
+      "duration": "PT8.1952613S",
+      "trackingId": "d8b98d64-6e43-481c-b2cb-8b2bea75d1dc",
+      "statusCode": "OK",
+      "targetResource": {
+        "id": "/subscriptions/f828653f-fe32-433f-be6e-383400598a25/resourceGroups/compflow-org/providers/Microsoft.Network/networkSecurityGroups/compflow-backend-nsg",
+        "resourceType": "Microsoft.Network/networkSecurityGroups",
+        "resourceName": "compflow-backend-nsg"
+      }
+    }
+  }
+]

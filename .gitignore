@@ -13,3 +13,4 @@ setup_ses.js
 trigger_test.js
 .test_resources
 scan_logs.txt
+*.tar.gz
