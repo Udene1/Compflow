@@ -169,6 +169,20 @@ export const handler = async (payload) => {
     } catch (e) {
         log.error(`❌ WORKER CRASHED for ${clientName}:`, e);
         if (jobId) await completeJob(jobId, 'failed', [], e.message);
+
+        // Non-retryable errors (e.g. Auth failures, invalid credentials, missing configuration)
+        const isNonRetryable = e.message.includes('Authentication Failed') || 
+                               e.message.includes('Verification Failed') || 
+                               e.message.includes('Missing cloud credentials') ||
+                               e.message.includes('invalid') ||
+                               e.message.includes('Unauthorized') ||
+                               e.isNonRetryable;
+
+        if (isNonRetryable) {
+            log.warn(`[WORKER] Non-retryable authentication error detected for ${clientName}. Skipping queue retries.`);
+            return { success: false, clientId, jobId, error: e.message };
+        }
+
         throw e;
     }
 };
