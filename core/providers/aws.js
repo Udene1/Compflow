@@ -20,6 +20,7 @@ import { APIGatewayClient, GetRestApisCommand, GetStagesCommand } from "@aws-sdk
 import { CloudFrontClient, ListDistributionsCommand, GetDistributionConfigCommand } from "@aws-sdk/client-cloudfront";
 import { SQSClient, ListQueuesCommand, GetQueueAttributesCommand } from "@aws-sdk/client-sqs";
 import { SNSClient, ListTopicsCommand, GetTopicAttributesCommand } from "@aws-sdk/client-sns";
+import { STSClient, GetCallerIdentityCommand } from "@aws-sdk/client-sts";
 import { log } from '../logger.js';
 
 export async function runScan(provider, credentials) {
@@ -52,6 +53,13 @@ export async function runScan(provider, credentials) {
         const resources = [];
         
         if (provider === 'aws') {
+            const sts = new STSClient(config);
+            try {
+                await sts.send(new GetCallerIdentityCommand({}));
+            } catch (err) {
+                throw new Error(`AWS Identity Verification Failed: ${err.message}`);
+            }
+
             const s3 = new S3Client(config);
             const iam = new IAMClient(config);
             const ec2 = new EC2Client(config);
