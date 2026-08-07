@@ -17,7 +17,6 @@ import { LogicManagementClient } from "@azure/arm-logic";
 import { FrontDoorManagementClient } from "@azure/arm-frontdoor";
 import { ApplicationInsightsManagementClient } from "@azure/arm-appinsights";
 import { ServiceBusManagementClient } from "@azure/arm-servicebus";
-import { PolicyClient } from "@azure/arm-policy";
 import { CdnManagementClient } from "@azure/arm-cdn";
 import { DnsManagementClient } from "@azure/arm-dns";
 import { SubscriptionClient } from "@azure/arm-subscriptions";
@@ -409,9 +408,9 @@ export async function runScan(provider, credentials) {
 
     // ─── 14. AZURE POLICY & BLUEPRINTS ─────────────────────────────────────
     try {
+        const { PolicyClient } = await import("@azure/arm-policy");
         const policyClient = new PolicyClient(credential, subscriptionId);
         // High-level check: Are there any non-compliant policies?
-        // In a real sweep, we'd iterate over assignments. For now, a "Policy Health" marker.
         resources.push({
             name: 'Governance Policy', type: 'Azure Policy', icon: '⚖️', region: 'global',
             severity: 'pass', technicalId: 'AZ_POLICY_HEALTH',
