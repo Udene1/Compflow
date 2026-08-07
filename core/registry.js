@@ -1,53 +1,58 @@
-import { DynamoDBClient } from "@aws-sdk/client-dynamodb";
-import { DynamoDBDocumentClient, ScanCommand, PutCommand, GetCommand, UpdateCommand } from "@aws-sdk/lib-dynamodb";
-
-const clientConfig = { 
-    region: process.env.AWS_REGION || "us-east-1"
-};
-
-// Only add credentials if they are explicitly provided in environment
-if (process.env.PLATFORM_AWS_ACCESS_KEY_ID && process.env.PLATFORM_AWS_SECRET_ACCESS_KEY) {
-    clientConfig.credentials = {
-        accessKeyId: process.env.PLATFORM_AWS_ACCESS_KEY_ID,
-        secretAccessKey: process.env.PLATFORM_AWS_SECRET_ACCESS_KEY
-    };
-}
-
-const client = new DynamoDBClient(clientConfig);
-const docClient = DynamoDBDocumentClient.from(client);
-
-const TABLE_NAME = process.env.CLIENTS_TABLE || "CompFlowClientsTable";
+import pool from './db.js';
 
 /**
- * Loads all clients from the DynamoDB registry.
+ * Loads all clients/tenants from PostgreSQL.
  */
 export async function loadClients() {
     try {
-        const command = new ScanCommand({ TableName: TABLE_NAME });
-        const response = await docClient.send(command);
-        return response.Items || [];
+        const res = await pool.query('SELECT * FROM tenants ORDER BY created_at DESC');
+        return res.rows.map(r => ({
+            id: r.id,
+            name: r.name,
+            provider: r.provider,
+            roleArn: r.role_arn,
+            apiToken: r.api_token,
+            email: r.email,
+            autoRemediate: r.auto_remediate,
+            status: r.status,
+            createdAt: r.created_at,
+            updatedAt: r.updated_at
+        }));
     } catch (e) {
-        console.error("[REGISTRY] Failed to load clients from DynamoDB:", e.message);
-        // Fallback or rethrow? 
-        // For now, we return empty so the agent doesn't crash but logs the error.
+        console.error('[REGISTRY] Failed to load clients from PostgreSQL:', e.message);
         return [];
     }
 }
 
 /**
- * Adds or updates a client in the registry.
+ * Adds or updates a client/tenant in PostgreSQL.
  */
 export async function saveClient(clientData) {
     try {
-        const command = new PutCommand({
-            TableName: TABLE_NAME,
-            Item: {
-                ...clientData,
-                updatedAt: new Date().toISOString()
-            }
-        });
-        await docClient.send(command);
-        console.log(`[REGISTRY] Client ${clientData.name} saved successfully.`);
+        const query = `
+            INSERT INTO tenants (id, name, provider, role_arn, api_token, email, auto_remediate, status, updated_at)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, CURRENT_TIMESTAMP)
+            ON CONFLICT (id) DO UPDATE SET
+                name = EXCLUDED.name,
+                provider = EXCLUDED.provider,
+                role_arn = EXCLUDED.role_arn,
+                api_token = EXCLUDED.api_token,
+                email = EXCLUDED.email,
+                auto_remediate = EXCLUDED.auto_remediate,
+                status = EXCLUDED.status,
+                updated_at = CURRENT_TIMESTAMP;
+        `;
+        await pool.query(query, [
+            clientData.id,
+            clientData.name,
+            clientData.provider,
+            clientData.roleArn || null,
+            clientData.apiToken || null,
+            clientData.email || '',
+            clientData.autoRemediate === true,
+            clientData.status || 'active'
+        ]);
+        console.log(`[REGISTRY] Client ${clientData.name} saved to PostgreSQL successfully.`);
     } catch (e) {
         console.error(`[REGISTRY] Failed to save client ${clientData.name}:`, e.message);
         throw e;
@@ -55,16 +60,25 @@ export async function saveClient(clientData) {
 }
 
 /**
- * Gets a specific client by ID.
+ * Gets a specific client/tenant by ID.
  */
 export async function getClient(clientId) {
     try {
-        const command = new GetCommand({
-            TableName: TABLE_NAME,
-            Key: { id: clientId }
-        });
-        const response = await docClient.send(command);
-        return response.Item;
+        const res = await pool.query('SELECT * FROM tenants WHERE id = $1', [clientId]);
+        if (res.rows.length === 0) return null;
+        const r = res.rows[0];
+        return {
+            id: r.id,
+            name: r.name,
+            provider: r.provider,
+            roleArn: r.role_arn,
+            apiToken: r.api_token,
+            email: r.email,
+            autoRemediate: r.auto_remediate,
+            status: r.status,
+            createdAt: r.created_at,
+            updatedAt: r.updated_at
+        };
     } catch (e) {
         console.error(`[REGISTRY] Failed to get client ${clientId}:`, e.message);
         return null;

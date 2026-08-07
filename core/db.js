@@ -31,6 +31,19 @@ export async function initDb() {
             expires_at INT
         );
         CREATE INDEX IF NOT EXISTS idx_jobs_client_id ON jobs(client_id);
+
+        CREATE TABLE IF NOT EXISTS tenants (
+            id VARCHAR(64) PRIMARY KEY,
+            name VARCHAR(255) NOT NULL,
+            provider VARCHAR(64) NOT NULL,
+            role_arn TEXT,
+            api_token TEXT,
+            email VARCHAR(255),
+            auto_remediate BOOLEAN DEFAULT false,
+            status VARCHAR(32) DEFAULT 'active',
+            created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+            updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+        );
     `;
 
     try {
