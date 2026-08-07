@@ -102,6 +102,13 @@ window.CloudConnect = (() => {
         const azGcpGroup = document.getElementById('azure-gcp-group');
         const azTenantGroup = document.getElementById('azure-tenant-group');
         const projectIdLabel = document.getElementById('project-id-label');
+        const keyIdLabel = document.getElementById('key-id-label');
+        const secretKeyLabel = document.getElementById('secret-key-label');
+
+        const keyIdInput = document.getElementById('setting-access-key');
+        const secretKeyInput = document.getElementById('setting-secret-key');
+        const projectIdInput = document.getElementById('setting-project-id');
+        const tenantIdInput = document.getElementById('setting-tenant-id');
 
         // Auto-select best method for provider
         if (provider === 'hetzner' || provider === 'digitalocean' || provider === 'gcp') {
@@ -118,7 +125,24 @@ window.CloudConnect = (() => {
         // Azure/GCP specific field toggles
         azGcpGroup.style.display = (provider === 'azure' || provider === 'gcp') ? 'block' : 'none';
         azTenantGroup.style.display = (provider === 'azure') ? 'block' : 'none';
-        projectIdLabel.textContent = (provider === 'gcp') ? 'GCP Project ID' : 'Azure Subscription ID';
+
+        if (provider === 'azure') {
+            keyIdLabel.textContent = 'Azure Client ID (Application ID)';
+            keyIdInput.placeholder = 'e.g. 4f31621d-34e1-480c-ae1a-afd2632d171c';
+            secretKeyLabel.textContent = 'Azure Client Secret Value';
+            secretKeyInput.placeholder = 'e.g. Gw78Q~DHYsuswSdV...';
+            projectIdLabel.textContent = 'Azure Subscription ID';
+            projectIdInput.placeholder = 'e.g. f828653f-fe32-433f-be6e-383400598a25';
+            if (tenantIdInput) tenantIdInput.placeholder = 'e.g. 3492487c-fac2-4f53-b3f1-48715b21a4a7';
+        } else if (provider === 'aws') {
+            keyIdLabel.textContent = 'AWS Access Key ID';
+            keyIdInput.placeholder = 'AKIAIOSFODNN7EXAMPLE';
+            secretKeyLabel.textContent = 'AWS Secret Access Key';
+            secretKeyInput.placeholder = 'wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY';
+        } else if (provider === 'gcp') {
+            projectIdLabel.textContent = 'GCP Project ID';
+            projectIdInput.placeholder = 'my-gcp-project-123';
+        }
 
         if (selectedMethod === 'token') {
             tokenLabel.textContent = (provider === 'gcp') ? 'Service Account JSON Key' : 'API Token';
