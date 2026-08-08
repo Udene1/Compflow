@@ -15,17 +15,15 @@ window.CloudConnect = (() => {
     ];
 
     function init() {
-        // Auto-reconnect if we have saved credentials
-        const savedCreds = localStorage.getItem('cf_aws_creds');
-        if (savedCreds) {
-            try {
-                state.credentials['aws'] = JSON.parse(savedCreds);
-                setTimeout(() => { // slight delay for visual simulation effect on load
-                    const awsCard = document.querySelector('.provider-card[data-provider="aws"]');
-                    if (awsCard) connect('aws', awsCard);
-                }, 500);
-            } catch (e) {}
-        }
+        // Auto-reconnect saved credentials per provider
+        ['aws', 'azure', 'gcp', 'hetzner', 'digitalocean'].forEach(p => {
+            const saved = localStorage.getItem(`cf_creds_${p}`) || (p === 'aws' ? localStorage.getItem('cf_aws_creds') : null);
+            if (saved) {
+                try {
+                    state.credentials[p] = JSON.parse(saved);
+                } catch (e) {}
+            }
+        });
 
         document.querySelectorAll('.provider-card').forEach(card => {
             card.addEventListener('click', () => {
@@ -81,7 +79,8 @@ window.CloudConnect = (() => {
         }
 
         const data = { authMethod, accessKeyId, secretAccessKey, roleArn, externalId, apiToken, projectId, tenantId, region, reportEmail };
-        localStorage.setItem('cf_aws_creds', JSON.stringify(data));
+        localStorage.setItem(`cf_creds_${provider}`, JSON.stringify(data));
+        if (provider === 'aws') localStorage.setItem('cf_aws_creds', JSON.stringify(data));
         state.credentials[provider] = data;
 
         closeSettings();
@@ -308,6 +307,9 @@ window.CloudConnect = (() => {
             roleArn: creds.roleArn,
             externalId: creds.externalId,
             apiToken: obfuscate(creds.apiToken),
+            tenantId: creds.tenantId,
+            projectId: creds.projectId,
+            subscriptionId: creds.projectId || creds.subscriptionId,
             region: creds.region,
             reportEmail: creds.reportEmail,
             isObfuscated: true
