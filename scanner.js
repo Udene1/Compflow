@@ -115,24 +115,38 @@ window.Scanner = (() => {
 
             const eventSource = new EventSource(streamUrl);
             let logIndex = 0;
+            let receivedMessage = false;
+
+            // Instant polling fallback if SSE is silent for 2 seconds
+            const fallbackTimer = setTimeout(() => {
+                if (!receivedMessage) {
+                    console.log('[SSE] SSE quiet, starting parallel poll...');
+                    pollJobStatus(jobId, baseUrl, logIndex).then((res) => {
+                        try { eventSource.close(); } catch (_) {}
+                        resolve(res);
+                    }).catch((err) => {
+                        try { eventSource.close(); } catch (_) {}
+                        reject(err);
+                    });
+                }
+            }, 2000);
 
             eventSource.onmessage = async (event) => {
+                receivedMessage = true;
+                clearTimeout(fallbackTimer);
                 try {
                     const data = JSON.parse(event.data);
                     
-                    // Stream new logs to terminal
                     if (data.logs && data.logs.length > logIndex) {
                         logIndex = LiveTerminal.logBatch(data.logs, logIndex);
                     } else if (data.newLog) {
                         logIndex = LiveTerminal.logBatch([data.newLog], 0);
                     }
 
-                    // Update progress bar
                     if (typeof data.progress === 'number' && data.progress > 0) {
                         document.getElementById('scan-progress-fill').style.width = `${Math.min(data.progress, 99)}%`;
                     }
 
-                    // Check terminal states
                     if (data.status === 'completed') {
                         eventSource.close();
                         resolve(data.resources || []);
@@ -146,6 +160,7 @@ window.Scanner = (() => {
             };
 
             eventSource.onerror = (err) => {
+                clearTimeout(fallbackTimer);
                 console.warn('[SSE] EventSource connection error, falling back to polling...', err);
                 eventSource.close();
                 pollJobStatus(jobId, baseUrl, logIndex).then(resolve).catch(reject);
