@@ -61,9 +61,9 @@ export async function runScan(provider, credentials) {
     }
 
     const tenantId = credentials.tenantId;
-    const clientId = credentials.isObfuscated ? deobfuscate(credentials.accessKeyId) : credentials.accessKeyId;
-    const clientSecret = credentials.isObfuscated ? deobfuscate(credentials.secretAccessKey) : credentials.secretAccessKey;
-    const subscriptionId = credentials.projectId; // Subscription ID is stored in projectId
+    const clientId = credentials.isObfuscated ? deobfuscate(credentials.accessKeyId) : (credentials.accessKeyId || credentials.clientId);
+    const clientSecret = credentials.isObfuscated ? deobfuscate(credentials.secretAccessKey) : (credentials.secretAccessKey || credentials.clientSecret);
+    const subscriptionId = credentials.projectId || credentials.subscriptionId;
 
     if (!tenantId || !clientId || !clientSecret || !subscriptionId) {
         throw new Error("Missing Azure credentials (Tenant ID, Client ID, Client Secret, or Subscription ID)");
