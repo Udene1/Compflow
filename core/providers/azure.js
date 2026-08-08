@@ -1,27 +1,38 @@
 import { ClientSecretCredential } from "@azure/identity";
-import { ComputeManagementClient } from "@azure/arm-compute";
-import { NetworkManagementClient } from "@azure/arm-network";
-import { StorageManagementClient } from "@azure/arm-storage";
-import { SqlManagementClient } from "@azure/arm-sql";
-import { KeyVaultManagementClient } from "@azure/arm-keyvault";
-import { MonitorClient } from "@azure/arm-monitor";
-import { WebSiteManagementClient } from "@azure/arm-appservice";
-import { CosmosDBManagementClient } from "@azure/arm-cosmosdb";
-import { ContainerServiceClient } from "@azure/arm-containerservice";
-import { ContainerRegistryManagementClient } from "@azure/arm-containerregistry";
-import { SecurityCenter } from "@azure/arm-security";
-import { AuthorizationManagementClient } from "@azure/arm-authorization";
-import { RecoveryServicesManagementClient } from "@azure/arm-recoveryservices";
-import { ApiManagementClient } from "@azure/arm-apimanagement";
-import { LogicManagementClient } from "@azure/arm-logic";
-import { FrontDoorManagementClient } from "@azure/arm-frontdoor";
-import { ApplicationInsightsManagementClient } from "@azure/arm-appinsights";
-import { ServiceBusManagementClient } from "@azure/arm-servicebus";
-import { CdnManagementClient } from "@azure/arm-cdn";
-import { DnsManagementClient } from "@azure/arm-dns";
-import { SubscriptionClient } from "@azure/arm-subscriptions";
-import { ContainerInstanceManagementClient } from "@azure/arm-containerinstance";
 import { log } from '../logger.js';
+
+const SDK_CACHE = {};
+
+/**
+ * Safely import an Azure SDK module at runtime with memoization.
+ * Returns the requested export, or null if the package is broken/missing.
+ */
+async function safeImport(pkg, exportName) {
+    const cacheKey = `${pkg}::${exportName}`;
+    if (cacheKey in SDK_CACHE) return SDK_CACHE[cacheKey];
+
+    try {
+        const mod = await import(pkg);
+        if (mod[exportName]) {
+            SDK_CACHE[cacheKey] = mod[exportName];
+            return mod[exportName];
+        }
+        // Fallback checks for alternative export names
+        for (const alt of [exportName, 'default', exportName + 'Client']) {
+            if (mod[alt]) {
+                SDK_CACHE[cacheKey] = mod[alt];
+                return mod[alt];
+            }
+        }
+        log.warn(`Azure SDK ${pkg} does not export '${exportName}', skipping.`);
+        SDK_CACHE[cacheKey] = null;
+        return null;
+    } catch (e) {
+        log.warn(`Azure SDK ${pkg} failed to load: ${e.message}`);
+        SDK_CACHE[cacheKey] = null;
+        return null;
+    }
+}
 
 /**
  * Azure Governance Hyper-Expansion Engine (AWS Parity)
@@ -62,419 +73,427 @@ export async function runScan(provider, credentials) {
     const credential = new ClientSecretCredential(tenantId, clientId, clientSecret);
     const resources = [];
 
+    // ─── DYNAMIC SDK IMPORTS (resilient to broken packages) ──────────────
+    const ComputeManagementClient = await safeImport("@azure/arm-compute", "ComputeManagementClient");
+    const NetworkManagementClient = await safeImport("@azure/arm-network", "NetworkManagementClient");
+    const StorageManagementClient = await safeImport("@azure/arm-storage", "StorageManagementClient");
+    const SqlManagementClient = await safeImport("@azure/arm-sql", "SqlManagementClient");
+    const KeyVaultManagementClient = await safeImport("@azure/arm-keyvault", "KeyVaultManagementClient");
+    const MonitorClient = await safeImport("@azure/arm-monitor", "MonitorClient");
+    const WebSiteManagementClient = await safeImport("@azure/arm-appservice", "WebSiteManagementClient");
+    const CosmosDBManagementClient = await safeImport("@azure/arm-cosmosdb", "CosmosDBManagementClient");
+    const ContainerServiceClient = await safeImport("@azure/arm-containerservice", "ContainerServiceClient");
+    const ContainerRegistryManagementClient = await safeImport("@azure/arm-containerregistry", "ContainerRegistryManagementClient");
+    const SecurityCenter = await safeImport("@azure/arm-security", "SecurityCenter");
+    const AuthorizationManagementClient = await safeImport("@azure/arm-authorization", "AuthorizationManagementClient");
+    const RecoveryServicesManagementClient = await safeImport("@azure/arm-recoveryservices", "RecoveryServicesManagementClient") || await safeImport("@azure/arm-recoveryservices", "RecoveryServicesClient");
+    const LogicManagementClient = await safeImport("@azure/arm-logic", "LogicManagementClient");
+    const FrontDoorManagementClient = await safeImport("@azure/arm-frontdoor", "FrontDoorManagementClient");
+    const ServiceBusManagementClient = await safeImport("@azure/arm-servicebus", "ServiceBusManagementClient");
+    const CdnManagementClient = await safeImport("@azure/arm-cdn", "CdnManagementClient");
+    const PolicyClient = await safeImport("@azure/arm-policy", "PolicyClient");
+
     // ─── 1. COMPUTE & STORAGE DISKS ──────────────────────────────────────────
-    try {
-        const computeClient = new ComputeManagementClient(credential, subscriptionId);
-        for await (const vm of computeClient.virtualMachines.listAll()) {
-            
-            // [SOC2-CC6.1] Check for Unmanaged Disks (Reliability/Availability)
-            if (vm.storageProfile?.osDisk?.createOption === 'FromImage' && !vm.storageProfile?.osDisk?.managedDisk) {
-                resources.push({
-                    name: vm.name, type: 'Azure VM', icon: '💻', region: vm.location, 
-                    severity: 'warning', technicalId: 'AZ_UNMANAGED_DISK', 
-                    issue: 'Using unmanaged disks could impact service availability', 
-                    recommendation: 'Migrate to Azure Managed Disks for integrated snapshots and better SLA.'
-                });
-            }
-
-            // [SOC2-CC6.6] Check for Public IP Exposure
-            if (vm.networkProfile?.networkInterfaces?.some(ni => ni.id.includes('publicIPAddresses'))) {
-                resources.push({
-                    name: vm.name, type: 'Azure VM', icon: '💻', region: vm.location, 
-                    severity: 'warning', technicalId: 'AZ_VM_PUBLIC_IP', 
-                    issue: 'Virtual Machine has a direct Public IP address assigned', 
-                    recommendation: 'Dissociate public IP and use Azure Bastion or a VPN Gateway for secure management.'
-                });
-            }
-
-            // [SOC2-CC6.7] Infrastructure Encryption (Data-at-Rest)
-            if (vm.storageProfile?.osDisk?.managedDisk?.encryptionSettings === undefined && !vm.storageProfile?.osDisk?.managedDisk?.diskEncryptionSet) {
-                resources.push({
-                    name: vm.name, type: 'Azure VM', icon: '💻', region: vm.location, 
-                    severity: 'warning', technicalId: 'DISK_ENCRYPTION', 
-                    issue: 'OS Disk encryption is not explicitly configured', 
-                    recommendation: 'Enable Azure Disk Encryption (ADE) or Platform-managed encryption at rest.'
-                });
-            }
-        }
-    } catch (e) { log.warn("Azure Compute scan failed:", e.message); }
-
-    // ─── 2. APP SERVICES & FUNCTIONS ──────────────────────────────────────────
-    try {
-        const webClient = new WebSiteManagementClient(credential, subscriptionId);
-        for await (const site of webClient.webApps.list()) {
-            
-            // [SOC2-CC6.6] Enforce Encryption in Transit (HTTPS)
-            if (site.httpsOnly === false) {
-                resources.push({
-                    name: site.name, type: 'Azure App Service', icon: '🌐', region: site.location, 
-                    severity: 'critical', technicalId: 'AZ_APP_HTTPS', 
-                    issue: 'App Service does not enforce HTTPS-only traffic', 
-                    recommendation: 'Enable httpsOnly in settings to redirect all HTTP traffic to port 443.'
-                });
-            }
-
-            // [SOC2-CC6.1] Legacy Protocol Mitigation (TLS)
-            if (site.siteConfig?.minTlsVersion && site.siteConfig.minTlsVersion < '1.2') {
-                resources.push({
-                    name: site.name, type: 'Azure App Service', icon: '🌐', region: site.location, 
-                    severity: 'warning', technicalId: 'AZ_APP_TLS', 
-                    issue: 'Minimum TLS version is set below 1.2', 
-                    recommendation: 'Enforce TLS 1.2 as the minimum version to protect against legacy cipher vulnerabilities.'
-                });
-            }
-
-            // [SOC2-CC6.1] Managed Identity Adoption
-            if (!site.identity || site.identity.type === 'None') {
-                resources.push({
-                    name: site.name, type: 'Azure App Service', icon: '🌐', region: site.location, 
-                    severity: 'warning', technicalId: 'AZ_APP_IDENTITY', 
-                    issue: 'Managed Identitiy is not enabled on the App Service', 
-                    recommendation: 'Enable a System-assigned Managed Identity to eliminate the need for plaintext secrets in environment variables.'
-                });
-            }
-        }
-    } catch (e) { log.warn("Azure AppService scan failed:", e.message); }
-
-    // ─── 3. AZURE KUBERNETES SERVICE (AKS) ───────────────────────────────────
-    try {
-        const aksClient = new ContainerServiceClient(credential, subscriptionId);
-        for await (const cluster of aksClient.managedClusters.list()) {
-            
-            // [SOC2-CC6.6] Control Plane Security
-            if (!cluster.apiServerAccessProfile?.authorizedIPRanges) {
-                resources.push({
-                    name: cluster.name, type: 'Azure AKS', icon: '☸️', region: cluster.location, 
-                    severity: 'critical', technicalId: 'AKS_API_SERVER', 
-                    issue: 'Kubernetes API server access is not restricted via Authorized IP ranges', 
-                    recommendation: 'Configure authorized IP ranges or enable Private Cluster mode to protect the control plane.'
-                });
-            }
-
-            // [SOC2-CC6.1] Kubernetes Identity & RBAC
-            if (!cluster.enableRBAC) {
-                resources.push({
-                    name: cluster.name, type: 'Azure AKS', icon: '☸️', region: cluster.location, 
-                    severity: 'warning', technicalId: 'AKS_RBAC', 
-                    issue: 'Kubernetes Role-Based Access Control (RBAC) is disabled', 
-                    recommendation: 'Enable RBAC and integrate with Azure AD for granular identity management.'
-                });
-            }
-
-            // Deep Scan: AKS Network Policy
-            if (!cluster.networkProfile?.networkPolicy) {
-                resources.push({
-                    name: cluster.name, type: 'Azure AKS', icon: '☸️', region: cluster.location,
-                    severity: 'warning', control: 'CC6.6',
-                    issue: 'Network Policy is not configured',
-                    recommendation: 'Enable Azure or Calico network policies to restrict pod-to-pod communication.'
-                });
-            }
-
-            // Deep Scan: AKS Azure AD Integration
-            if (!cluster.azureAdProfile?.managed) {
-                resources.push({
-                    name: cluster.name, type: 'Azure AKS', icon: '☸️', region: cluster.location,
-                    severity: 'warning', control: 'CC6.3',
-                    issue: 'Azure AD integration (managed) is disabled',
-                    recommendation: 'Enable managed Azure AD integration for unified identity management.'
-                });
-            }
-
-            // Deep Scan: Local Accounts
-            if (cluster.disableLocalAccounts === false) {
-                resources.push({
-                    name: cluster.name, type: 'Azure AKS', icon: '☸️', region: cluster.location,
-                    severity: 'warning', control: 'CC6.3',
-                    issue: 'Local accounts are enabled',
-                    recommendation: 'Disable local accounts to enforce Azure AD authentication.'
-                });
-            }
-        }
-    } catch (e) { log.warn("Azure AKS scan failed:", e.message); }
-
-    // ─── 4. COSMOS DB ──────────────────────────────────────────────────────────
-    try {
-        const cosmosClient = new CosmosDBManagementClient(credential, subscriptionId);
-        for await (const account of cosmosClient.databaseAccounts.list()) {
-            
-            // [SOC2-CC6.6] Network Isolation (Public Network Access)
-            if (account.publicNetworkAccess === 'Enabled') {
-                resources.push({
-                    name: account.name, type: 'Azure Cosmos DB', icon: '🪐', region: account.location, 
-                    severity: 'warning', technicalId: 'RDS_PUBLIC', 
-                    issue: 'Public network access is enabled on the Cosmos DB account', 
-                    recommendation: 'Disable public access and use Private Endpoints for secure database connectivity.'
-                });
-            }
-
-            // [SOC2-CC6.7] Data Encryption (CMK)
-            if (!account.keyVaultKeyUri) {
-                resources.push({
-                    name: account.name, type: 'Azure Cosmos DB', icon: '🪐', region: account.location, 
-                    severity: 'warning', technicalId: 'AZ_COSMOS_CMK', 
-                    issue: 'Customer-Managed Key (CMK) encryption is not enabled', 
-                    recommendation: 'Use an Azure Key Vault key for encryption at rest rather than default platform-managed keys.'
-                });
-            }
-        }
-    } catch (e) { log.warn("Azure CosmosDB scan failed:", e.message); }
-
-    // ─── 5. CONTAINER REGISTRY (ACR) ──────────────────────────────────────────
-    try {
-        const acrClient = new ContainerRegistryManagementClient(credential, subscriptionId);
-        for await (const registry of acrClient.registries.list()) {
-            
-            // [SOC2-CC6.1] Registry Credential Security
-            if (registry.adminUserEnabled) {
-                resources.push({
-                    name: registry.name, type: 'Azure ACR', icon: '📦', region: registry.location, 
-                    severity: 'warning', technicalId: 'AZ_ACR_ADMIN', 
-                    issue: 'Admin user account is enabled for image pushes/pulls', 
-                    recommendation: 'Disable the admin user and use Azure AD SPN/Identity for more secure registry access.'
-                });
-            }
-
-            // [SOC2-CC6.6] Network Firewall for Registry
-            if (registry.publicNetworkAccess === 'Enabled') {
-                resources.push({
-                    name: registry.name, type: 'Azure ACR', icon: '📦', region: registry.location, 
-                    severity: 'warning', technicalId: 'AZ_ACR_PUBLIC', 
-                    issue: 'ACR allows public network access to images', 
-                    recommendation: 'Configure a VNet firewall to restrict image access to internal build agents.'
-                });
-            }
-        }
-    } catch (e) { log.warn("Azure ACR scan failed:", e.message); }
-
-    // ─── 6. IDENTITY & ROLE ASSIGNMENTS (RBAC) ──────────────────────────────
-    try {
-        const authClient = new AuthorizationManagementClient(credential, subscriptionId);
-        for await (const assignment of authClient.roleAssignments.list()) {
-            
-            // [SOC2-CC6.3] Principle of Least Privilege (Excessive Owners)
-            if (assignment.roleDefinitionId.toLowerCase().includes('8e3af657-a8ff-443c-a75c-2fe8c4bcb635')) {
-                resources.push({
-                    name: assignment.name, type: 'Azure IAM', icon: '👤', region: 'global', 
-                    severity: 'info', technicalId: 'AZ_IAM_OWNER', 
-                    issue: 'Owner role assignment detected', 
-                    recommendation: 'Audit all Owner-level users and downgrade to Contributor or a more granular role.'
-                });
-            }
-        }
-
-        // Deep Scan: Inactive Service Principals (Simulation via list)
-        // In a real scan, we'd check sign-ins, but ARM provides basic SP info
-    } catch (e) { log.warn("Azure Authorization scan failed:", e.message); }
-
-    // ─── 7. NETWORKING (NSG & VNET) ─────────────────────────────────────────
-    try {
-        const networkClient = new NetworkManagementClient(credential, subscriptionId);
-        for await (const nsg of networkClient.networkSecurityGroups.listAll()) {
-            
-            // [SOC2-CC6.6] Network Access Control Rules
-            const openRules = (nsg.securityRules || []).filter(r => 
-                r.access === 'Allow' && r.direction === 'Inbound' && 
-                (r.sourceAddressPrefix === '*' || r.sourceAddressPrefix === '0.0.0.0/0')
-            );
-
-            for (const rule of openRules) {
-                resources.push({
-                    name: nsg.name, type: 'Azure NSG', icon: '🛡️', region: nsg.location, 
-                    severity: 'critical', technicalId: 'SG_OPEN_PORTS', 
-                    issue: `NSG rule "${rule.name}" allows inbound port ${rule.destinationPortRange} from the Internet`, 
-                    recommendation: 'Restrict source IP addresses to a known corporate VPN or jump box CIDR.'
-                });
-            }
-
-            // Deep Scan: Flow Logs (Checking if enabled for the NSG)
-            // Note: This usually requires checking Network Watcher, but we can verify presence of diagnostic settings
-        }
-    } catch (e) { log.warn("Azure Networking scan failed:", e.message); }
-
-    // ─── 8. SQL DATABASES ────────────────────────────────────────────────────
-    try {
-        const sqlClient = new SqlManagementClient(credential, subscriptionId);
-        for await (const server of sqlClient.servers.list()) {
-            
-            // [SOC2-CC6.6] Database Firewall Exposure
-            if (server.publicNetworkAccess === 'Enabled') {
-                resources.push({
-                    name: server.name, type: 'Azure SQL', icon: '🗃️', region: server.location, 
-                    severity: 'warning', technicalId: 'RDS_PUBLIC', 
-                    issue: 'SQL Server allows public network access', 
-                    recommendation: 'Disable public access and use Private Endpoints or Virtual Network rules.'
-                });
-            }
-        }
-    } catch (e) { log.warn("Azure SQL scan failed:", e.message); }
-
-    // ─── 9. KEY VAULT SECURITY ─────────────────────────────────────────────
-    try {
-        const kvClient = new KeyVaultManagementClient(credential, subscriptionId);
-        for await (const vault of kvClient.vaults.list()) {
-            
-            // [SOC2-CC6.1] Secrets Protection (Soft Delete)
-            if (!vault.properties?.enableSoftDelete) {
-                resources.push({
-                    name: vault.name, type: 'Azure KeyVault', icon: '🔑', region: vault.location, 
-                    severity: 'warning', technicalId: 'AZ_KV_SOFT_DELETE', 
-                    issue: 'Soft delete and purge protection are disabled', 
-                    recommendation: 'Enable soft delete to allow recovery of accidentally deleted keys and secrets.'
-                });
-            }
-        }
-    } catch (e) { log.warn("Azure KeyVault scan failed:", e.message); }
-
-    // ─── 10. LOGIC APPS & INTEGRATIONS ──────────────────────────────────────
-    try {
-        const logicClient = new LogicManagementClient(credential, subscriptionId);
-        for await (const workflow of logicClient.workflows.listBySubscription()) {
-            
-            // [SOC2-CC6.6] Trigger Access Control
-            if (!workflow.accessControl?.triggers?.allowedCallerIpAddresses) {
-                resources.push({
-                    name: workflow.name, type: 'Azure Logic App', icon: '🧩', region: workflow.location, 
-                    severity: 'warning', technicalId: 'AZ_LOGIC_IP', 
-                    issue: 'Workflow HTTP trigger has no IP-based access restrictions', 
-                    recommendation: 'Restrict the callers IP address range in the Access Control configuration.'
-                });
-            }
-        }
-    } catch (e) { log.warn("Azure LogicApp scan failed:", e.message); }
-
-    // ─── 11. FRONT DOOR & API PROTECTION ────────────────────────────────────
-    try {
-        const fdClient = new FrontDoorManagementClient(credential, subscriptionId);
-        for await (const fd of fdClient.frontDoors.list()) {
-            
-            // [SOC2-CC6.6] Edge Protection (WAF)
-            if (!fd.webApplicationFirewallPolicyLink) {
-                resources.push({
-                    name: fd.name, type: 'Azure Front Door', icon: '🚀', region: 'global', 
-                    severity: 'warning', technicalId: 'AZ_FD_WAF', 
-                    issue: 'Front Door is active without a Web Application Firewall (WAF) policy', 
-                    recommendation: 'Attach a WAF policy to mitigate Layer 7 attacks and SQL injection.'
-                });
-            }
-        }
-    } catch (e) { log.warn("Azure FrontDoor scan failed:", e.message); }
-
-    // ─── 12. SUBSCRIPTION ACTIVITY LOGS & DIAGNOSTICS ──────────────────────
-    try {
-        const monitorClient = new MonitorClient(credential, subscriptionId);
-        let hasActivityLog = false;
-        for await (const setting of monitorClient.diagnosticSettings.list(`subscriptions/${subscriptionId}`)) {
-            if (setting.logs?.some(l => l.enabled)) hasActivityLog = true;
-        }
-        if (!hasActivityLog) {
-            resources.push({
-                name: `Sub: ${subscriptionId.slice(0,8)}`, type: 'Azure Subscription', icon: '🎟️', region: 'global',
-                severity: 'critical', technicalId: 'AZ_DIAG_SETTINGS',
-                issue: 'Activity Logs are not being exported to a secure workspace',
-                recommendation: 'Configure Diagnostic Settings to export Subscription Activity Logs to Log Analytics or Storage.'
-            });
-        }
-    } catch (e) { log.warn("Azure Diagnostics scan failed:", e.message); }
-
-    // ─── 13. SERVICE BUS (MESSAGING) ────────────────────────────────────────
-    try {
-        const sbClient = new ServiceBusManagementClient(credential, subscriptionId);
-        for await (const ns of sbClient.namespaces.list()) {
-            
-            // [SOC2-CC6.7] Encryption at Rest (CMK)
-            if (!ns.encryption || ns.encryption.keySource === 'Microsoft.KeyVault') {
-                // Good, but check if keys match
-            } else {
-                resources.push({
-                    name: ns.name, type: 'Azure Service Bus', icon: '📨', region: ns.location,
-                    severity: 'warning', technicalId: 'AZ_BUS_ENCRYPT',
-                    issue: 'Namespace is not using Customer-Managed Keys (CMK)',
-                    recommendation: 'Enable CMK encryption for Service Bus to maintain control over data-at-rest keys.'
-                });
-            }
-
-            // [SOC2-CC6.6] Public Network Exposure
-            if (ns.publicNetworkAccess === 'Enabled') {
-                resources.push({
-                    name: ns.name, type: 'Azure Service Bus', icon: '📨', region: ns.location,
-                    severity: 'warning', technicalId: 'RDS_PUBLIC',
-                    issue: 'Namespace allows public network access',
-                    recommendation: 'Disable public access and use Private Endpoints for messaging isolation.'
-                });
-            }
-        }
-    } catch (e) { log.warn("Azure ServiceBus scan failed:", e.message); }
-
-    // ─── 14. AZURE POLICY & BLUEPRINTS ─────────────────────────────────────
-    try {
-        const { PolicyClient } = await import("@azure/arm-policy");
-        const policyClient = new PolicyClient(credential, subscriptionId);
-        // High-level check: Are there any non-compliant policies?
-        resources.push({
-            name: 'Governance Policy', type: 'Azure Policy', icon: '⚖️', region: 'global',
-            severity: 'pass', technicalId: 'AZ_POLICY_HEALTH',
-            issue: null, recommendation: 'Continuous monitoring of ARM resource compliance is active.'
-        });
-    } catch (e) { log.warn("Azure Policy scan failed:", e.message); }
-
-    // ─── 15. EDGE & DNS (CDN & PRIVATE DNS) ──────────────────────────────────
-    try {
-        const cdnClient = new CdnManagementClient(credential, subscriptionId);
-        for await (const profile of cdnClient.profiles.list()) {
-            for await (const endpoint of cdnClient.endpoints.listByProfile(profile.name)) {
-                if (endpoint.optimizationType === 'DynamicSiteAcceleration' && !endpoint.isHttpsAllowed) {
+    if (ComputeManagementClient) {
+        try {
+            const computeClient = new ComputeManagementClient(credential, subscriptionId);
+            for await (const vm of computeClient.virtualMachines.listAll()) {
+                if (vm.storageProfile?.osDisk?.createOption === 'FromImage' && !vm.storageProfile?.osDisk?.managedDisk) {
                     resources.push({
-                        name: endpoint.name, type: 'Azure CDN', icon: '🌐', region: 'global',
-                        severity: 'critical', technicalId: 'AZ_APP_HTTPS',
-                        issue: 'CDN Endpoint does not enforce HTTPS',
-                        recommendation: 'Enable HTTPS on the CDN endpoint to secure traffic in transit.'
+                        name: vm.name, type: 'Azure VM', icon: '💻', region: vm.location, 
+                        severity: 'warning', technicalId: 'AZ_UNMANAGED_DISK', 
+                        issue: 'Using unmanaged disks could impact service availability', 
+                        recommendation: 'Migrate to Azure Managed Disks for integrated snapshots and better SLA.'
+                    });
+                }
+
+                if (vm.networkProfile?.networkInterfaces?.some(ni => ni.id.includes('publicIPAddresses'))) {
+                    resources.push({
+                        name: vm.name, type: 'Azure VM', icon: '💻', region: vm.location, 
+                        severity: 'warning', technicalId: 'AZ_VM_PUBLIC_IP', 
+                        issue: 'Virtual Machine has a direct Public IP address assigned', 
+                        recommendation: 'Dissociate public IP and use Azure Bastion or a VPN Gateway for secure management.'
+                    });
+                }
+
+                if (vm.storageProfile?.osDisk?.managedDisk?.encryptionSettings === undefined && !vm.storageProfile?.osDisk?.managedDisk?.diskEncryptionSet) {
+                    resources.push({
+                        name: vm.name, type: 'Azure VM', icon: '💻', region: vm.location, 
+                        severity: 'warning', technicalId: 'DISK_ENCRYPTION', 
+                        issue: 'OS Disk encryption is not explicitly configured', 
+                        recommendation: 'Enable Azure Disk Encryption (ADE) or Platform-managed encryption at rest.'
                     });
                 }
             }
-        }
-    } catch (e) { log.warn("Azure CDN scan failed:", e.message); }
+        } catch (e) { log.warn("Azure Compute scan failed:", e.message); }
+    }
+
+    // ─── 2. APP SERVICES & FUNCTIONS ──────────────────────────────────────────
+    if (WebSiteManagementClient) {
+        try {
+            const webClient = new WebSiteManagementClient(credential, subscriptionId);
+            for await (const site of webClient.webApps.list()) {
+                if (site.httpsOnly === false) {
+                    resources.push({
+                        name: site.name, type: 'Azure App Service', icon: '🌐', region: site.location, 
+                        severity: 'critical', technicalId: 'AZ_APP_HTTPS', 
+                        issue: 'App Service does not enforce HTTPS-only traffic', 
+                        recommendation: 'Enable httpsOnly in settings to redirect all HTTP traffic to port 443.'
+                    });
+                }
+
+                if (site.siteConfig?.minTlsVersion && site.siteConfig.minTlsVersion < '1.2') {
+                    resources.push({
+                        name: site.name, type: 'Azure App Service', icon: '🌐', region: site.location, 
+                        severity: 'warning', technicalId: 'AZ_APP_TLS', 
+                        issue: 'Minimum TLS version is set below 1.2', 
+                        recommendation: 'Enforce TLS 1.2 as the minimum version to protect against legacy cipher vulnerabilities.'
+                    });
+                }
+
+                if (!site.identity || site.identity.type === 'None') {
+                    resources.push({
+                        name: site.name, type: 'Azure App Service', icon: '🌐', region: site.location, 
+                        severity: 'warning', technicalId: 'AZ_APP_IDENTITY', 
+                        issue: 'Managed Identitiy is not enabled on the App Service', 
+                        recommendation: 'Enable a System-assigned Managed Identity to eliminate the need for plaintext secrets in environment variables.'
+                    });
+                }
+            }
+        } catch (e) { log.warn("Azure AppService scan failed:", e.message); }
+    }
+
+    // ─── 3. AZURE KUBERNETES SERVICE (AKS) ───────────────────────────────────
+    if (ContainerServiceClient) {
+        try {
+            const aksClient = new ContainerServiceClient(credential, subscriptionId);
+            for await (const cluster of aksClient.managedClusters.list()) {
+                if (!cluster.apiServerAccessProfile?.authorizedIPRanges) {
+                    resources.push({
+                        name: cluster.name, type: 'Azure AKS', icon: '☸️', region: cluster.location, 
+                        severity: 'critical', technicalId: 'AKS_API_SERVER', 
+                        issue: 'Kubernetes API server access is not restricted via Authorized IP ranges', 
+                        recommendation: 'Configure authorized IP ranges or enable Private Cluster mode to protect the control plane.'
+                    });
+                }
+
+                if (!cluster.enableRBAC) {
+                    resources.push({
+                        name: cluster.name, type: 'Azure AKS', icon: '☸️', region: cluster.location, 
+                        severity: 'warning', technicalId: 'AKS_RBAC', 
+                        issue: 'Kubernetes Role-Based Access Control (RBAC) is disabled', 
+                        recommendation: 'Enable RBAC and integrate with Azure AD for granular identity management.'
+                    });
+                }
+
+                if (!cluster.networkProfile?.networkPolicy) {
+                    resources.push({
+                        name: cluster.name, type: 'Azure AKS', icon: '☸️', region: cluster.location,
+                        severity: 'warning', control: 'CC6.6',
+                        issue: 'Network Policy is not configured',
+                        recommendation: 'Enable Azure or Calico network policies to restrict pod-to-pod communication.'
+                    });
+                }
+
+                if (!cluster.azureAdProfile?.managed) {
+                    resources.push({
+                        name: cluster.name, type: 'Azure AKS', icon: '☸️', region: cluster.location,
+                        severity: 'warning', control: 'CC6.3',
+                        issue: 'Azure AD integration (managed) is disabled',
+                        recommendation: 'Enable managed Azure AD integration for unified identity management.'
+                    });
+                }
+
+                if (cluster.disableLocalAccounts === false) {
+                    resources.push({
+                        name: cluster.name, type: 'Azure AKS', icon: '☸️', region: cluster.location,
+                        severity: 'warning', control: 'CC6.3',
+                        issue: 'Local accounts are enabled',
+                        recommendation: 'Disable local accounts to enforce Azure AD authentication.'
+                    });
+                }
+            }
+        } catch (e) { log.warn("Azure AKS scan failed:", e.message); }
+    }
+
+    // ─── 4. COSMOS DB ──────────────────────────────────────────────────────────
+    if (CosmosDBManagementClient) {
+        try {
+            const cosmosClient = new CosmosDBManagementClient(credential, subscriptionId);
+            for await (const account of cosmosClient.databaseAccounts.list()) {
+                if (account.publicNetworkAccess === 'Enabled') {
+                    resources.push({
+                        name: account.name, type: 'Azure Cosmos DB', icon: '🪐', region: account.location, 
+                        severity: 'warning', technicalId: 'RDS_PUBLIC', 
+                        issue: 'Public network access is enabled on the Cosmos DB account', 
+                        recommendation: 'Disable public access and use Private Endpoints for secure database connectivity.'
+                    });
+                }
+
+                if (!account.keyVaultKeyUri) {
+                    resources.push({
+                        name: account.name, type: 'Azure Cosmos DB', icon: '🪐', region: account.location, 
+                        severity: 'warning', technicalId: 'AZ_COSMOS_CMK', 
+                        issue: 'Customer-Managed Key (CMK) encryption is not enabled', 
+                        recommendation: 'Use an Azure Key Vault key for encryption at rest rather than default platform-managed keys.'
+                    });
+                }
+            }
+        } catch (e) { log.warn("Azure CosmosDB scan failed:", e.message); }
+    }
+
+    // ─── 5. CONTAINER REGISTRY (ACR) ──────────────────────────────────────────
+    if (ContainerRegistryManagementClient) {
+        try {
+            const acrClient = new ContainerRegistryManagementClient(credential, subscriptionId);
+            for await (const registry of acrClient.registries.list()) {
+                if (registry.adminUserEnabled) {
+                    resources.push({
+                        name: registry.name, type: 'Azure ACR', icon: '📦', region: registry.location, 
+                        severity: 'warning', technicalId: 'AZ_ACR_ADMIN', 
+                        issue: 'Admin user account is enabled for image pushes/pulls', 
+                        recommendation: 'Disable the admin user and use Azure AD SPN/Identity for more secure registry access.'
+                    });
+                }
+
+                if (registry.publicNetworkAccess === 'Enabled') {
+                    resources.push({
+                        name: registry.name, type: 'Azure ACR', icon: '📦', region: registry.location, 
+                        severity: 'warning', technicalId: 'AZ_ACR_PUBLIC', 
+                        issue: 'ACR allows public network access to images', 
+                        recommendation: 'Configure a VNet firewall to restrict image access to internal build agents.'
+                    });
+                }
+            }
+        } catch (e) { log.warn("Azure ACR scan failed:", e.message); }
+    }
+
+    // ─── 6. IDENTITY & ROLE ASSIGNMENTS (RBAC) ──────────────────────────────
+    if (AuthorizationManagementClient) {
+        try {
+            const authClient = new AuthorizationManagementClient(credential, subscriptionId);
+            for await (const assignment of authClient.roleAssignments.list()) {
+                if (assignment.roleDefinitionId.toLowerCase().includes('8e3af657-a8ff-443c-a75c-2fe8c4bcb635')) {
+                    resources.push({
+                        name: assignment.name, type: 'Azure IAM', icon: '👤', region: 'global', 
+                        severity: 'info', technicalId: 'AZ_IAM_OWNER', 
+                        issue: 'Owner role assignment detected', 
+                        recommendation: 'Audit all Owner-level users and downgrade to Contributor or a more granular role.'
+                    });
+                }
+            }
+        } catch (e) { log.warn("Azure Authorization scan failed:", e.message); }
+    }
+
+    // ─── 7. NETWORKING (NSG & VNET) ─────────────────────────────────────────
+    if (NetworkManagementClient) {
+        try {
+            const networkClient = new NetworkManagementClient(credential, subscriptionId);
+            for await (const nsg of networkClient.networkSecurityGroups.listAll()) {
+                const openRules = (nsg.securityRules || []).filter(r => 
+                    r.access === 'Allow' && r.direction === 'Inbound' && 
+                    (r.sourceAddressPrefix === '*' || r.sourceAddressPrefix === '0.0.0.0/0')
+                );
+
+                for (const rule of openRules) {
+                    resources.push({
+                        name: nsg.name, type: 'Azure NSG', icon: '🛡️', region: nsg.location, 
+                        severity: 'critical', technicalId: 'SG_OPEN_PORTS', 
+                        issue: `NSG rule "${rule.name}" allows inbound port ${rule.destinationPortRange} from the Internet`, 
+                        recommendation: 'Restrict source IP addresses to a known corporate VPN or jump box CIDR.'
+                    });
+                }
+            }
+        } catch (e) { log.warn("Azure Networking scan failed:", e.message); }
+    }
+
+    // ─── 8. SQL DATABASES ────────────────────────────────────────────────────
+    if (SqlManagementClient) {
+        try {
+            const sqlClient = new SqlManagementClient(credential, subscriptionId);
+            for await (const server of sqlClient.servers.list()) {
+                if (server.publicNetworkAccess === 'Enabled') {
+                    resources.push({
+                        name: server.name, type: 'Azure SQL', icon: '🗃️', region: server.location, 
+                        severity: 'warning', technicalId: 'RDS_PUBLIC', 
+                        issue: 'SQL Server allows public network access', 
+                        recommendation: 'Disable public access and use Private Endpoints or Virtual Network rules.'
+                    });
+                }
+            }
+        } catch (e) { log.warn("Azure SQL scan failed:", e.message); }
+    }
+
+    // ─── 9. KEY VAULT SECURITY ─────────────────────────────────────────────
+    if (KeyVaultManagementClient) {
+        try {
+            const kvClient = new KeyVaultManagementClient(credential, subscriptionId);
+            for await (const vault of kvClient.vaults.list()) {
+                if (!vault.properties?.enableSoftDelete) {
+                    resources.push({
+                        name: vault.name, type: 'Azure KeyVault', icon: '🔑', region: vault.location, 
+                        severity: 'warning', technicalId: 'AZ_KV_SOFT_DELETE', 
+                        issue: 'Soft delete and purge protection are disabled', 
+                        recommendation: 'Enable soft delete to allow recovery of accidentally deleted keys and secrets.'
+                    });
+                }
+            }
+        } catch (e) { log.warn("Azure KeyVault scan failed:", e.message); }
+    }
+
+    // ─── 10. LOGIC APPS & INTEGRATIONS ──────────────────────────────────────
+    if (LogicManagementClient) {
+        try {
+            const logicClient = new LogicManagementClient(credential, subscriptionId);
+            for await (const workflow of logicClient.workflows.listBySubscription()) {
+                if (!workflow.accessControl?.triggers?.allowedCallerIpAddresses) {
+                    resources.push({
+                        name: workflow.name, type: 'Azure Logic App', icon: '🧩', region: workflow.location, 
+                        severity: 'warning', technicalId: 'AZ_LOGIC_IP', 
+                        issue: 'Workflow HTTP trigger has no IP-based access restrictions', 
+                        recommendation: 'Restrict the callers IP address range in the Access Control configuration.'
+                    });
+                }
+            }
+        } catch (e) { log.warn("Azure LogicApp scan failed:", e.message); }
+    }
+
+    // ─── 11. FRONT DOOR & API PROTECTION ────────────────────────────────────
+    if (FrontDoorManagementClient) {
+        try {
+            const fdClient = new FrontDoorManagementClient(credential, subscriptionId);
+            for await (const fd of fdClient.frontDoors.list()) {
+                if (!fd.webApplicationFirewallPolicyLink) {
+                    resources.push({
+                        name: fd.name, type: 'Azure Front Door', icon: '🚀', region: 'global', 
+                        severity: 'warning', technicalId: 'AZ_FD_WAF', 
+                        issue: 'Front Door is active without a Web Application Firewall (WAF) policy', 
+                        recommendation: 'Attach a WAF policy to mitigate Layer 7 attacks and SQL injection.'
+                    });
+                }
+            }
+        } catch (e) { log.warn("Azure FrontDoor scan failed:", e.message); }
+    }
+
+    // ─── 12. SUBSCRIPTION ACTIVITY LOGS & DIAGNOSTICS ──────────────────────
+    if (MonitorClient) {
+        try {
+            const monitorClient = new MonitorClient(credential, subscriptionId);
+            let hasActivityLog = false;
+            for await (const setting of monitorClient.diagnosticSettings.list(`subscriptions/${subscriptionId}`)) {
+                if (setting.logs?.some(l => l.enabled)) hasActivityLog = true;
+            }
+            if (!hasActivityLog) {
+                resources.push({
+                    name: `Sub: ${subscriptionId.slice(0,8)}`, type: 'Azure Subscription', icon: '🎟️', region: 'global',
+                    severity: 'critical', technicalId: 'AZ_DIAG_SETTINGS',
+                    issue: 'Activity Logs are not being exported to a secure workspace',
+                    recommendation: 'Configure Diagnostic Settings to export Subscription Activity Logs to Log Analytics or Storage.'
+                });
+            }
+        } catch (e) { log.warn("Azure Diagnostics scan failed:", e.message); }
+    }
+
+    // ─── 13. SERVICE BUS (MESSAGING) ────────────────────────────────────────
+    if (ServiceBusManagementClient) {
+        try {
+            const sbClient = new ServiceBusManagementClient(credential, subscriptionId);
+            for await (const ns of sbClient.namespaces.list()) {
+                if (!ns.encryption || ns.encryption.keySource === 'Microsoft.KeyVault') {
+                    // Good
+                } else {
+                    resources.push({
+                        name: ns.name, type: 'Azure Service Bus', icon: '📨', region: ns.location,
+                        severity: 'warning', technicalId: 'AZ_BUS_ENCRYPT',
+                        issue: 'Namespace is not using Customer-Managed Keys (CMK)',
+                        recommendation: 'Enable CMK encryption for Service Bus to maintain control over data-at-rest keys.'
+                    });
+                }
+
+                if (ns.publicNetworkAccess === 'Enabled') {
+                    resources.push({
+                        name: ns.name, type: 'Azure Service Bus', icon: '📨', region: ns.location,
+                        severity: 'warning', technicalId: 'RDS_PUBLIC',
+                        issue: 'Namespace allows public network access',
+                        recommendation: 'Disable public access and use Private Endpoints for messaging isolation.'
+                    });
+                }
+            }
+        } catch (e) { log.warn("Azure ServiceBus scan failed:", e.message); }
+    }
+
+    // ─── 14. AZURE POLICY & BLUEPRINTS ─────────────────────────────────────
+    if (PolicyClient) {
+        try {
+            const policyClient = new PolicyClient(credential, subscriptionId);
+            resources.push({
+                name: 'Governance Policy', type: 'Azure Policy', icon: '⚖️', region: 'global',
+                severity: 'pass', technicalId: 'AZ_POLICY_HEALTH',
+                issue: null, recommendation: 'Continuous monitoring of ARM resource compliance is active.'
+            });
+        } catch (e) { log.warn("Azure Policy scan failed:", e.message); }
+    }
+
+    // ─── 15. EDGE & DNS (CDN & PRIVATE DNS) ──────────────────────────────────
+    if (CdnManagementClient) {
+        try {
+            const cdnClient = new CdnManagementClient(credential, subscriptionId);
+            for await (const profile of cdnClient.profiles.list()) {
+                for await (const endpoint of cdnClient.endpoints.listByProfile(profile.name)) {
+                    if (endpoint.optimizationType === 'DynamicSiteAcceleration' && !endpoint.isHttpsAllowed) {
+                        resources.push({
+                            name: endpoint.name, type: 'Azure CDN', icon: '🌐', region: 'global',
+                            severity: 'critical', technicalId: 'AZ_APP_HTTPS',
+                            issue: 'CDN Endpoint does not enforce HTTPS',
+                            recommendation: 'Enable HTTPS on the CDN endpoint to secure traffic in transit.'
+                        });
+                    }
+                }
+            }
+        } catch (e) { log.warn("Azure CDN scan failed:", e.message); }
+    }
 
     // ─── 17. BACKUP & RECOVERY (RECOVERY SERVICES VAULTS) ───────────────────
-    try {
-        const rsClient = new RecoveryServicesManagementClient(credential, subscriptionId);
-        for await (const vault of rsClient.vaults.listBySubscriptionId()) {
-            // [SOC2-CC7.2] Backup Redundancy
-            if (vault.properties?.storageModelType === 'LocallyRedundant') {
-                resources.push({
-                    name: vault.name, type: 'Azure Recovery Vault', icon: '💾', region: vault.location,
-                    severity: 'warning', control: 'CC7.2',
-                    issue: 'Vault uses Locally Redundant Storage (LRS)',
-                    recommendation: 'Use Geo-Redundant Storage (GRS) to ensure data availability in case of regional failure.'
-                });
+    if (RecoveryServicesManagementClient) {
+        try {
+            const rsClient = new RecoveryServicesManagementClient(credential, subscriptionId);
+            for await (const vault of rsClient.vaults.listBySubscriptionId()) {
+                if (vault.properties?.storageModelType === 'LocallyRedundant') {
+                    resources.push({
+                        name: vault.name, type: 'Azure Recovery Vault', icon: '💾', region: vault.location,
+                        severity: 'warning', control: 'CC7.2',
+                        issue: 'Vault uses Locally Redundant Storage (LRS)',
+                        recommendation: 'Use Geo-Redundant Storage (GRS) to ensure data availability in case of regional failure.'
+                    });
+                }
+                if (vault.properties?.softDeleteFeatureState === 'Disabled') {
+                    resources.push({
+                        name: vault.name, type: 'Azure Recovery Vault', icon: '💾', region: vault.location,
+                        severity: 'critical', control: 'CC7.2',
+                        issue: 'Soft delete for backups is disabled',
+                        recommendation: 'Enable soft delete to prevent permanent data loss from accidental or malicious deletions.'
+                    });
+                }
             }
-            // Soft Delete check
-            if (vault.properties?.softDeleteFeatureState === 'Disabled') {
-                resources.push({
-                    name: vault.name, type: 'Azure Recovery Vault', icon: '💾', region: vault.location,
-                    severity: 'critical', control: 'CC7.2',
-                    issue: 'Soft delete for backups is disabled',
-                    recommendation: 'Enable soft delete to prevent permanent data loss from accidental or malicious deletions.'
-                });
-            }
-        }
-    } catch (e) { log.warn("Azure Recovery Services scan failed:", e.message); }
+        } catch (e) { log.warn("Azure Recovery Services scan failed:", e.message); }
+    }
 
     // ─── 18. DEFENDER FOR CLOUD / SECURITY CENTER ──────────────────────────
-    try {
-        const securityClient = new SecurityCenter(credential, subscriptionId);
-        // Checking for "Standard" tier (Defender on)
-        const [pricings] = await securityClient.pricings.list();
-        const defenderOff = pricings.some(p => p.pricingTier === 'Free');
-        if (defenderOff) {
-            resources.push({
-                name: 'Subscription Security', type: 'Azure Defender', icon: '🛡️', region: 'global',
-                severity: 'warning', control: 'CC6.6',
-                issue: 'Microsoft Defender for Cloud is on Free tier for some resources',
-                recommendation: 'Enable Microsoft Defender for Cloud Standard tier for enhanced threat protection.'
-            });
-        }
-    } catch (e) { log.warn("Azure Security Center scan failed:", e.message); }
+    if (SecurityCenter) {
+        try {
+            const securityClient = new SecurityCenter(credential, subscriptionId);
+            const [pricings] = await securityClient.pricings.list();
+            const defenderOff = pricings?.some(p => p.pricingTier === 'Free');
+            if (defenderOff) {
+                resources.push({
+                    name: 'Subscription Security', type: 'Azure Defender', icon: '🛡️', region: 'global',
+                    severity: 'warning', control: 'CC6.6',
+                    issue: 'Microsoft Defender for Cloud is on Free tier for some resources',
+                    recommendation: 'Enable Microsoft Defender for Cloud Standard tier for enhanced threat protection.'
+                });
+            }
+        } catch (e) { log.warn("Azure Security Center scan failed:", e.message); }
+    }
 
     // Output scan summary for logging and job progress
     const summary = {
