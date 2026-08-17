@@ -1,9 +1,13 @@
 import { describe, it, expect, vi } from 'vitest';
 import { runScan } from '../../core/providers/azure.js';
 
-// Mock Azure SDKs
+// Mock Azure identity
 vi.mock('@azure/identity', () => ({
-    ClientSecretCredential: vi.fn().mockImplementation(function() { return {}; })
+    ClientSecretCredential: vi.fn().mockImplementation(function() {
+        return {
+            getToken: vi.fn().mockResolvedValue({ token: 'mock-token', expiresOnTimestamp: Date.now() + 3600000 })
+        };
+    })
 }));
 
 // Helper to create an async iterator mock
@@ -32,6 +36,9 @@ vi.mock('@azure/arm-compute', () => ({
                         }
                     }
                 }]))
+            },
+            disks: {
+                list: vi.fn(() => createAsyncIterable([]))
             }
         };
     })
@@ -54,6 +61,9 @@ vi.mock('@azure/arm-network', () => ({
                         }
                     ]
                 }]))
+            },
+            virtualNetworks: {
+                listAll: vi.fn(() => createAsyncIterable([]))
             }
         };
     })
@@ -64,8 +74,20 @@ vi.mock('@azure/arm-storage', () => ({
         return {
             storageAccounts: {
                 list: vi.fn(() => createAsyncIterable([
-                    { name: 'teststorage', location: 'eastus', id: '/subscriptions/sub/resourceGroups/rg/providers/Microsoft.Storage/storageAccounts/teststorage' }
+                    {
+                        name: 'insecurestorage',
+                        location: 'eastus',
+                        id: '/subscriptions/sub/resourceGroups/rg/providers/Microsoft.Storage/storageAccounts/insecurestorage',
+                        allowBlobPublicAccess: true,
+                        enableHttpsTrafficOnly: false,
+                        minimumTlsVersion: 'TLS1_0'
+                    }
                 ]))
+            },
+            blobServices: {
+                getServiceProperties: vi.fn().mockResolvedValue({
+                    deleteRetentionPolicy: { enabled: false }
+                })
             }
         };
     })
@@ -78,6 +100,9 @@ vi.mock('@azure/arm-sql', () => ({
                 list: vi.fn(() => createAsyncIterable([
                     { name: 'testsql', location: 'eastus', publicNetworkAccess: 'Enabled' }
                 ]))
+            },
+            firewallRules: {
+                listByServer: vi.fn(() => createAsyncIterable([]))
             }
         };
     })
@@ -107,9 +132,9 @@ vi.mock('@azure/arm-recoveryservices', () => ({
     })
 }));
 
-// Mock other clients as empty lists to prevent errors
+// Mock remaining optional clients
 vi.mock('@azure/arm-keyvault', () => ({ KeyVaultManagementClient: vi.fn().mockImplementation(function() { return { vaults: { list: vi.fn(() => createAsyncIterable([])) } }; }) }));
-vi.mock('@azure/arm-monitor', () => ({ MonitorClient: vi.fn().mockImplementation(function() { return { diagnosticSettings: { listByResource: vi.fn(() => createAsyncIterable([])) } }; }) }));
+vi.mock('@azure/arm-monitor', () => ({ MonitorClient: vi.fn().mockImplementation(function() { return { diagnosticSettings: { list: vi.fn(() => createAsyncIterable([])) } }; }) }));
 vi.mock('@azure/arm-servicebus', () => ({ ServiceBusManagementClient: vi.fn().mockImplementation(function() { return { namespaces: { list: vi.fn(() => createAsyncIterable([])) } }; }) }));
 vi.mock('@azure/arm-policy', () => ({ PolicyClient: vi.fn().mockImplementation(function() { return {}; }) }));
 vi.mock('@azure/arm-cdn', () => ({ CdnManagementClient: vi.fn().mockImplementation(function() { return { profiles: { list: vi.fn(() => createAsyncIterable([])) } }; }) }));
@@ -124,7 +149,7 @@ vi.mock('@azure/arm-appinsights', () => ({ ApplicationInsightsManagementClient: 
 vi.mock('@azure/arm-subscriptions', () => ({ SubscriptionClient: vi.fn().mockImplementation(function() { return {}; }) }));
 vi.mock('@azure/arm-containerinstance', () => ({ ContainerInstanceManagementClient: vi.fn().mockImplementation(function() { return {}; }) }));
 
-describe('Azure Provider Scanner', () => {
+describe('Azure Enterprise Provider Scanner', () => {
     const credentials = {
         tenantId: 'test-tenant',
         accessKeyId: 'test-client-id',
@@ -142,9 +167,19 @@ describe('Azure Provider Scanner', () => {
 
     it('should detect open SSH in NSG rules', async () => {
         const { resources } = await runScan('azure', credentials);
-        const nsgIssue = resources.find(r => r.technicalId === 'SG_OPEN_PORTS');
+        const nsgIssue = resources.find(r => r.technicalId === 'SG_OPEN_SSH');
         expect(nsgIssue).toBeDefined();
         expect(nsgIssue.severity).toBe('critical');
+    });
+
+    it('should detect public blob access and HTTPS disabled on Storage Accounts', async () => {
+        const { resources } = await runScan('azure', credentials);
+        const publicBlob = resources.find(r => r.technicalId === 'AZ_STORAGE_PUBLIC_BLOB');
+        const httpsDisabled = resources.find(r => r.technicalId === 'AZ_STORAGE_HTTPS');
+        const tlsIssue = resources.find(r => r.technicalId === 'AZ_STORAGE_TLS');
+        expect(publicBlob).toBeDefined();
+        expect(httpsDisabled).toBeDefined();
+        expect(tlsIssue).toBeDefined();
     });
 
     it('should detect HTTPS disabled on App Service', async () => {
@@ -163,8 +198,8 @@ describe('Azure Provider Scanner', () => {
 
     it('should detect insecure recovery vault settings', async () => {
         const { resources } = await runScan('azure', credentials);
-        const lrsIssue = resources.find(r => r.issue === 'Vault uses Locally Redundant Storage (LRS)');
-        const softDeleteIssue = resources.find(r => r.issue === 'Soft delete for backups is disabled');
+        const lrsIssue = resources.find(r => r.technicalId === 'AZ_VAULT_REDUNDANCY');
+        const softDeleteIssue = resources.find(r => r.technicalId === 'AZ_VAULT_SOFT_DELETE');
         expect(lrsIssue).toBeDefined();
         expect(softDeleteIssue).toBeDefined();
     });
