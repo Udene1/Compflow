@@ -5,21 +5,21 @@ import { runRemediation as remediateDO } from './providers/digitalocean_remediat
 import { runRemediation as remediateHetzner } from './providers/hetzner_remediator.js';
 import { log } from './logger.js';
 
-export async function runRemediation(provider, credentials, resourceType, resourceName, issue) {
-    log.info(`Initiating remediation for ${resourceName} on ${provider.toUpperCase()}...`);
+export async function runRemediation(provider, credentials, resourceType, resourceName, issue, dryRun = false) {
+    log.info(`Initiating remediation for ${resourceName} on ${provider.toUpperCase()} (dryRun: ${dryRun})...`);
 
     switch (provider.toLowerCase()) {
         case 'aws':
-            return await remediateAWS(provider, credentials, resourceType, resourceName, issue);
+            return await remediateAWS(provider, credentials, resourceType, resourceName, issue, dryRun);
         case 'gcp':
-            return await remediateGCP(provider, credentials, resourceType, resourceName, issue);
+            return await remediateGCP(provider, credentials, resourceType, resourceName, issue, dryRun);
         case 'azure':
-            return await remediateAzure(provider, credentials, resourceType, resourceName, issue);
+            return await remediateAzure(provider, credentials, resourceType, resourceName, issue, dryRun);
         case 'digitalocean':
         case 'do':
-            return await remediateDO(provider, credentials, resourceType, resourceName, issue);
+            return await remediateDO(provider, credentials, resourceType, resourceName, issue, dryRun);
         case 'hetzner':
-            return await remediateHetzner(provider, credentials, resourceType, resourceName, issue);
+            return await remediateHetzner(provider, credentials, resourceType, resourceName, issue, dryRun);
         default:
             log.warn(`Remediation not yet implemented for ${provider}`);
             return { success: false, message: `Remediation for ${provider} is coming soon.` };

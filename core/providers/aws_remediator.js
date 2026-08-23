@@ -28,7 +28,7 @@ export async function runRemediation(provider, credentials, resourceType, resour
     }
 
     if (!credentials || !credentials.accessKeyId || !credentials.secretAccessKey) {
-        return res.status(400).json({ error: 'Missing cloud credentials' });
+        return { success: false, error: 'Missing cloud credentials' };
     }
 
     try {
