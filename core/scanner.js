@@ -1,7 +1,8 @@
 import { ControlMatrix } from './controls.js';
 import { log } from './logger.js';
+import { evaluateCustomPolicies } from './policy_engine.js';
 
-export async function runScan(provider, credentials) {
+export async function runScan(provider, credentials, customPolicies = null) {
     log.info(`Initiating ${provider.toUpperCase()} scan...`);
 
     let result;
@@ -45,6 +46,14 @@ export async function runScan(provider, credentials) {
                 r.control = ControlMatrix[r.technicalId].soc2 ? ControlMatrix[r.technicalId].soc2[0] : 'N/A';
             }
         });
+
+        // Evaluate Custom Organization Governance Policies if defined
+        if (customPolicies && typeof customPolicies === 'object') {
+            const policyViolations = evaluateCustomPolicies(result.resources, customPolicies);
+            if (policyViolations.length > 0) {
+                result.resources.push(...policyViolations);
+            }
+        }
     }
 
     return result;

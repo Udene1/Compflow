@@ -1,25 +1,39 @@
-import { Queue, Worker } from 'bullmq';
-import Redis from 'ioredis';
-
 const redisHost = process.env.REDIS_HOST || 'localhost';
 const redisPort = parseInt(process.env.REDIS_PORT || '6379', 10);
-
-const connection = new Redis({
-    host: redisHost,
-    port: redisPort,
-    maxRetriesPerRequest: null
-});
-
 const QUEUE_NAME = 'scan_jobs';
 
-export const scanQueue = new Queue(QUEUE_NAME, { connection });
+let scanQueue = null;
+
+async function getQueue() {
+    if (scanQueue) return scanQueue;
+    try {
+        const { Queue } = await import('bullmq');
+        const { default: Redis } = await import('ioredis');
+        const connection = new Redis({
+            host: redisHost,
+            port: redisPort,
+            maxRetriesPerRequest: null,
+            lazyConnect: true
+        });
+        scanQueue = new Queue(QUEUE_NAME, { connection });
+        return scanQueue;
+    } catch (e) {
+        return null;
+    }
+}
 
 /**
  * Enqueue a job into BullMQ
  * @param {Object} jobData - Payload containing jobId, clientId, provider, credentials, email
  */
 export async function enqueueJob(jobData) {
-    const job = await scanQueue.add('scan', jobData, {
+    const queue = await getQueue();
+    if (!queue) {
+        console.log(`[QUEUE-FALLBACK] BullMQ queue unavailable. Processing in direct mode for job: ${jobData.jobId}`);
+        return { id: jobData.jobId || 'fallback-id' };
+    }
+
+    const job = await queue.add('scan', jobData, {
         attempts: 3,
         backoff: {
             type: 'exponential',
@@ -37,25 +51,38 @@ export async function enqueueJob(jobData) {
  * Listen and process jobs from BullMQ
  * @param {Function} processorFn - Async function (job) => void
  */
-export function listenWorkerQueue(processorFn) {
-    console.log(`[BULLMQ] Starting Worker on queue '${QUEUE_NAME}' connected to ${redisHost}:${redisPort}...`);
+export async function listenWorkerQueue(processorFn) {
+    try {
+        const { Worker } = await import('bullmq');
+        const { default: Redis } = await import('ioredis');
+        const connection = new Redis({
+            host: redisHost,
+            port: redisPort,
+            maxRetriesPerRequest: null
+        });
 
-    const worker = new Worker(
-        QUEUE_NAME,
-        async (job) => {
-            console.log(`[BULLMQ WORKER] Processing job ${job.id} (jobId: ${job.data.jobId})...`);
-            await processorFn(job.data);
-        },
-        { connection, concurrency: 5 }
-    );
+        console.log(`[BULLMQ] Starting Worker on queue '${QUEUE_NAME}' connected to ${redisHost}:${redisPort}...`);
 
-    worker.on('completed', (job) => {
-        console.log(`[BULLMQ WORKER] Job ${job.id} completed.`);
-    });
+        const worker = new Worker(
+            QUEUE_NAME,
+            async (job) => {
+                console.log(`[BULLMQ WORKER] Processing job ${job.id} (jobId: ${job.data.jobId})...`);
+                await processorFn(job.data);
+            },
+            { connection, concurrency: 5 }
+        );
 
-    worker.on('failed', (job, err) => {
-        console.error(`[BULLMQ WORKER] Job ${job?.id} failed:`, err.message);
-    });
+        worker.on('completed', (job) => {
+            console.log(`[BULLMQ WORKER] Job ${job.id} completed.`);
+        });
 
-    return worker;
+        worker.on('failed', (job, err) => {
+            console.error(`[BULLMQ WORKER] Job ${job?.id} failed:`, err.message);
+        });
+
+        return worker;
+    } catch (e) {
+        console.warn('[BULLMQ] Failed to initialize worker listener:', e.message);
+        return null;
+    }
 }

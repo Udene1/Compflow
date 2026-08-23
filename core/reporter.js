@@ -24,6 +24,7 @@ const FROM_EMAIL = process.env.AWS_SES_FROM_EMAIL || 'reports@complianceflow.ai'
  * Maps finding text back to a ControlMatrix key for enriched metadata.
  */
 function getMetadataForFinding(finding) {
+    if (!finding || !finding.issue || typeof finding.issue !== 'string') return null;
     // Simple heuristic mapping
     if (finding.issue.includes('Public access')) return ControlMatrix.S3_PUBLIC;
     if (finding.issue.includes('Versioning')) return ControlMatrix.S3_VERSIONING;
