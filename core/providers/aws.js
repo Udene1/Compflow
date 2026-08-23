@@ -84,386 +84,377 @@ export async function runScan(provider, credentials) {
             const sns = new SNSClient(config);
 
             // ═══════════════════════════════════════════
-            // 1. S3 BUCKETS — Deep Scan
+            // PARALLEL SERVICE RUNNERS
             // ═══════════════════════════════════════════
-            try {
-                const { Buckets } = await s3.send(new ListBucketsCommand({}));
-                for (const bucket of Buckets || []) {
-                    // Check: Public Access Block
-                    let severity = 'pass';
-                    let issue = null;
-                    try {
-                        await s3.send(new GetPublicAccessBlockCommand({ Bucket: bucket.Name }));
-                    } catch (e) {
-                        severity = 'critical';
-                        issue = 'Public access enabled';
-                    }
-                    resources.push({
-                        name: bucket.Name, type: 'S3 Bucket', icon: '🪣',
-                        region: config.region, severity, 
-                        technicalId: severity === 'pass' ? null : 'S3_PUBLIC', issue
-                    });
 
-                    // Check: Versioning & MFA Delete
-                    try {
-                        const vRes = await s3.send(new GetBucketVersioningCommand({ Bucket: bucket.Name }));
-                        if (vRes.Status !== 'Enabled') {
+            // 1. S3 Buckets
+            const checkS3 = async () => {
+                try {
+                    const { Buckets } = await s3.send(new ListBucketsCommand({}));
+                    for (const bucket of Buckets || []) {
+                        let severity = 'pass';
+                        let issue = null;
+                        try {
+                            await s3.send(new GetPublicAccessBlockCommand({ Bucket: bucket.Name }));
+                        } catch (e) {
+                            severity = 'critical';
+                            issue = 'Public access enabled';
+                        }
+                        resources.push({
+                            name: bucket.Name, type: 'S3 Bucket', icon: '🪣',
+                            region: config.region, severity, 
+                            technicalId: severity === 'pass' ? null : 'S3_PUBLIC', issue
+                        });
+
+                        try {
+                            const vRes = await s3.send(new GetBucketVersioningCommand({ Bucket: bucket.Name }));
+                            if (vRes.Status !== 'Enabled') {
+                                resources.push({
+                                    name: bucket.Name, type: 'S3 Bucket', icon: '🪣',
+                                    region: config.region, severity: 'warning',
+                                    technicalId: 'S3_VERSIONING',
+                                    issue: 'Versioning not enabled'
+                                });
+                            }
+                            if (vRes.MFADelete !== 'Enabled') {
+                                resources.push({
+                                    name: bucket.Name, type: 'S3 Bucket', icon: '🪣',
+                                    region: config.region, severity: 'warning', control: 'CC6.3',
+                                    issue: 'MFA Delete disabled'
+                                });
+                            }
+                        } catch (e) { /* skip */ }
+
+                        try {
+                            await s3.send(new GetBucketEncryptionCommand({ Bucket: bucket.Name }));
+                        } catch (e) {
                             resources.push({
                                 name: bucket.Name, type: 'S3 Bucket', icon: '🪣',
                                 region: config.region, severity: 'warning',
-                                technicalId: 'S3_VERSIONING',
-                                issue: 'Versioning not enabled'
+                                technicalId: 'S3_ENCRYPTION',
+                                issue: 'Default encryption disabled'
                             });
                         }
-                        if (vRes.MFADelete !== 'Enabled') {
-                            resources.push({
-                                name: bucket.Name, type: 'S3 Bucket', icon: '🪣',
-                                region: config.region, severity: 'warning', control: 'CC6.3',
-                                issue: 'MFA Delete disabled'
-                            });
-                        }
-                    } catch (e) { /* skip */ }
 
-                    // Check: Default Encryption
-                    try {
-                        await s3.send(new GetBucketEncryptionCommand({ Bucket: bucket.Name }));
-                    } catch (e) {
-                        resources.push({
-                            name: bucket.Name, type: 'S3 Bucket', icon: '🪣',
-                            region: config.region, severity: 'warning',
-                            technicalId: 'S3_ENCRYPTION',
-                            issue: 'Default encryption disabled'
-                        });
-                    }
+                        try {
+                            const logRes = await s3.send(new GetBucketLoggingCommand({ Bucket: bucket.Name }));
+                            if (!logRes.LoggingEnabled) {
+                                resources.push({
+                                    name: bucket.Name, type: 'S3 Bucket', icon: '🪣',
+                                    region: config.region, severity: 'warning', control: 'CC7.2',
+                                    issue: 'Server access logging disabled'
+                                });
+                            }
+                        } catch (e) { /* skip */ }
 
-                    // Check: Server Access Logging
-                    try {
-                        const logRes = await s3.send(new GetBucketLoggingCommand({ Bucket: bucket.Name }));
-                        if (!logRes.LoggingEnabled) {
+                        try {
+                            await s3.send(new GetBucketLifecycleConfigurationCommand({ Bucket: bucket.Name }));
+                        } catch (e) {
                             resources.push({
                                 name: bucket.Name, type: 'S3 Bucket', icon: '🪣',
                                 region: config.region, severity: 'warning', control: 'CC7.2',
-                                issue: 'Server access logging disabled'
+                                issue: 'Lifecycle policy not configured'
                             });
                         }
-                    } catch (e) { /* skip */ }
+                    }
+                } catch (e) { log.warn("S3 fail", e); }
+            };
 
-                    // Check: Lifecycle Policy
-                    try {
-                        await s3.send(new GetBucketLifecycleConfigurationCommand({ Bucket: bucket.Name }));
-                    } catch (e) {
+            // 2. EC2, Security Groups & VPCs
+            const checkEC2 = async () => {
+                try {
+                    const { SecurityGroups } = await ec2.send(new DescribeSecurityGroupsCommand({}));
+                    for (const sg of SecurityGroups || []) {
+                        const isOpen = sg.IpPermissions.some(p => 
+                            (p.FromPort <= 22 && p.ToPort >= 22 || p.IpProtocol === '-1') && 
+                            p.IpRanges.some(r => r.CidrIp === '0.0.0.0/0')
+                        );
                         resources.push({
-                            name: bucket.Name, type: 'S3 Bucket', icon: '🪣',
-                            region: config.region, severity: 'warning', control: 'CC7.2',
-                            issue: 'Lifecycle policy not configured'
+                            name: sg.GroupName, type: 'Security Group', icon: '🛡️',
+                            region: config.region, 
+                            severity: isOpen ? 'critical' : 'pass',
+                            technicalId: isOpen ? 'SG_OPEN_SSH' : null,
+                            issue: isOpen ? 'Allows 0.0.0.0/0 on port 22' : null
                         });
                     }
-                }
-            } catch (e) { log.warn("S3 fail", e); }
 
-            // ═══════════════════════════════════════════
-            // 2. EC2 — Security Groups, VPCs, Instances
-            // ═══════════════════════════════════════════
-            try {
-                const { SecurityGroups } = await ec2.send(new DescribeSecurityGroupsCommand({}));
-                for (const sg of SecurityGroups || []) {
-                    const isOpen = sg.IpPermissions.some(p => 
-                        (p.FromPort <= 22 && p.ToPort >= 22 || p.IpProtocol === '-1') && 
-                        p.IpRanges.some(r => r.CidrIp === '0.0.0.0/0')
-                    );
-                    resources.push({
-                        name: sg.GroupName, type: 'Security Group', icon: '🛡️',
-                        region: config.region, 
-                        severity: isOpen ? 'critical' : 'pass',
-                        technicalId: isOpen ? 'SG_OPEN_SSH' : null,
-                        issue: isOpen ? 'Allows 0.0.0.0/0 on port 22' : null
-                    });
-                }
+                    const { Vpcs } = await ec2.send(new DescribeVpcsCommand({}));
+                    for (const vpc of Vpcs || []) {
+                        let flowLogsEnabled = false;
+                        try {
+                            const { FlowLogs } = await ec2.send(new DescribeFlowLogsCommand({
+                                Filter: [{ Name: 'resource-id', Values: [vpc.VpcId] }]
+                            }));
+                            flowLogsEnabled = FlowLogs && FlowLogs.length > 0;
+                        } catch (e) { /* skip */ }
 
-                // VPCs + Flow Logs check
-                const { Vpcs } = await ec2.send(new DescribeVpcsCommand({}));
-                for (const vpc of Vpcs || []) {
-                    let flowLogsEnabled = false;
+                        resources.push({
+                            name: vpc.VpcId, type: 'VPC', icon: '🌐',
+                            region: config.region,
+                            severity: flowLogsEnabled ? 'pass' : 'warning',
+                            technicalId: flowLogsEnabled ? null : 'VPC_FLOW_LOGS',
+                            issue: flowLogsEnabled ? null : 'Flow Logs disabled'
+                        });
+                    }
+
                     try {
-                        const { FlowLogs } = await ec2.send(new DescribeFlowLogsCommand({
-                            Filter: [{ Name: 'resource-id', Values: [vpc.VpcId] }]
+                        const { Reservations } = await ec2.send(new DescribeInstancesCommand({
+                            Filters: [{ Name: 'instance-state-name', Values: ['running'] }]
                         }));
-                        flowLogsEnabled = FlowLogs && FlowLogs.length > 0;
-                    } catch (e) { /* skip */ }
+                        for (const res of Reservations || []) {
+                            for (const inst of res.Instances || []) {
+                                const imdsV2 = inst.MetadataOptions?.HttpTokens === 'required';
+                                const nameTag = inst.Tags?.find(t => t.Key === 'Name')?.Value || inst.InstanceId;
+                                if (!imdsV2) {
+                                    resources.push({
+                                        name: nameTag, type: 'EC2 Instance', icon: '💻',
+                                        region: config.region, severity: 'warning', control: 'CC6.3',
+                                        issue: 'IMDSv2 not enforced'
+                                    });
+                                }
+                            }
+                        }
+                    } catch (e) { log.warn("EC2 instances fail", e); }
 
-                    resources.push({
-                        name: vpc.VpcId, type: 'VPC', icon: '🌐',
-                        region: config.region,
-                        severity: flowLogsEnabled ? 'pass' : 'warning',
-                        technicalId: flowLogsEnabled ? null : 'VPC_FLOW_LOGS',
-                        issue: flowLogsEnabled ? null : 'Flow Logs disabled'
-                    });
-                }
-
-                // EC2 Instances — IMDSv2 check
-                try {
-                    const { Reservations } = await ec2.send(new DescribeInstancesCommand({
-                        Filters: [{ Name: 'instance-state-name', Values: ['running'] }]
-                    }));
-                    for (const res of Reservations || []) {
-                        for (const inst of res.Instances || []) {
-                            const imdsV2 = inst.MetadataOptions?.HttpTokens === 'required';
-                            const nameTag = inst.Tags?.find(t => t.Key === 'Name')?.Value || inst.InstanceId;
-                            if (!imdsV2) {
+                    try {
+                        const { Volumes } = await ec2.send(new DescribeVolumesCommand({}));
+                        for (const vol of Volumes || []) {
+                            if (!vol.Encrypted) {
                                 resources.push({
-                                    name: nameTag, type: 'EC2 Instance', icon: '💻',
-                                    region: config.region, severity: 'warning', control: 'CC6.3',
-                                    issue: 'IMDSv2 not enforced'
+                                    name: vol.VolumeId, type: 'EBS Volume', icon: '💾',
+                                    region: config.region, severity: 'critical', control: 'CC6.7',
+                                    issue: 'Volume encryption disabled'
+                                });
+                            }
+                        }
+                    } catch(e) { log.warn("EBS fail", e); }
+
+                    try {
+                        const { Snapshots } = await ec2.send(new DescribeSnapshotsCommand({ OwnerIds: ['self'] }));
+                        for (const snap of (Snapshots || []).slice(0, 10)) {
+                            const { CreateVolumePermissions } = await ec2.send(new DescribeSnapshotAttributeCommand({
+                                Attribute: 'createVolumePermission', SnapshotId: snap.SnapshotId
+                            }));
+                            if (CreateVolumePermissions && CreateVolumePermissions.some(p => p.Group === 'all')) {
+                                resources.push({
+                                    name: snap.SnapshotId, type: 'EBS Snapshot', icon: '📸',
+                                    region: config.region, severity: 'critical', control: 'CC6.6',
+                                    issue: 'Publicly Restorable'
+                                });
+                            }
+                        }
+                    } catch(e) { log.warn("EBS snapshots fail", e); }
+                } catch (e) { log.warn("EC2/VPC fail", e); }
+            };
+
+            // 3. RDS Databases
+            const checkRDS = async () => {
+                try {
+                    const { DBInstances } = await rds.send(new DescribeDBInstancesCommand({}));
+                    for (const db of DBInstances || []) {
+                        if (!db.StorageEncrypted) {
+                            resources.push({
+                                name: db.DBInstanceIdentifier, type: 'RDS Database', icon: '💾',
+                                region: config.region, severity: 'critical', control: 'CC6.7',
+                                issue: 'Encryption at rest disabled'
+                            });
+                        }
+                        if ((db.BackupRetentionPeriod || 0) < 7) {
+                            resources.push({
+                                name: db.DBInstanceIdentifier, type: 'RDS Database', icon: '💾',
+                                region: config.region, severity: 'warning', control: 'CC7.2',
+                                issue: `Backup retention < 7 days (currently ${db.BackupRetentionPeriod || 0}d)`
+                            });
+                        }
+                        if (!db.MultiAZ) {
+                            resources.push({
+                                name: db.DBInstanceIdentifier, type: 'RDS Database', icon: '💾',
+                                region: config.region, severity: 'warning', control: 'CC7.1',
+                                issue: 'Multi-AZ disabled (no failover)'
+                            });
+                        }
+                        if (db.PubliclyAccessible) {
+                            resources.push({
+                                name: db.DBInstanceIdentifier, type: 'RDS Database', icon: '💾',
+                                region: config.region, severity: 'critical', control: 'CC6.6',
+                                issue: 'Publicly accessible'
+                            });
+                        }
+                        if (db.StorageEncrypted && (db.BackupRetentionPeriod || 0) >= 7 && db.MultiAZ && !db.PubliclyAccessible) {
+                            resources.push({
+                                name: db.DBInstanceIdentifier, type: 'RDS Database', icon: '💾',
+                                region: config.region, severity: 'pass', control: 'CC6.7', issue: null
+                            });
+                        }
+                    }
+                } catch (e) { log.warn("RDS fail", e); }
+            };
+
+            // 4. CloudTrail
+            const checkCloudTrail = async () => {
+                try {
+                    const { TrailList } = await cloudtrail.send(new DescribeTrailsCommand({}));
+                    if (!TrailList || TrailList.length === 0) {
+                        resources.push({
+                            name: 'Global', type: 'CloudTrail', icon: '📋',
+                            region: 'Global', severity: 'critical', control: 'CC7.2', issue: 'No trail enabled'
+                        });
+                    } else {
+                        for (const t of TrailList) {
+                            if (!t.LogFileValidationEnabled) {
+                                resources.push({
+                                    name: t.Name, type: 'CloudTrail', icon: '📋',
+                                    region: t.HomeRegion, severity: 'warning', control: 'CC7.2',
+                                    issue: 'Log Validation disabled'
+                                });
+                            }
+                            if (!t.IsMultiRegionTrail) {
+                                resources.push({
+                                    name: t.Name, type: 'CloudTrail', icon: '📋',
+                                    region: t.HomeRegion, severity: 'warning', control: 'CC7.2',
+                                    issue: 'Not multi-region (blind spots in other regions)'
+                                });
+                            }
+                            if (!t.KmsKeyId) {
+                                resources.push({
+                                    name: t.Name, type: 'CloudTrail', icon: '📋',
+                                    region: t.HomeRegion, severity: 'warning', control: 'CC6.7',
+                                    issue: 'Log encryption disabled (no KMS key)'
+                                });
+                            }
+                            if (t.LogFileValidationEnabled && t.IsMultiRegionTrail && t.KmsKeyId) {
+                                resources.push({
+                                    name: t.Name, type: 'CloudTrail', icon: '📋',
+                                    region: t.HomeRegion, severity: 'pass', control: 'CC7.2', issue: null
                                 });
                             }
                         }
                     }
-                } catch (e) { log.warn("EC2 instances fail", e); }
+                } catch (e) { log.warn("CloudTrail fail", e); }
+            };
 
-                // EBS Volumes Check
+            // 5. Macie & Security Services
+            const checkMacie = async () => {
                 try {
-                    const { Volumes } = await ec2.send(new DescribeVolumesCommand({}));
-                    for (const vol of Volumes || []) {
-                        if (!vol.Encrypted) {
+                    const { status } = await macie.send(new GetMacieSessionCommand({}));
+                    resources.push({
+                        name: 'Macie Service', type: 'Macie', icon: '🔍',
+                        region: 'Global', severity: status === 'ENABLED' ? 'pass' : 'warning',
+                        control: 'Art. 25', issue: status === 'ENABLED' ? null : 'Automated Data Discovery disabled'
+                    });
+                } catch (e) { 
+                    resources.push({
+                        name: 'Macie Service', type: 'Macie', icon: '🔍',
+                        region: 'Global', severity: 'warning', control: 'Art. 25',
+                        issue: 'Macie not initialized'
+                    });
+                }
+            };
+
+            // 6. KMS Keys
+            const checkKMS = async () => {
+                try {
+                    const { Keys } = await kms.send(new ListKeysCommand({}));
+                    for (const k of (Keys || []).slice(0, 5)) {
+                        const { KeyMetadata } = await kms.send(new DescribeKeyCommand({ KeyId: k.KeyId }));
+                        if (KeyMetadata.KeyManager === 'CUSTOMER') {
+                            const { RotationEnabled } = await kms.send(new GetKeyRotationStatusCommand({ KeyId: k.KeyId }));
                             resources.push({
-                                name: vol.VolumeId, type: 'EBS Volume', icon: '💾',
-                                region: config.region, severity: 'critical', control: 'CC6.7',
-                                issue: 'Volume encryption disabled'
+                                name: k.KeyId.substring(0, 8), type: 'KMS Key', icon: '🔐',
+                                region: config.region, severity: RotationEnabled ? 'pass' : 'warning',
+                                control: 'CC6.7', issue: RotationEnabled ? null : 'Key Rotation disabled'
                             });
                         }
                     }
-                } catch(e) { log.warn("EBS fail", e); }
+                } catch (e) { log.warn("KMS fail", e); }
+            };
 
-                // EBS Snapshots Check
+            // 7. Lambda Functions
+            const checkLambda = async () => {
                 try {
-                    const { Snapshots } = await ec2.send(new DescribeSnapshotsCommand({ OwnerIds: ['self'] }));
-                    for (const snap of (Snapshots || []).slice(0, 10)) {
-                        const { CreateVolumePermissions } = await ec2.send(new DescribeSnapshotAttributeCommand({
-                            Attribute: 'createVolumePermission', SnapshotId: snap.SnapshotId
-                        }));
-                        if (CreateVolumePermissions && CreateVolumePermissions.some(p => p.Group === 'all')) {
+                    const { Functions } = await lambda.send(new ListFunctionsCommand({}));
+                    for (const fn of (Functions || []).slice(0, 15)) {
+                        const deprecated = ['nodejs12.x','nodejs14.x','nodejs16.x','python3.7','python3.8','dotnetcore3.1','ruby2.7'];
+                        const isOld = fn.Runtime && deprecated.some(d => fn.Runtime.includes(d));
+                        if (isOld) {
                             resources.push({
-                                name: snap.SnapshotId, type: 'EBS Snapshot', icon: '📸',
-                                region: config.region, severity: 'critical', control: 'CC6.6',
-                                issue: 'Publicly Restorable'
+                                name: fn.FunctionName, type: 'Lambda', icon: '⚡',
+                                region: config.region, severity: 'critical', control: 'CC7.1',
+                                issue: `Deprecated runtime (${fn.Runtime})`
+                            });
+                        }
+                        if (!fn.VpcConfig || !fn.VpcConfig.VpcId) {
+                            resources.push({
+                                name: fn.FunctionName, type: 'Lambda', icon: '⚡',
+                                region: config.region, severity: 'warning', control: 'CC6.6',
+                                issue: 'Not VPC-attached (public network exposure)'
+                            });
+                        }
+                        if (fn.Environment?.Variables) {
+                            const suspectKeys = Object.keys(fn.Environment.Variables).filter(k =>
+                                /secret|password|key|token|api_key/i.test(k)
+                            );
+                            if (suspectKeys.length > 0) {
+                                resources.push({
+                                    name: fn.FunctionName, type: 'Lambda', icon: '⚡',
+                                    region: config.region, severity: 'warning', control: 'CC6.1',
+                                    issue: `Possible secrets in env vars: ${suspectKeys.join(', ')}`
+                                });
+                            }
+                        }
+                        if (!isOld && fn.VpcConfig?.VpcId && !(fn.Environment?.Variables && Object.keys(fn.Environment.Variables).some(k => /secret|password|key|token|api_key/i.test(k)))) {
+                            resources.push({
+                                name: fn.FunctionName, type: 'Lambda', icon: '⚡',
+                                region: config.region, severity: 'pass', control: 'CC7.1', issue: null
                             });
                         }
                     }
-                } catch(e) { log.warn("EBS snapshots fail", e); }
-            } catch (e) { log.warn("EC2/VPC fail", e); }
+                } catch (e) { log.warn("Lambda fail", e); }
+            };
 
-            // ═══════════════════════════════════════════
-            // 3. RDS — Deep Scan
-            // ═══════════════════════════════════════════
-            try {
-                const { DBInstances } = await rds.send(new DescribeDBInstancesCommand({}));
-                for (const db of DBInstances || []) {
-                    // Encryption at rest
-                    if (!db.StorageEncrypted) {
+            // 8. WAF & Shield
+            const checkWAFAndShield = async () => {
+                try {
+                    const { WebACLs } = await waf.send(new ListWebACLsCommand({ Scope: 'REGIONAL' }));
+                    if (!WebACLs || WebACLs.length === 0) {
                         resources.push({
-                            name: db.DBInstanceIdentifier, type: 'RDS Database', icon: '💾',
-                            region: config.region, severity: 'critical', control: 'CC6.7',
-                            issue: 'Encryption at rest disabled'
+                            name: 'Web Perimeter', type: 'WAF', icon: '🧱',
+                            region: config.region, severity: 'warning', control: 'CC6.7', issue: 'No WAF WebACLs found'
                         });
-                    }
-                    // Backup retention
-                    if ((db.BackupRetentionPeriod || 0) < 7) {
+                    } else {
                         resources.push({
-                            name: db.DBInstanceIdentifier, type: 'RDS Database', icon: '💾',
-                            region: config.region, severity: 'warning', control: 'CC7.2',
-                            issue: `Backup retention < 7 days (currently ${db.BackupRetentionPeriod || 0}d)`
-                        });
-                    }
-                    // Multi-AZ
-                    if (!db.MultiAZ) {
-                        resources.push({
-                            name: db.DBInstanceIdentifier, type: 'RDS Database', icon: '💾',
-                            region: config.region, severity: 'warning', control: 'CC7.1',
-                            issue: 'Multi-AZ disabled (no failover)'
-                        });
-                    }
-                    // Publicly accessible
-                    if (db.PubliclyAccessible) {
-                        resources.push({
-                            name: db.DBInstanceIdentifier, type: 'RDS Database', icon: '💾',
-                            region: config.region, severity: 'critical', control: 'CC6.6',
-                            issue: 'Publicly accessible'
-                        });
-                    }
-                    // If all pass, add a clean entry
-                    if (db.StorageEncrypted && (db.BackupRetentionPeriod || 0) >= 7 && db.MultiAZ && !db.PubliclyAccessible) {
-                        resources.push({
-                            name: db.DBInstanceIdentifier, type: 'RDS Database', icon: '💾',
+                            name: `${WebACLs.length} WebACL(s)`, type: 'WAF', icon: '🧱',
                             region: config.region, severity: 'pass', control: 'CC6.7', issue: null
                         });
                     }
-                }
-            } catch (e) { log.warn("RDS fail", e); }
+                } catch (e) { log.warn("WAF fail", e); }
 
-            // ═══════════════════════════════════════════
-            // 4. CloudTrail — Deep Scan
-            // ═══════════════════════════════════════════
-            try {
-                const { TrailList } = await cloudtrail.send(new DescribeTrailsCommand({}));
-                if (!TrailList || TrailList.length === 0) {
+                try {
+                    const { SubscriptionState } = await shield.send(new GetSubscriptionStateCommand({}));
+                    const isSubscribed = SubscriptionState === 'SUBSCRIBED' || SubscriptionState === 'ACTIVE';
                     resources.push({
-                        name: 'Global', type: 'CloudTrail', icon: '📋',
-                        region: 'Global', severity: 'critical', control: 'CC7.2', issue: 'No trail enabled'
+                        name: 'Shield Protection', type: 'Shield', icon: '🛡️',
+                        region: 'Global',
+                        severity: isSubscribed ? 'pass' : 'warning',
+                        control: 'CC6.7',
+                        issue: isSubscribed ? null : 'Shield Advanced not active'
                     });
-                } else {
-                    for (const t of TrailList) {
-                        // Log validation
-                        if (!t.LogFileValidationEnabled) {
-                            resources.push({
-                                name: t.Name, type: 'CloudTrail', icon: '📋',
-                                region: t.HomeRegion, severity: 'warning', control: 'CC7.2',
-                                issue: 'Log Validation disabled'
-                            });
-                        }
-                        // Multi-region
-                        if (!t.IsMultiRegionTrail) {
-                            resources.push({
-                                name: t.Name, type: 'CloudTrail', icon: '📋',
-                                region: t.HomeRegion, severity: 'warning', control: 'CC7.2',
-                                issue: 'Not multi-region (blind spots in other regions)'
-                            });
-                        }
-                        // Log encryption
-                        if (!t.KmsKeyId) {
-                            resources.push({
-                                name: t.Name, type: 'CloudTrail', icon: '📋',
-                                region: t.HomeRegion, severity: 'warning', control: 'CC6.7',
-                                issue: 'Log encryption disabled (no KMS key)'
-                            });
-                        }
-                        // All pass
-                        if (t.LogFileValidationEnabled && t.IsMultiRegionTrail && t.KmsKeyId) {
-                            resources.push({
-                                name: t.Name, type: 'CloudTrail', icon: '📋',
-                                region: t.HomeRegion, severity: 'pass', control: 'CC7.2', issue: null
-                            });
-                        }
-                    }
-                }
-            } catch (e) { log.warn("CloudTrail fail", e); }
+                } catch (e) { log.warn("Shield fail", e); }
+            };
 
-            // ═══════════════════════════════════════════
-            // 5. Macie
-            // ═══════════════════════════════════════════
-            try {
-                const { status } = await macie.send(new GetMacieSessionCommand({}));
-                resources.push({
-                    name: 'Macie Service', type: 'Macie', icon: '🔍',
-                    region: 'Global', severity: status === 'ENABLED' ? 'pass' : 'warning',
-                    control: 'Art. 25', issue: status === 'ENABLED' ? null : 'Automated Data Discovery disabled'
-                });
-            } catch (e) { 
-                resources.push({
-                    name: 'Macie Service', type: 'Macie', icon: '🔍',
-                    region: 'Global', severity: 'warning', control: 'Art. 25',
-                    issue: 'Macie not initialized'
-                });
-            }
+            // Execute all service audits concurrently in parallel
+            await Promise.allSettled([
+                checkS3(),
+                checkEC2(),
+                checkRDS(),
+                checkCloudTrail(),
+                checkMacie(),
+                checkKMS(),
+                checkLambda(),
+                checkWAFAndShield()
+            ]);
 
-            // ═══════════════════════════════════════════
-            // 6. KMS Keys — Deep Scan
-            // ═══════════════════════════════════════════
-            try {
-                const { Keys } = await kms.send(new ListKeysCommand({}));
-                for (const k of (Keys || []).slice(0, 5)) {
-                    const { KeyMetadata } = await kms.send(new DescribeKeyCommand({ KeyId: k.KeyId }));
-                    if (KeyMetadata.KeyManager === 'CUSTOMER') {
-                        const { RotationEnabled } = await kms.send(new GetKeyRotationStatusCommand({ KeyId: k.KeyId }));
-                        resources.push({
-                            name: k.KeyId.substring(0, 8), type: 'KMS Key', icon: '🔐',
-                            region: config.region, severity: RotationEnabled ? 'pass' : 'warning',
-                            control: 'CC6.7', issue: RotationEnabled ? null : 'Key Rotation disabled'
-                        });
-                    }
-                }
-            } catch (e) { log.warn("KMS fail", e); }
-
-            // ═══════════════════════════════════════════
-            // 7. Lambda — Deep Scan
-            // ═══════════════════════════════════════════
-            try {
-                const { Functions } = await lambda.send(new ListFunctionsCommand({}));
-                for (const fn of (Functions || []).slice(0, 15)) {
-                    const issues = [];
-                    // Deprecated runtime check
-                    const deprecated = ['nodejs12.x','nodejs14.x','nodejs16.x','python3.7','python3.8','dotnetcore3.1','ruby2.7'];
-                    const isOld = fn.Runtime && deprecated.some(d => fn.Runtime.includes(d));
-                    if (isOld) {
-                        resources.push({
-                            name: fn.FunctionName, type: 'Lambda', icon: '⚡',
-                            region: config.region, severity: 'critical', control: 'CC7.1',
-                            issue: `Deprecated runtime (${fn.Runtime})`
-                        });
-                    }
-                    // VPC attachment check
-                    if (!fn.VpcConfig || !fn.VpcConfig.VpcId) {
-                        resources.push({
-                            name: fn.FunctionName, type: 'Lambda', icon: '⚡',
-                            region: config.region, severity: 'warning', control: 'CC6.6',
-                            issue: 'Not VPC-attached (public network exposure)'
-                        });
-                    }
-                    // Environment variable secrets exposure
-                    if (fn.Environment?.Variables) {
-                        const suspectKeys = Object.keys(fn.Environment.Variables).filter(k =>
-                            /secret|password|key|token|api_key/i.test(k)
-                        );
-                        if (suspectKeys.length > 0) {
-                            resources.push({
-                                name: fn.FunctionName, type: 'Lambda', icon: '⚡',
-                                region: config.region, severity: 'warning', control: 'CC6.1',
-                                issue: `Possible secrets in env vars: ${suspectKeys.join(', ')}`
-                            });
-                        }
-                    }
-                    // If all pass
-                    if (!isOld && fn.VpcConfig?.VpcId && !(fn.Environment?.Variables && Object.keys(fn.Environment.Variables).some(k => /secret|password|key|token|api_key/i.test(k)))) {
-                        resources.push({
-                            name: fn.FunctionName, type: 'Lambda', icon: '⚡',
-                            region: config.region, severity: 'pass', control: 'CC7.1', issue: null
-                        });
-                    }
-                }
-            } catch (e) { log.warn("Lambda fail", e); }
-
-            // ═══════════════════════════════════════════
-            // 8. WAF & Shield
-            // ═══════════════════════════════════════════
-            try {
-                const { WebACLs } = await waf.send(new ListWebACLsCommand({ Scope: 'REGIONAL' }));
-                if (!WebACLs || WebACLs.length === 0) {
-                    resources.push({
-                        name: 'Web Perimeter', type: 'WAF', icon: '🧱',
-                        region: config.region, severity: 'warning', control: 'CC6.7', issue: 'No WAF WebACLs found'
-                    });
-                } else {
-                    resources.push({
-                        name: `${WebACLs.length} WebACL(s)`, type: 'WAF', icon: '🧱',
-                        region: config.region, severity: 'pass', control: 'CC6.7', issue: null
-                    });
-                }
-            } catch (e) { log.warn("WAF fail", e); }
-
-            try {
-                const { SubscriptionState } = await shield.send(new GetSubscriptionStateCommand({}));
-                const isSubscribed = SubscriptionState === 'SUBSCRIBED' || SubscriptionState === 'ACTIVE';
-                resources.push({
-                    name: 'Shield Protection', type: 'Shield', icon: '🛡️',
-                    region: 'Global',
-                    severity: isSubscribed ? 'pass' : 'warning',
-                    control: 'CC6.7',
-                    issue: isSubscribed ? null : 'Shield Advanced not active'
-                });
-            } catch (e) { log.warn("Shield fail", e); }
-
-            // ═══════════════════════════════════════════
             // 9. IAM — Deep Scan
-            // ═══════════════════════════════════════════
             try {
                 const { SummaryMap } = await iam.send(new GetAccountSummaryCommand({}));
                 
