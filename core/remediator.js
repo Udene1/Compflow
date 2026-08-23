@@ -1,6 +1,8 @@
 import { runRemediation as remediateAWS } from './providers/aws_remediator.js';
 import { runRemediation as remediateGCP } from './providers/gcp_remediator.js';
 import { runRemediation as remediateAzure } from './providers/azure_remediator.js';
+import { runRemediation as remediateDO } from './providers/digitalocean_remediator.js';
+import { runRemediation as remediateHetzner } from './providers/hetzner_remediator.js';
 import { log } from './logger.js';
 
 export async function runRemediation(provider, credentials, resourceType, resourceName, issue) {
@@ -13,6 +15,11 @@ export async function runRemediation(provider, credentials, resourceType, resour
             return await remediateGCP(provider, credentials, resourceType, resourceName, issue);
         case 'azure':
             return await remediateAzure(provider, credentials, resourceType, resourceName, issue);
+        case 'digitalocean':
+        case 'do':
+            return await remediateDO(provider, credentials, resourceType, resourceName, issue);
+        case 'hetzner':
+            return await remediateHetzner(provider, credentials, resourceType, resourceName, issue);
         default:
             log.warn(`Remediation not yet implemented for ${provider}`);
             return { success: false, message: `Remediation for ${provider} is coming soon.` };

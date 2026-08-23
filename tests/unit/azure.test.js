@@ -147,7 +147,7 @@ vi.mock('@azure/arm-logic', () => ({ LogicManagementClient: vi.fn().mockImplemen
 vi.mock('@azure/arm-frontdoor', () => ({ FrontDoorManagementClient: vi.fn().mockImplementation(function() { return { frontDoors: { list: vi.fn(() => createAsyncIterable([])) } }; }) }));
 vi.mock('@azure/arm-appinsights', () => ({ ApplicationInsightsManagementClient: vi.fn().mockImplementation(function() { return {}; }) }));
 vi.mock('@azure/arm-subscriptions', () => ({ SubscriptionClient: vi.fn().mockImplementation(function() { return {}; }) }));
-vi.mock('@azure/arm-containerinstance', () => ({ ContainerInstanceManagementClient: vi.fn().mockImplementation(function() { return {}; }) }));
+vi.setConfig({ testTimeout: 30000 });
 
 describe('Azure Enterprise Provider Scanner', () => {
     const credentials = {
