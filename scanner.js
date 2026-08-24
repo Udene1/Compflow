@@ -276,21 +276,22 @@ window.Scanner = (() => {
         const sevClass = res.severity === 'pass' ? 'pass' : res.severity === 'warning' ? 'warning' : 'critical';
         const sevLabel = res.severity === 'pass' ? '✓ Pass' : res.severity === 'warning' ? '⚠ Warning' : '✕ Critical';
 
-        // Generate control badges
-        let controlsHtml = '';
-        if (res.controls) {
-            if (res.controls.soc2) controlsHtml += `<span class="rem-control-tag soc2" title="SOC2: ${res.controls.soc2.join(', ')}">S</span> `;
-            if (res.controls.gdpr) controlsHtml += `<span class="rem-control-tag gdpr" title="GDPR: ${res.controls.gdpr.join(', ')}">G</span> `;
-            if (res.controls.hipaa) controlsHtml += `<span class="rem-control-tag hipaa" title="HIPAA: ${res.controls.hipaa.join(', ')}">H</span> `;
-            if (res.controls.iso27001) controlsHtml += `<span class="rem-control-tag iso" title="ISO 27001: ${res.controls.iso27001.join(', ')}">I</span> `;
-        } else {
-            controlsHtml = `<span class="rem-control-tag">${res.control || 'N/A'}</span>`;
+        // Evaluate custom organizational governance policies
+        let policyBadgesHtml = '';
+        if (window.PoliciesUI && typeof window.PoliciesUI.evaluateResource === 'function') {
+            const policyViolations = window.PoliciesUI.evaluateResource(res);
+            if (policyViolations.length > 0) {
+                policyBadgesHtml = policyViolations.map(v => 
+                    `<span class="policy-violation-badge" title="${v.description}">🏷️ ${v.policyId}</span>`
+                ).join(' ');
+            }
         }
 
         tr.innerHTML = `
             <td><div class="resource-name">${res.icon} ${res.name}</div>
                 <div style="font-size:0.72rem; color:var(--text-dim); margin-top:2px;">
                     ${res.issue || 'No issues'}
+                    ${policyBadgesHtml}
                     ${res.requires_legal_review ? `<div class="legal-tag" title="${res.legal_review_reason}">⚠️ Legal Review</div>` : ''}
                 </div></td>
             <td><span class="resource-type">${res.type}</span></td>

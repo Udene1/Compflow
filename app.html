@@ -57,6 +57,9 @@
                 <a class="nav-item" data-panel="tenants" id="nav-tenants">
                     <span class="icon">👥</span> Governance Registry
                 </a>
+                <a class="nav-item" data-panel="policies" id="nav-policies">
+                    <span class="icon">📜</span> Custom Policies
+                </a>
                 <a class="nav-item" id="nav-settings" onclick="CloudConnect.openSettings()">
                     <span class="icon">⚙️</span> Connection Settings
                 </a>
@@ -73,12 +76,14 @@
                     <span class="icon">⚡</span> Live Terminal
                 </a>
 
-                <div class="nav-section-label">Evidence</div>
+                <div class="nav-section-label">Evidence & Audit</div>
                 <a class="nav-item" data-panel="evidence" id="nav-evidence">
-                    <span class="icon">📸</span> Evidence
+                    <span class="icon">📸</span> Evidence Vault
                     <span class="badge-count" id="evidence-badge" style="display:none">0</span>
                 </a>
-
+                <a class="nav-item" data-panel="auditor" id="nav-auditor">
+                    <span class="icon">⚖️</span> Auditor Portal
+                </a>
                 <a class="nav-item" data-panel="reports" id="nav-reports">
                     <span class="icon">📄</span> Audit Report
                 </a>
@@ -106,6 +111,7 @@
                     <div id="active-fw-badge" class="fw-status-badge">SOC2 Type II</div>
                 </div>
                 <div class="topbar-actions">
+                    <div id="auth-profile-widget" class="auth-profile-widget"></div>
                     <div class="connection-chips" id="connection-chips"></div>
                     <button class="btn btn-secondary btn-sm" onclick="runShowcase()">✨ Play Show</button>
                     <a href="index.html" class="btn btn-secondary btn-sm">← Landing Page</a>
@@ -176,7 +182,10 @@
                             <h3>Governance Registry</h3>
                             <p style="color:var(--text-muted); font-size:0.85rem;">Manage multi-tenant cloud environments and auto-remediation policies.</p>
                         </div>
-                        <button class="btn btn-primary" onclick="TenantManager.openOnboarding()">➕ Onboard Tenant</button>
+                        <div style="display:flex; gap:0.5rem;">
+                            <button class="btn btn-secondary" onclick="TenantManager.triggerAutonomousSweep('all')">⚡ Trigger Autonomous Sweep</button>
+                            <button class="btn btn-primary" onclick="TenantManager.openOnboarding()">➕ Onboard Tenant</button>
+                        </div>
                     </div>
                     
                     <div class="tenant-grid" id="tenant-list">
@@ -187,6 +196,113 @@
                         <div class="icon">👥</div>
                         <h3>No tenants registered</h3>
                         <p>Start by onboarding your first cloud environment to the registry.</p>
+                    </div>
+                </div>
+
+                <!-- ══════ Panel: Custom Policies ══════ -->
+                <div class="panel" id="panel-policies">
+                    <div class="panel-header-actions">
+                        <div>
+                            <h3>Custom Governance Policies Engine</h3>
+                            <p style="color:var(--text-muted); font-size:0.85rem;">Define organization-wide infrastructure guardrails, geographic restrictions, and tagging standards.</p>
+                        </div>
+                        <div style="display:flex; gap:0.5rem">
+                            <button class="btn btn-secondary btn-sm" onclick="PoliciesUI.resetToDefaults()">🔄 Reset Defaults</button>
+                            <button class="btn btn-primary btn-sm" onclick="PoliciesUI.save()">💾 Save Policies</button>
+                        </div>
+                    </div>
+
+                    <div class="policy-card-grid">
+                        <!-- Allowed Regions Card -->
+                        <div class="policy-card">
+                            <div class="policy-card-header">
+                                <div>
+                                    <div class="policy-id-badge">ORG-GOV-01</div>
+                                    <h4>Restricted Cloud Regions</h4>
+                                </div>
+                                <span class="policy-enforcement-pill">Enforced</span>
+                            </div>
+                            <p class="policy-desc">Authorize specific geographic deployment regions. Resources detected outside these zones are flagged as non-compliant.</p>
+                            <div class="policy-chips-container" id="policy-region-chips"></div>
+                        </div>
+
+                        <!-- Mandatory Tags Card -->
+                        <div class="policy-card">
+                            <div class="policy-card-header">
+                                <div>
+                                    <div class="policy-id-badge">ORG-GOV-02</div>
+                                    <h4>Mandatory Resource Tagging</h4>
+                                </div>
+                                <span class="policy-enforcement-pill">Enforced</span>
+                            </div>
+                            <p class="policy-desc">Every provisioned resource must contain these metadata tags for accountability and cost allocation.</p>
+                            <div class="policy-tag-adder">
+                                <input type="text" id="policy-tag-input" placeholder="e.g. CostCenter, ProjectID" onkeydown="if(event.key === 'Enter') PoliciesUI.addTag()">
+                                <button class="btn btn-secondary btn-sm" onclick="PoliciesUI.addTag()">+ Add Tag</button>
+                            </div>
+                            <div class="policy-tags-container" id="policy-tags-container"></div>
+                        </div>
+
+                        <!-- Whitelisted Inbound Ports Card -->
+                        <div class="policy-card">
+                            <div class="policy-card-header">
+                                <div>
+                                    <div class="policy-id-badge">ORG-NET-01</div>
+                                    <h4>Inbound Port Security Whitelist</h4>
+                                </div>
+                                <span class="policy-enforcement-pill">Enforced</span>
+                            </div>
+                            <p class="policy-desc">Permissible publicly open inbound ports. Any security group or firewall opening non-whitelisted ports is flagged immediately.</p>
+                            <div class="policy-tag-adder">
+                                <input type="number" id="policy-port-input" placeholder="e.g. 443, 80" min="1" max="65535" onkeydown="if(event.key === 'Enter') PoliciesUI.addPort()">
+                                <button class="btn btn-secondary btn-sm" onclick="PoliciesUI.addPort()">+ Add Port</button>
+                            </div>
+                            <div class="policy-tags-container" id="policy-ports-container"></div>
+                        </div>
+
+                        <!-- Automated Backup & Encryption Rules -->
+                        <div class="policy-card">
+                            <div class="policy-card-header">
+                                <div>
+                                    <div class="policy-id-badge">ORG-DATA-01</div>
+                                    <h4>Automated Backup & Data Governance</h4>
+                                </div>
+                                <span class="policy-enforcement-pill">Enforced</span>
+                            </div>
+                            <p class="policy-desc">Automated security baselines applied across storage, databases, and disk volumes.</p>
+                            <div class="policy-toggle-list">
+                                <div class="policy-toggle-item">
+                                    <div>
+                                        <div class="toggle-title">Enforce Automated Database Backups</div>
+                                        <div class="toggle-sub">Mandates automated daily snapshots on RDS, Cloud SQL, and Azure SQL.</div>
+                                    </div>
+                                    <label class="switch">
+                                        <input type="checkbox" id="policy-toggle-backups" onchange="PoliciesUI.updateToggles()">
+                                        <span class="slider"></span>
+                                    </label>
+                                </div>
+                                <div class="policy-toggle-item">
+                                    <div>
+                                        <div class="toggle-title">Mandatory At-Rest Encryption (AES-256 / KMS)</div>
+                                        <div class="toggle-sub">Requires encryption on all S3 buckets, EBS volumes, and Azure Disks.</div>
+                                    </div>
+                                    <label class="switch">
+                                        <input type="checkbox" id="policy-toggle-encryption" onchange="PoliciesUI.updateToggles()">
+                                        <span class="slider"></span>
+                                    </label>
+                                </div>
+                                <div class="policy-toggle-item">
+                                    <div>
+                                        <div class="toggle-title">Object Storage Versioning & MFA Delete</div>
+                                        <div class="toggle-sub">Prevents accidental or malicious object destruction in S3 and Azure Blobs.</div>
+                                    </div>
+                                    <label class="switch">
+                                        <input type="checkbox" id="policy-toggle-versioning" onchange="PoliciesUI.updateToggles()">
+                                        <span class="slider"></span>
+                                    </label>
+                                </div>
+                            </div>
+                        </div>
                     </div>
                 </div>
 
@@ -368,6 +484,111 @@
                         <p>Run a scan and remediate issues. Evidence is automatically captured for every action.</p>
                     </div>
                     <div id="evidence-list" class="evidence-list"></div>
+                </div>
+
+                <!-- ══════ Panel: Auditor Portal ══════ -->
+                <div class="panel" id="panel-auditor">
+                    <div class="auditor-hero-banner">
+                        <div class="auditor-hero-content">
+                            <div class="trust-badge">⚖️ SOC2 TYPE II CRYPTOGRAPHIC PORTAL</div>
+                            <h3 style="margin-top:0.4rem; font-size:1.4rem;">Third-Party Auditor Verification & Evidence Access</h3>
+                            <p style="color:var(--text-muted); font-size:0.88rem; margin-top:0.3rem;">Generate time-bounded, cryptographically signed access tokens for external compliance auditors (PwC, EY, Deloitte, KPMG) with automated HMAC-SHA256 evidence package verification.</p>
+                        </div>
+                        <div class="auditor-hero-actions">
+                            <button class="btn btn-primary" onclick="Evidence.downloadAuditorPackage()">📦 Export Signed Bundle (.json)</button>
+                            <button class="btn btn-secondary" onclick="window.print()">📑 Export Executive PDF</button>
+                        </div>
+                    </div>
+
+                    <div class="auditor-grid">
+                        <!-- Card 1: Issue Auditor Access Token -->
+                        <div class="auditor-card">
+                            <div class="auditor-card-header">
+                                <div class="card-icon">🔑</div>
+                                <div>
+                                    <h4>Issue Auditor Access Token</h4>
+                                    <p style="color:var(--text-muted); font-size:0.8rem;">Grant read-only, expiring access to verified infrastructure proofs.</p>
+                                </div>
+                            </div>
+                            
+                            <div class="input-group" style="margin-top:1.2rem;">
+                                <label>Target Environment / Tenant</label>
+                                <select id="auditor-tenant-select">
+                                    <option value="prod-aws-env">AWS Production Environment</option>
+                                    <option value="azure-cloud-core">Azure Enterprise Core</option>
+                                    <option value="gcp-analytics-hub">GCP Analytics Cluster</option>
+                                    <option value="hetzner-gpu-nodes">Hetzner Dedicated Fleet</option>
+                                </select>
+                            </div>
+
+                            <div class="input-group">
+                                <label>Auditor Email Address <span style="color:var(--danger)">*</span></label>
+                                <input type="email" id="auditor-email-input" placeholder="lead.auditor@firm.com" value="auditor@complianceflow.icu">
+                            </div>
+
+                            <div class="input-group">
+                                <label>Access Duration</label>
+                                <select id="auditor-expiry-select">
+                                    <option value="24">24 Hours (Standard Review)</option>
+                                    <option value="48" selected>48 Hours (Full Audit Period)</option>
+                                    <option value="72">72 Hours (Extended Deep Dive)</option>
+                                    <option value="168">7 Days (Comprehensive Certification)</option>
+                                </select>
+                            </div>
+
+                            <button class="btn btn-primary" style="width:100%; margin-top:0.8rem;" onclick="Evidence.issueAuditorToken()">
+                                ⚡ Generate Cryptographic Auditor Token
+                            </button>
+
+                            <!-- Token Result Display -->
+                            <div id="auditor-token-result" class="auditor-token-result" style="display:none;">
+                                <div class="token-success-header">
+                                    <span class="pulse-dot green"></span> Token Issued & Signed with HMAC-SHA256
+                                </div>
+                                <div class="token-row">
+                                    <label>Auditor Token:</label>
+                                    <code id="auditor-token-value"></code>
+                                </div>
+                                <div class="token-row">
+                                    <label>Expires At:</label>
+                                    <span id="auditor-token-expires"></span>
+                                </div>
+                                <div class="token-row">
+                                    <label>Direct Portal URL:</label>
+                                    <div class="copy-url-group">
+                                        <input type="text" id="auditor-portal-link" readonly>
+                                        <button class="btn btn-secondary btn-sm" onclick="Evidence.copyPortalLink()">📋 Copy</button>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Card 2: Interactive Tamper Detection & Verifier -->
+                        <div class="auditor-card">
+                            <div class="auditor-card-header">
+                                <div class="card-icon">🛡️</div>
+                                <div>
+                                    <h4>Cryptographic Package Verifier</h4>
+                                    <p style="color:var(--text-muted); font-size:0.8rem;">Verify that an evidence bundle has not been modified, forged, or tampered with.</p>
+                                </div>
+                            </div>
+
+                            <div class="input-group" style="margin-top:1.2rem;">
+                                <label>Paste Signed Evidence Bundle JSON</label>
+                                <textarea id="verify-package-input" placeholder='Paste export JSON bundle here (starts with { "manifest": ... })' style="height:140px; font-family:var(--font-mono); font-size:0.75rem;"></textarea>
+                            </div>
+
+                            <button class="btn btn-secondary" style="width:100%;" onclick="Evidence.verifyEvidencePackage()">
+                                🔍 Interrogate Cryptographic Authenticity
+                            </button>
+
+                            <!-- Verification Result Card -->
+                            <div id="verify-result-card" class="verify-result-card" style="display:none;">
+                                <div id="verify-result-status"></div>
+                                <div id="verify-result-details" class="verify-result-details"></div>
+                            </div>
+                        </div>
+                    </div>
                 </div>
 
                 <!-- ══════ Panel: Reports ══════ -->
@@ -557,6 +778,15 @@
                     </div>
 
                     <div class="input-group">
+                        <label>Scan Frequency</label>
+                        <select id="onboard-frequency">
+                            <option value="daily" selected>Daily (24h)</option>
+                            <option value="weekly">Weekly (7d)</option>
+                            <option value="continuous">Continuous (15s Drift Engine)</option>
+                        </select>
+                    </div>
+
+                    <div class="input-group">
                         <label>Report Delivery Email <span style="color:var(--danger)">*</span></label>
                         <input type="email" id="onboard-email" placeholder="compliance@company.com" required>
                         <small style="color:var(--text-dim); font-size:0.72rem;">Automated scan reports & alerts will be sent here.</small>
@@ -568,6 +798,66 @@
                     <div class="modal-actions">
                         <button class="btn btn-secondary" onclick="TenantManager.closeOnboarding()">Cancel</button>
                         <button class="btn btn-primary" onclick="TenantManager.saveTenant()">Authorize & Save</button>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- ══════ Modal: Team Authentication & SSO ══════ -->
+        <div class="modal-overlay" id="modal-auth">
+            <div class="modal-card" style="max-width: 460px;">
+                <div class="modal-header">
+                    <h3>Team Authentication & SSO</h3>
+                    <button class="modal-close" onclick="AuthUI.closeAuthModal()">✕</button>
+                </div>
+                <div class="modal-body">
+                    <p style="font-size:0.85rem; color:var(--text-muted); margin-bottom:1.5rem;">
+                        Sign in to access your organization's compliance dashboard, automated sweeps, and evidence vault.
+                    </p>
+
+                    <!-- OAuth SSO Options -->
+                    <div class="auth-provider-buttons">
+                        <button class="btn btn-sso btn-google" onclick="AuthUI.signInWithGoogle()">
+                            <span class="provider-logo">🌐</span> Continue with Google Workspace
+                        </button>
+                        <button class="btn btn-sso btn-github" onclick="AuthUI.signInWithGitHub()">
+                            <span class="provider-logo">🐙</span> Continue with GitHub Enterprise
+                        </button>
+                    </div>
+
+                    <div class="auth-divider">
+                        <span>OR QUICK RBAC ROLE TEST</span>
+                    </div>
+
+                    <div class="quick-roles-grid">
+                        <button class="btn-role-select" onclick="AuthUI.quickDevLogin('ADMIN')">
+                            <span class="role-icon">👑</span>
+                            <div>
+                                <div class="role-name">Admin / Owner</div>
+                                <div class="role-desc">Full access & tenant management</div>
+                            </div>
+                        </button>
+                        <button class="btn-role-select" onclick="AuthUI.quickDevLogin('ENGINEER')">
+                            <span class="role-icon">⚡</span>
+                            <div>
+                                <div class="role-name">Cloud Engineer</div>
+                                <div class="role-desc">Trigger scans & auto-remediations</div>
+                            </div>
+                        </button>
+                        <button class="btn-role-select" onclick="AuthUI.quickDevLogin('AUDITOR')">
+                            <span class="role-icon">⚖️</span>
+                            <div>
+                                <div class="role-name">SOC2 Auditor</div>
+                                <div class="role-desc">View evidence & export bundles</div>
+                            </div>
+                        </button>
+                        <button class="btn-role-select" onclick="AuthUI.quickDevLogin('VIEWER')">
+                            <span class="role-icon">👁️</span>
+                            <div>
+                                <div class="role-name">Read-Only Viewer</div>
+                                <div class="role-desc">Audit logs & status dashboards</div>
+                            </div>
+                        </button>
                     </div>
                 </div>
             </div>
@@ -669,6 +959,8 @@
 
 
     <script src="live-terminal.js?v=2.1"></script>
+    <script src="auth-ui.js"></script>
+    <script src="policies-ui.js"></script>
     <script src="tenant-manager.js?v=2.1"></script>
     <script src="frameworks.js?v=2.1"></script>
     <script src="evidence.js?v=2.1"></script>
@@ -688,10 +980,12 @@
         const titles = {
             connect: 'Cloud Connect',
             tenants: 'Governance Registry',
+            policies: 'Governance Policies',
             scan: 'Resource Scanner',
             remediate: 'Remediation Center',
             terminal: 'Live Terminal',
             evidence: 'Evidence Vault',
+            auditor: 'Auditor Portal',
             reports: 'Audit Report'
         };
 
@@ -733,7 +1027,7 @@
         async function runShowcase() {
             if (typeof showToast !== 'function') return;
             showToast("🎬 Starting Platform Showcase...");
-            const sequence = ['connect', 'tenants', 'scan', 'remediate', 'terminal', 'evidence', 'reports'];
+            const sequence = ['connect', 'tenants', 'policies', 'scan', 'remediate', 'terminal', 'evidence', 'auditor', 'reports'];
             for (const p of sequence) {
                 switchPanel(p);
                 const nav = document.querySelector(`.nav-item[data-panel="${p}"]`);

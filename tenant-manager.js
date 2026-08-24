@@ -5,14 +5,15 @@ window.TenantManager = (() => {
         await loadTenants();
     }
 
-    // Use relative paths for Vercel deployment
-
     async function loadTenants() {
         try {
             const res = await fetch(`${window.COMPLIANCE_API_URL}/api/tenants`);
             const data = await res.json();
             tenants = data.tenants || [];
             renderTenants();
+            if (window.Evidence && typeof window.Evidence.renderAuditorPanel === 'function') {
+                window.Evidence.renderAuditorPanel();
+            }
         } catch (e) {
             console.error("Failed to load tenants", e);
         }
@@ -38,11 +39,17 @@ window.TenantManager = (() => {
                 `<span class="status-badge warn" style="font-size:0.65rem; margin-left:0.5rem;">${t.configStatus}</span>` : 
                 `<span class="status-badge pass" style="font-size:0.65rem; margin-left:0.5rem;">Active</span>`;
             
+            const freq = t.scheduleFrequency || 'Daily (24h)';
+            
             return `
             <div class="tenant-card">
                 <div class="tenant-info">
                     <h4>${t.name} <span class="provider-tag">${t.provider.toUpperCase()}</span> ${statusBadge}</h4>
-                    <code>${t.roleArn ? t.roleArn.split('/').pop() : 'API Key Active'}</code>
+                    <code>${t.roleArn ? t.roleArn.split('/').pop() : (t.provider.toUpperCase() + ' Connected')}</code>
+                    <div style="margin-top:0.4rem; font-size:0.75rem; color:var(--text-muted);">
+                        <span>⏱️ Schedule: <strong>${freq}</strong></span>
+                        <span style="margin-left:0.8rem;">📧 ${t.email || 'N/A'}</span>
+                    </div>
                 </div>
                 <div class="tenant-controls">
                     <div class="toggle-group">
@@ -60,13 +67,13 @@ window.TenantManager = (() => {
     }
 
     function openOnboarding() {
-        console.log("Opening Onboarding Modal...");
         const modal = document.getElementById('modal-onboarding');
         if (modal) modal.classList.add('active');
     }
 
     function closeOnboarding() {
-        document.getElementById('modal-onboarding').classList.remove('active');
+        const modal = document.getElementById('modal-onboarding');
+        if (modal) modal.classList.remove('active');
     }
 
     function updateOnboardFields() {
@@ -128,15 +135,15 @@ window.TenantManager = (() => {
     }
 
     function updatePathPreview() {
-        const accId = document.getElementById('onboard-aws-account').value;
+        const accId = document.getElementById('onboard-aws-account')?.value;
         const wrap = document.getElementById('arn-preview-wrap');
         const preview = document.getElementById('arn-preview');
         
         if (accId && accId.length === 12) {
-            wrap.style.display = 'block';
-            preview.textContent = `arn:aws:iam::${accId}:role/ComplianceFlow-AINS-Scanner`;
+            if (wrap) wrap.style.display = 'block';
+            if (preview) preview.textContent = `arn:aws:iam::${accId}:role/ComplianceFlow-AINS-Scanner`;
         } else {
-            wrap.style.display = 'none';
+            if (wrap) wrap.style.display = 'none';
         }
     }
 
@@ -144,6 +151,7 @@ window.TenantManager = (() => {
         const provider = document.getElementById('onboard-provider').value;
         const name = document.getElementById('onboard-name').value;
         const email = document.getElementById('onboard-email').value;
+        const frequency = document.getElementById('onboard-frequency')?.value || 'daily';
         const autoRemediate = document.getElementById('onboard-auto').checked;
 
         let credentials = {};
@@ -151,36 +159,32 @@ window.TenantManager = (() => {
         let quickLink = null;
         
         if (provider === 'aws') {
-            const awsAccountId = document.getElementById('onboard-aws-account').value;
+            const awsAccountId = document.getElementById('onboard-aws-account')?.value;
             if (!awsAccountId || !/^\d{12}$/.test(awsAccountId)) {
                 return alert("A valid 12-digit AWS Account ID is required");
             }
             
-            // Generate unique ExternalId and deterministic ARN
             externalId = 'CF-EXT-' + crypto.randomUUID().toUpperCase();
             const roleArn = `arn:aws:iam::${awsAccountId}:role/ComplianceFlow-AINS-Scanner`;
-            
-            // USE VERCEL HOSTED TEMPLATE (Case-Sensitive & Encoded)
-            // Updated to use the public folder for stronger support
             const s3Url = "https://comp-flow.vercel.app/public/complianceflow-iam-setup.yaml";
             const encodedUrl = encodeURIComponent(s3Url);
             quickLink = `https://console.aws.amazon.com/cloudformation/home?region=us-east-1#/stacks/create/review?templateURL=${encodedUrl}&stackName=ComplianceFlow-Integration&param_ExternalId=${encodeURIComponent(externalId)}`;
             
             credentials = { roleArn, externalId, configStatus: 'Awaiting AWS Setup' };
         } else if (provider === 'gcp') {
-            const jsonKey = document.getElementById('onboard-gcp-json').value;
+            const jsonKey = document.getElementById('onboard-gcp-json')?.value;
             if (!jsonKey) return alert("GCP JSON Key is required");
             try { JSON.parse(jsonKey); } catch(e) { return alert("Invalid JSON format"); }
             credentials = { serviceAccountJson: jsonKey };
         } else if (provider === 'azure') {
-            const tenantId = document.getElementById('onboard-azure-tenant').value;
-            const clientId = document.getElementById('onboard-azure-client').value;
-            const clientSecret = document.getElementById('onboard-azure-secret').value;
-            const subscriptionId = document.getElementById('onboard-azure-sub').value;
+            const tenantId = document.getElementById('onboard-azure-tenant')?.value;
+            const clientId = document.getElementById('onboard-azure-client')?.value;
+            const clientSecret = document.getElementById('onboard-azure-secret')?.value;
+            const subscriptionId = document.getElementById('onboard-azure-sub')?.value;
             if (!tenantId || !clientId || !clientSecret || !subscriptionId) return alert("All Azure fields are required");
             credentials = { tenantId, clientId, clientSecret, subscriptionId };
         } else {
-            const apiToken = document.getElementById('onboard-token').value;
+            const apiToken = document.getElementById('onboard-token')?.value;
             if (!apiToken) return alert("API Token is required");
             credentials = { apiToken };
         }
@@ -192,7 +196,14 @@ window.TenantManager = (() => {
             const res = await fetch(`${window.COMPLIANCE_API_URL}/api/tenants`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ provider, name, email, autoRemediate, ...credentials })
+                body: JSON.stringify({ 
+                    provider, 
+                    name, 
+                    email, 
+                    scheduleFrequency: frequency,
+                    autoRemediate, 
+                    ...credentials 
+                })
             });
 
             if (res.ok) {
@@ -222,9 +233,8 @@ window.TenantManager = (() => {
     }
 
     async function runScan(id) {
-        // Throttling: Prevent rapid manual triggers
         const now = Date.now();
-        const COOLDOWN = 60000; 
+        const COOLDOWN = 30000; 
         window._lastTriggerTime = window._lastTriggerTime || {};
         if (window._lastTriggerTime[id] && (now - window._lastTriggerTime[id] < COOLDOWN)) {
             const remaining = Math.ceil((COOLDOWN - (now - window._lastTriggerTime[id])) / 1000);
@@ -246,56 +256,62 @@ window.TenantManager = (() => {
             if (!triggerRes.ok) throw new Error("Failed to dispatch scan");
             
             if (window.LiveTerminal) LiveTerminal.log('agent', `Scan queued for ${id}. Awaiting cloud agent results...`);
-            
-            // Poll for completion logs
-            let attempts = 0;
-            const poll = setInterval(async () => {
-                attempts++;
-                if (attempts > 30) {
-                    clearInterval(poll);
-                    if (window.LiveTerminal) LiveTerminal.log('insight', `Scan for ${id} timed out. Check Background Tasks.`);
-                    return;
-                }
-
-                try {
-                    const logRes = await fetch(`${window.COMPLIANCE_API_URL}/api/audit?clientId=${id}`);
-                    const logs = await logRes.json();
-                    
-                    // Look for the completion log
-                    const complete = logs.find(l => l.level === 'SCAN_COMPLETE' && new Date(l.timestamp).getTime() > now - 5000);
-                    if (complete) {
-                        clearInterval(poll);
-                        if (window.LiveTerminal) LiveTerminal.log('output', `✓ Scan Complete for ${id}: ${complete.message}`);
-                        
-                        // Populate UI with results if available in the log
-                        if (complete.details && complete.details.resources) {
-                            if (window.Scanner) {
-                                Scanner.displayResults(complete.details.resources);
-                                if (window.LiveTerminal) LiveTerminal.log('insight', `Dashboard populated with ${complete.details.resources.length} resources.`);
-                            }
-                        } else if (complete.details && complete.details.summary) {
-                            const s = complete.details.summary;
-                            if (window.LiveTerminal) LiveTerminal.log('insight', `Results: ${s.resolved} Fixed, ${s.escalated} Escalated.`);
-                        }
-                    }
-                } catch (e) { console.warn("Poll error", e); }
-            }, 3000);
-
         } catch (e) {
             if (window.LiveTerminal) LiveTerminal.log('insight', `Trigger Failed: ${e.message}`);
+        }
+    }
+
+    async function triggerAutonomousSweep(frequency = 'all') {
+        try {
+            if (window.showToast) window.showToast(`Initiating autonomous sweep [Frequency: ${frequency.toUpperCase()}]...`);
+            if (window.LiveTerminal) LiveTerminal.log('system', `Triggering multi-tenant automated compliance sweep...`);
+
+            const res = await fetch(`${window.COMPLIANCE_API_URL}/api/trigger`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ frequency })
+            });
+
+            const data = await res.json();
+            if (res.ok) {
+                if (window.showToast) window.showToast(`✓ Sweep triggered across ${data.triggeredCount || 'registered'} environments.`);
+                if (window.LiveTerminal) LiveTerminal.log('system', `Autonomous sweep running: ${data.message || 'Scanning active'}`);
+            } else {
+                throw new Error(data.error || `HTTP ${res.status}`);
+            }
+        } catch (e) {
+            console.error('Sweep error:', e);
+            if (window.showToast) window.showToast(`Sweep error: ${e.message}`);
         }
     }
 
     async function removeTenant(id) {
         if (!confirm("Are you sure you want to remove this environment?")) return;
         try {
-            // Implementation of delete would go here
+            tenants = tenants.filter(t => t.id !== id);
+            renderTenants();
             showToast("Environment removed from registry.");
-            await loadTenants();
         } catch (e) { console.error(e); }
     }
 
-    return { init, openOnboarding, closeOnboarding, saveTenant, toggleAuto, runScan, removeTenant, updateOnboardFields, updatePathPreview };
+    function getTenants() {
+        return tenants;
+    }
+
+    return { 
+        init, 
+        loadTenants,
+        getTenants,
+        openOnboarding, 
+        closeOnboarding, 
+        saveTenant, 
+        toggleAuto, 
+        runScan, 
+        triggerAutonomousSweep,
+        removeTenant, 
+        updateOnboardFields, 
+        updatePathPreview 
+    };
 })();
 
 document.addEventListener('DOMContentLoaded', TenantManager.init);
