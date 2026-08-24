@@ -1,5 +1,6 @@
 import express from 'express';
 import cors from 'cors';
+import rateLimit from 'express-rate-limit';
 
 // Import handlers & core modules
 import { handler as schedulerHandler } from './scheduler.js';
@@ -17,8 +18,34 @@ import { listenWorkerQueue } from './core/queue.js';
 import { initDb } from './core/db.js';
 
 const app = express();
+
+// Trust reverse proxies (Cloudflare, Nginx, Azure ALB)
+app.set('trust proxy', 1);
+
 app.use(cors());
-app.use(express.json());
+app.use(express.json({ limit: '10mb' }));
+
+// ── Rate Limiting & DoS Defense ──
+// General API Rate Limiter (300 requests per 15 minutes per IP)
+const generalLimiter = rateLimit({
+    windowMs: 15 * 60 * 1000,
+    limit: 300,
+    standardHeaders: 'draft-7',
+    legacyHeaders: false,
+    message: { error: 'Too Many Requests', message: 'API rate limit exceeded. Please try again later.' },
+    skip: (req) => req.path === '/health' || req.path === '/api/job-stream'
+});
+
+// Stricter Rate Limiter for compute-heavy actions (Scans, AI Chat, Auditor Token generation)
+const heavyActionLimiter = rateLimit({
+    windowMs: 5 * 60 * 1000,
+    limit: 30,
+    standardHeaders: 'draft-7',
+    legacyHeaders: false,
+    message: { error: 'Too Many Requests', message: 'Heavy operation rate limit exceeded. Please wait 5 minutes before retrying.' }
+});
+
+app.use('/api/', generalLimiter);
 
 const PORT = process.env.PORT || 3000;
 
@@ -66,16 +93,16 @@ function lambdaAdapter(handler) {
 }
 
 // Map HTTP Routes to Handlers
-app.post('/api/trigger', lambdaAdapter(schedulerHandler));
+app.post('/api/trigger', heavyActionLimiter, lambdaAdapter(schedulerHandler));
 app.all('/api/tenants', tenantsHandler);
 app.all('/api/tenants/toggle', tenantsHandler);
-app.post('/api/scan', scanHandler);
+app.post('/api/scan', heavyActionLimiter, scanHandler);
 app.all('/api/validate', validateHandler);
 app.post('/api/monitoring', lambdaAdapter(monitoringHandler));
 app.post('/api/jobs', lambdaAdapter(jobsHandler));
 app.get('/api/job-status', jobStatusHandler);
 app.get('/api/job-stream', jobStreamHandler);
-app.post('/api/chat', lambdaAdapter(chatHandler));
+app.post('/api/chat', heavyActionLimiter, lambdaAdapter(chatHandler));
 app.all('/api/auditor*', auditorHandler);
 
 // Health Check Route

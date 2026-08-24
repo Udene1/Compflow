@@ -96,16 +96,17 @@
     "@google-cloud/sql": "^0.24.1",
     "@google-cloud/storage": "^7.21.0",
     "@google/generative-ai": "^0.24.0",
+    "bullmq": "^5.41.0",
+    "cors": "^2.8.5",
     "digitalocean": "^1.2.1",
     "express": "^4.19.2",
-    "cors": "^2.8.5",
+    "express-rate-limit": "^8.6.2",
     "hcloud-js": "^1.2.0",
+    "ioredis": "^5.5.0",
     "nodemailer": "^8.0.7",
     "pdfkit": "^0.18.0",
-    "uuid": "^11.1.1",
-    "bullmq": "^5.41.0",
-    "ioredis": "^5.5.0",
-    "pg": "^8.13.3"
+    "pg": "^8.13.3",
+    "uuid": "^11.1.1"
   },
   "devDependencies": {
     "@aws-sdk/client-acm": "^3.1085.0",

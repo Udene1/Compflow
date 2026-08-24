@@ -14,3 +14,5 @@ trigger_test.js
 .test_resources
 scan_logs.txt
 *.tar.gz
+*.pdf
+dogfood_scan.json

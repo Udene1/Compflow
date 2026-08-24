@@ -1,0 +1,32 @@
+[
+  {
+    "timestamp": "2026-08-24T14:28:19.649Z",
+    "summary": {
+      "totalSuites": 4,
+      "passedSuites": 4,
+      "failedSuites": 0
+    },
+    "steps": [
+      {
+        "step": "Vitest Automated Suite (Unit & E2E)",
+        "status": "PASSED",
+        "duration": "54.44s"
+      },
+      {
+        "step": "SOC2 Auditor Evidence Portal Engine",
+        "status": "PASSED",
+        "duration": "1.70s"
+      },
+      {
+        "step": "Autonomous Scheduled Sweeps & Custom Policies",
+        "status": "PASSED",
+        "duration": "1.58s"
+      },
+      {
+        "step": "Multi-Cloud E2E Engine",
+        "status": "PASSED",
+        "duration": "35.75s"
+      }
+    ]
+  }
+]
