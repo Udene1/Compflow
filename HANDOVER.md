@@ -507,56 +507,98 @@ const SAFE_WHITELIST = {
 
 ## 10. SOC2 Third-Party Auditor Portal
 
-**Files:** `core/auditor_portal.js`, `api/auditor.js`
+**Files:** `core/auditor_portal.js`, `api/auditor.js`, `evidence.js`
 
 ### What Problem Does This Solve?
 When a company undergoes a SOC2 Type II audit, an external CPA firm (like Schellman, Prescient, A-LIGN, or Coalfire) needs to review evidence that the company's cloud infrastructure meets security controls. Traditionally, this is a manual process involving screenshots, spreadsheets, and weeks of back-and-forth.
 
-This portal automates the entire process.
+This portal automates the entire process into a cryptographically provable, read-only workflow.
 
-### How It Works
+---
 
-#### 1. Issue an Auditor Token
+### 🌐 How the Auditor Portal Is Accessed (Step-by-Step)
+
+The Auditor Portal can be accessed through **two complementary channels**:
+
+#### Method A: Direct UI / One-Click Export (Compliance Manager Flow)
+1. Navigate to the ComplianceFlow Dashboard at `https://compflow.icu` (or `app.html`).
+2. Open the **Evidence** tab or click **Export Audit Bundle**.
+3. `window.Evidence.exportAuditorBundle()` triggers:
+   - Compiles all scanned assets into `evidence_manifest.json` with client-side SHA-256 fingerprints.
+   - Attaches SOC2, ISO 27001, and HIPAA control cross-walk proofs.
+   - Downloads a `.json` / `.zip` provable evidence package ready to upload to the auditor's Vanta/Drata/Audit dashboard.
+
+#### Method B: Auditor API & Portal Access Token (Independent External Auditor Flow)
+For external CPAs who want read-only API access directly to the live audit proof:
+
+1. **Tenant issues a time-limited Auditor Token:**
+   ```bash
+   curl -X POST https://api.compflow.icu/api/auditor/token \
+     -H "Content-Type: application/json" \
+     -d '{
+       "tenantId": "org_acme_corp",
+       "auditorEmail": "lead_auditor@schellman.com",
+       "expiryHours": 72
+     }'
+   ```
+   **Response:**
+   ```json
+   {
+     "success": true,
+     "token": "eyJwYXlsb2FkIjp7InRlbmFudElkIjoib3JnX2FjbWVfY29ycCIsImF1ZGl0b3JFbWFpbCI6ImxlYWRfYXVkaXRvckBzY2hlbGxtYW4uY29tIiwicm9sZSI6IkFVRElUT1JfUkVBRE9OTFkiLCJpc3N1ZWRBdCI6IjIwMjYtMDgtMjRUMTQ6Mjg6MTkuNjQ5WiIsImV4cGlyZXNBdCI6IjIwMjYtMDgtMjdUMTQ6Mjg6MTkuNjQ5WiJ9LCJzaWduYXR1cmUiOiI1YjA5Yzg3NzJmYmM2YjM1YzVjNDlkYTI5ODUzYmU2YmFhZjAzZmNmZjkyNTRiYWIzODcxZThjODk1NDUzMDRlIn0",
+     "expiresAt": "2026-08-27T14:28:19.649Z",
+     "role": "AUDITOR_READONLY"
+   }
+   ```
+
+2. **Auditor exports the full cryptographically signed evidence bundle:**
+   ```bash
+   curl -X GET "https://api.compflow.icu/api/auditor/export?token=YOUR_AUDITOR_TOKEN"
+   ```
+   **What the auditor receives:**
+   - `evidence_manifest.json`: Every asset and setting with an individual SHA-256 cryptographic fingerprint.
+   - `control_proof_soc2.json`: Control mapping against CC6.1, CC6.6, CC6.8, CC7.2.
+   - `control_proof_iso27001.json`: Annex A controls (A.9, A.12, A.13).
+   - `control_proof_hipaa.json`: §164.312 safeguards.
+   - `executive_summary.pdf`: Embedded, base64-encoded PDF executive report.
+   - `audit_trail.log`: Full chronological event log.
+   - `digitalSignature`: HMAC-SHA256 digital signature over the entire package.
+
+3. **Auditor validates the package integrity & proves zero tampering:**
+   ```bash
+   curl -X POST https://api.compflow.icu/api/auditor/verify \
+     -H "Content-Type: application/json" \
+     -d '{
+       "evidencePackage": { ...downloaded_package... }
+     }'
+   ```
+   **Response:**
+   ```json
+   {
+     "verified": true,
+     "tenantName": "Acme Corp",
+     "generatedAt": "2026-08-24T14:28:19.649Z",
+     "totalAssets": 10,
+     "totalDeficiencies": 0,
+     "message": "Cryptographic proof verified. Package matches official immutable audit trail."
+   }
+   ```
+
+---
+
+### Cryptographic Verification Chain
 ```
-POST /api/auditor/token
-Body: { tenantId, auditorEmail, expiryHours: 72 }
-→ Returns a base64url-encoded, HMAC-SHA256 signed token
-→ Token is read-only and expires after 72 hours
+Discovered Asset → SHA-256 fingerprint per asset → Evidence Manifest (JSON)
+                                                        ↓
+                                          HMAC-SHA256 Digital Signature
+                                          (using server signing secret)
+                                                        ↓
+                                           digitalSignature (Hex token)
+                                                        ↓
+                                   POST /api/auditor/verify asserts validity
 ```
 
-#### 2. Export Evidence Bundle
-```
-GET /api/auditor/export?token=<auditor_token>
-→ Returns a cryptographically signed evidence package containing:
-   - evidence_manifest.json   (every asset + SHA-256 fingerprint)
-   - control_proof_soc2.json  (SOC2 control evidence)
-   - control_proof_iso27001.json
-   - control_proof_hipaa.json
-   - executive_summary.pdf    (base64 encoded)
-   - audit_trail.log          (chronological event history)
-   - digital_signature.sig    (HMAC-SHA256 of entire package)
-```
-
-#### 3. Verify Package Integrity
-```
-POST /api/auditor/verify
-Body: { evidencePackage: <the full package> }
-→ Recomputes HMAC signature and SHA-256 manifest hash
-→ Returns { verified: true/false }
-→ Detects any tampering after package generation
-```
-
-### Cryptographic Chain
-```
-Resource data → SHA-256 hash per asset → Evidence manifest
-                                            ↓
-                              HMAC-SHA256 signature
-                              (using server signing secret)
-                                            ↓
-                              digital_signature.sig
-```
-
-If anyone modifies a single character in the evidence manifest after generation, the verification will fail.
+If anyone modifies a single character or byte in the evidence manifest after generation, `verifyAuditorPackage()` detects the signature or checksum mismatch and returns `verified: false`.
 
 ---
 
@@ -662,12 +704,13 @@ Instead of manually triggering scans, the scheduler runs automatically on a cron
 |:-----------|:----|
 | **Vanilla HTML/CSS/JS** | Single-page dashboard (`app.html`). No React/Vue/Angular build step. Deployable as a static file on any CDN. Frontend communicates with API via `fetch()`. |
 
-### DevOps & Deployment
+### DevOps, Security & Rate Limiting
 | Technology | Why |
 |:-----------|:----|
+| **`express-rate-limit`** | Application-level DoS protection and compute-throttling. Enforces tier-based request ceilings (300 req/15min on general API, 30 req/5min on heavy scan/AI endpoints). |
 | **Docker (Node.js 20 Alpine)** | Lightweight container (~120MB). Multi-arch support (amd64/arm64). Alpine Linux for minimal attack surface. |
 | **Docker Compose** | Single command to spin up the full stack (app + Redis + PostgreSQL) with health checks and volume persistence. |
-| **Cloudflare** | DNS management, DDoS protection, and SSL termination for `compflow.icu` and `api.compflow.icu`. |
+| **Cloudflare** | DNS management, Edge DDoS mitigation, and SSL termination for `compflow.icu` and `api.compflow.icu`. |
 
 ---
 
@@ -763,6 +806,20 @@ This is **not encryption** — it's obfuscation to prevent plaintext credential 
 - Contain embedded expiry (`expiresAt`) checked on every request.
 - Role locked to `AUDITOR_READONLY` with specific permission scopes.
 - Signature verification uses `crypto.timingSafeEqual` (constant-time comparison).
+
+### API Rate Limiting & DoS Defense
+To protect backend computing power and LLM API quotas from malicious exhaustion:
+1. **Edge Protection (Cloudflare)**: Layer 3 & 4 DDoS absorption and SSL offloading.
+2. **General API Rate Limiter (`express-rate-limit`)**:
+   - Limit: **300 requests per 15 minutes per IP** across all `/api/*` endpoints.
+   - Bypasses: `/health` (monitoring) and `/api/job-stream` (SSE streaming updates).
+3. **Heavy Action Rate Limiter**:
+   - Limit: **30 requests per 5 minutes per IP** on compute-intensive operations:
+     - `POST /api/scan` (full multi-service scan)
+     - `POST /api/trigger` (autonomous tenant dispatch)
+     - `POST /api/chat` (Gemini LLM queries)
+4. **Reverse Proxy Trust**:
+   - Configured `app.set('trust proxy', 1)` to evaluate client IPs through Cloudflare (`CF-Connecting-IP`) or Nginx (`X-Forwarded-For`).
 
 ---
 
@@ -952,18 +1009,19 @@ PORT=3000
 | Area | Limitation |
 |:-----|:-----------|
 | Authentication | No user login/SSO yet. API is open (relies on network-level access control). |
-| Rate Limiting | No API rate limiting. Should add `express-rate-limit` before public GA. |
 | Multi-Tenant Isolation | Tenant data is logically separated by `client_id`, not physically isolated. |
 | PCI-DSS | Framework mapping exists but has fewer control mappings than SOC2/GDPR. |
 | Terraform/IaC | Remediation operates via cloud APIs, not Infrastructure as Code. |
 
 ### Roadmap
-- [ ] User Authentication (OAuth / Magic Link)
-- [ ] API Rate Limiting & DDOS Protection
+- [x] API Rate Limiting & DDoS Defense (Layer 7 `express-rate-limit` + Cloudflare edge)
+- [x] SOC2 Third-Party Auditor Evidence Portal (Cryptographically signed bundles)
+- [x] Autonomous Scheduled Compliance Sweeps (Daily/Weekly automated sweeps)
+- [x] Custom Organization Governance Policies Engine
+- [ ] User Authentication / SSO (OAuth / Magic Link)
 - [ ] Slack / Microsoft Teams Webhook Notifications
 - [ ] Terraform Plan Generation (suggest IaC fixes instead of direct API calls)
 - [ ] Multi-region PostgreSQL replication
-- [ ] SOC2 Type II Continuous Monitoring Dashboard
 
 ---
 
