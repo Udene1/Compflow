@@ -12,7 +12,8 @@
     "test:integration": "vitest run tests/integration",
     "test:e2e": "vitest run tests/e2e",
     "test:all": "npm run test:unit && npm run test:integration && npm run test:e2e",
-    "test:save": "node scripts/test-logger.js"
+    "test:save": "node scripts/test-logger.js",
+    "test:record": "node scripts/record_all_tests.js"
   },
   "keywords": [
     "compliance",

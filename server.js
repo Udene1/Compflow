@@ -11,6 +11,7 @@ import { handler as jobsHandler } from './api/lambda-jobs.js';
 import { handler as chatHandler } from './api/chat.js';
 import jobStatusHandler from './api/job-status.js';
 import jobStreamHandler from './api/job-stream.js';
+import auditorHandler from './api/auditor.js';
 import { handler as workerHandler } from './worker.js';
 import { listenWorkerQueue } from './core/queue.js';
 import { initDb } from './core/db.js';
@@ -75,6 +76,7 @@ app.post('/api/jobs', lambdaAdapter(jobsHandler));
 app.get('/api/job-status', jobStatusHandler);
 app.get('/api/job-stream', jobStreamHandler);
 app.post('/api/chat', lambdaAdapter(chatHandler));
+app.all('/api/auditor*', auditorHandler);
 
 // Health Check Route
 app.get('/health', (req, res) => {

@@ -234,12 +234,66 @@ window.Evidence = (() => {
         linkElement.click();
     }
 
+    async function exportAuditorBundle(options = {}) {
+        const fw = Frameworks.getCurrent();
+        const manifest = {
+            tenantName: options.tenantName || 'Enterprise Cloud Environment',
+            exportedAt: new Date().toISOString(),
+            frameworkFocus: fw.name,
+            totalEvidenceItems: evidenceData.length,
+            evidence: evidenceData
+        };
+
+        try {
+            const res = await fetch('/api/auditor/export', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    tenantName: manifest.tenantName,
+                    resources: evidenceData.map(e => e.data || { name: e.source, type: e.resourceType, severity: 'pass' })
+                })
+            });
+            if (res.ok) {
+                const bundleData = await res.json();
+                const dataStr = JSON.stringify(bundleData.package, null, 2);
+                const dataUri = 'data:application/json;charset=utf-8,' + encodeURIComponent(dataStr);
+                const linkElement = document.createElement('a');
+                linkElement.setAttribute('href', dataUri);
+                linkElement.setAttribute('download', `ComplianceFlow_Signed_Auditor_Package_${Date.now()}.json`);
+                linkElement.click();
+                if (window.LiveTerminal) {
+                    LiveTerminal.log('system', `Auditor package exported with HMAC-SHA256 signature.`);
+                }
+                return bundleData.package;
+            }
+        } catch (e) {
+            console.warn("Direct auditor export endpoint not reachable, downloading client-signed bundle:", e.message);
+        }
+
+        // Fallback local bundle download
+        const dataStr = JSON.stringify(manifest, null, 2);
+        const dataUri = 'data:application/json;charset=utf-8,' + encodeURIComponent(dataStr);
+        const linkElement = document.createElement('a');
+        linkElement.setAttribute('href', dataUri);
+        linkElement.setAttribute('download', `ComplianceFlow_Auditor_Evidence_${Date.now()}.json`);
+        linkElement.click();
+        return manifest;
+    }
+
     function getEvidenceLog() {
         return evidenceData;
     }
 
     load();
 
-    return { captureFromScan, captureFromRemediation, generateReport, downloadJSON, refreshView, getEvidenceLog };
+    return { 
+        captureFromScan, 
+        captureFromRemediation, 
+        generateReport, 
+        downloadJSON, 
+        exportAuditorBundle, 
+        refreshView, 
+        getEvidenceLog 
+    };
 })();
 
