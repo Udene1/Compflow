@@ -844,6 +844,14 @@ To protect backend computing power and LLM API quotas from malicious exhaustion:
 | `POST` | `/api/auditor/verify` | Verify evidence package integrity. |
 | `POST` | `/api/monitoring` | Submit monitoring/job tracking data. |
 | `POST` | `/api/jobs` | Lambda-compatible job management endpoint. |
+| `GET` | `/api/auth/providers` | Check status of configured SSO providers (Google, GitHub). |
+| `GET` | `/api/auth/google` | Initiate Google Workspace OAuth 2.0 login. |
+| `GET` | `/api/auth/google/callback` | Exchange Google OAuth code & issue session cookie. |
+| `GET` | `/api/auth/github` | Initiate GitHub Developer OAuth login. |
+| `GET` | `/api/auth/github/callback` | Exchange GitHub OAuth code & issue session cookie. |
+| `GET` | `/api/auth/me` | Fetch currently authenticated user, tenant org & role. |
+| `POST` | `/api/auth/dev-login` | Staging/testing mock login. |
+| `POST` | `/api/auth/logout` | Invalidate session and clear HTTP-only session cookie. |
 
 ---
 
@@ -1018,7 +1026,7 @@ PORT=3000
 - [x] SOC2 Third-Party Auditor Evidence Portal (Cryptographically signed bundles)
 - [x] Autonomous Scheduled Compliance Sweeps (Daily/Weekly automated sweeps)
 - [x] Custom Organization Governance Policies Engine
-- [ ] User Authentication / SSO (OAuth / Magic Link)
+- [x] Team Authentication & SSO (Google Workspace, GitHub OAuth 2.0, Multi-Tenant RBAC)
 - [ ] Slack / Microsoft Teams Webhook Notifications
 - [ ] Terraform Plan Generation (suggest IaC fixes instead of direct API calls)
 - [ ] Multi-region PostgreSQL replication

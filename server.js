@@ -13,6 +13,7 @@ import { handler as chatHandler } from './api/chat.js';
 import jobStatusHandler from './api/job-status.js';
 import jobStreamHandler from './api/job-stream.js';
 import auditorHandler from './api/auditor.js';
+import authRouter from './api/auth.js';
 import { handler as workerHandler } from './worker.js';
 import { listenWorkerQueue } from './core/queue.js';
 import { initDb } from './core/db.js';
@@ -104,6 +105,7 @@ app.get('/api/job-status', jobStatusHandler);
 app.get('/api/job-stream', jobStreamHandler);
 app.post('/api/chat', heavyActionLimiter, lambdaAdapter(chatHandler));
 app.all('/api/auditor*', auditorHandler);
+app.use('/api/auth', authRouter);
 
 // Health Check Route
 app.get('/health', (req, res) => {
