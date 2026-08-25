@@ -1,0 +1,53 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: Non-compliant CloudFormation template for testing
+
+Resources:
+  PublicBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName: insecure-public-bucket
+      AccessControl: PublicRead
+
+  OpenSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Wide open security group
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 22
+          ToPort: 22
+          CidrIp: 0.0.0.0/0
+        - IpProtocol: tcp
+          FromPort: 3306
+          ToPort: 3306
+          CidrIp: 0.0.0.0/0
+
+  UnencryptedDatabase:
+    Type: AWS::RDS::DBInstance
+    Properties:
+      DBInstanceIdentifier: test-db
+      Engine: mysql
+      MasterUsername: admin
+      MasterUserPassword: insecure-password
+      StorageEncrypted: false
+      PubliclyAccessible: true
+      BackupRetentionPeriod: 0
+
+  WideOpenIAMRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: god-mode
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal: '*'
+            Action: 'sts:AssumeRole'
+      Policies:
+        - PolicyName: everything
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action: '*'
+                Resource: '*'

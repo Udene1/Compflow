@@ -1,0 +1,103 @@
+name: Compliance Gate
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - '**/*.tf'
+      - '**/*.bicep'
+      - '**/*.yaml'
+      - '**/*.yml'
+      - '**/*.json'
+      - 'scripts/iac-compliance-check.js'
+
+permissions:
+  contents: read
+  pull-requests: write
+
+jobs:
+  iac-compliance-check:
+    name: IaC Compliance Scan
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Run ComplianceFlow IaC Analyzer
+        id: scan
+        run: |
+          node scripts/iac-compliance-check.js --dir . --output compliance-report.md --format json > scan-output.json 2>&1 || true
+          
+          # Extract exit intention from the JSON output
+          CRITICAL_COUNT=$(node -e "
+            const fs = require('fs');
+            try {
+              const out = fs.readFileSync('scan-output.json', 'utf-8');
+              const lines = out.split('\n').filter(l => l.trim().startsWith('{') || l.trim().startsWith('['));
+              const json = JSON.parse(lines.join('\n'));
+              console.log(json.critical || 0);
+            } catch { console.log(0); }
+          ")
+          
+          echo "critical_count=$CRITICAL_COUNT" >> $GITHUB_OUTPUT
+          
+          if [ "$CRITICAL_COUNT" -gt 0 ]; then
+            echo "has_critical=true" >> $GITHUB_OUTPUT
+          else
+            echo "has_critical=false" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Post Compliance Report as PR Comment
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+            let report = '## ✅ ComplianceFlow IaC Compliance Gate\n\nNo IaC files found to scan.';
+            
+            try {
+              report = fs.readFileSync('compliance-report.md', 'utf-8');
+            } catch (e) {
+              console.log('No report file found, using default message.');
+            }
+            
+            // Find and update existing comment or create new one
+            const { data: comments } = await github.rest.issues.listComments({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number,
+            });
+            
+            const botComment = comments.find(c => 
+              c.body.includes('ComplianceFlow IaC Compliance Gate')
+            );
+            
+            const commentBody = report + '\n\n---\n*🤖 ComplianceFlow AI — Automated IaC compliance scan*';
+            
+            if (botComment) {
+              await github.rest.issues.updateComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                comment_id: botComment.id,
+                body: commentBody,
+              });
+            } else {
+              await github.rest.issues.createComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: context.issue.number,
+                body: commentBody,
+              });
+            }
+
+      - name: Fail on Critical Findings
+        if: steps.scan.outputs.has_critical == 'true'
+        run: |
+          echo "❌ COMPLIANCE GATE FAILED — Critical IaC violations detected."
+          echo "Fix all critical findings before this PR can be merged."
+          exit 1
