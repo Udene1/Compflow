@@ -208,7 +208,8 @@ window.Scanner = (() => {
             await new Promise(r => setTimeout(r, POLL_INTERVAL));
 
             try {
-                const res = await fetch(`${baseUrl}/api/job-status?jobId=${jobId}`);
+                const fetchFn = (window.AuthUI && window.AuthUI.authFetch) ? window.AuthUI.authFetch : fetch;
+                const res = await fetchFn(`${baseUrl}/api/job-status?jobId=${jobId}`);
                 if (!res.ok) continue;
 
                 const job = await res.json();
@@ -284,7 +285,8 @@ window.Scanner = (() => {
 
         const BASE_URL = window.COMPLIANCE_API_URL;
         try {
-            const res = await fetch(`${BASE_URL}/api/scan`, {
+            const fetchFn = (window.AuthUI && window.AuthUI.authFetch) ? window.AuthUI.authFetch : fetch;
+            const res = await fetchFn(`${BASE_URL}/api/scan`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ provider, credentials, email: document.getElementById('scan-report-email')?.value })

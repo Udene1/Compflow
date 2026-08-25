@@ -65,8 +65,7 @@ function validateEmailDomain(email) {
 // 1. Providers Status Endpoint
 // ─────────────────────────────────────────────────────────────────────────────
 router.get('/providers', (req, res) => {
-    const isDev = process.env.NODE_ENV !== 'production';
-    const devExplicitlyAllowed = process.env.ENABLE_DEV_LOGIN === 'true';
+    const isDev = process.env.NODE_ENV === 'development';
 
     res.json({
         google: {
@@ -77,7 +76,8 @@ router.get('/providers', (req, res) => {
             enabled: Boolean(process.env.GITHUB_CLIENT_ID && process.env.GITHUB_CLIENT_SECRET),
             authUrl: '/api/auth/github'
         },
-        devLogin: isDev && devExplicitlyAllowed,
+        devLogin: isDev,
+        pilotAccess: Boolean(process.env.PILOT_ACCESS_CODE),
         domainRestrictions: {
             allowedDomains: ALLOWED_DOMAINS.length > 0 ? ALLOWED_DOMAINS : 'all',
             rejectPersonalEmails: REJECT_PERSONAL_EMAILS,
@@ -317,14 +317,67 @@ router.get('/me', requireAuth(), (req, res) => {
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
-// 5. Developer & Testing Mock Login (disabled in production by default)
+// 5. Pilot Access Code Login (for pre-OAuth pilot environments)
+// ─────────────────────────────────────────────────────────────────────────────
+router.post('/pilot-login', async (req, res) => {
+    const pilotCode = process.env.PILOT_ACCESS_CODE;
+    if (!pilotCode) {
+        return res.status(503).json({
+            error: 'Pilot Access Not Configured',
+            message: 'No pilot access code has been set. Contact your administrator.'
+        });
+    }
+
+    const { code, email, name } = req.body || {};
+    if (!code || code !== pilotCode) {
+        log.warn(`[AUTH] Failed pilot login attempt from ${req.ip}`);
+        return res.status(401).json({
+            error: 'Invalid Access Code',
+            message: 'The pilot access code is incorrect. Please check with your administrator.'
+        });
+    }
+
+    if (!email) {
+        return res.status(400).json({ error: 'Email required', message: 'Please provide your work email address.' });
+    }
+
+    const domainCheck = validateEmailDomain(email);
+    if (!domainCheck.allowed) {
+        return res.status(403).json({ error: 'Domain Restricted', message: domainCheck.reason });
+    }
+
+    try {
+        const { user, org } = await upsertUserFromOAuth({ email, name: name || email.split('@')[0] }, 'pilot_code');
+        const session = createSessionToken(user, org, ROLES.ADMIN, 7);
+
+        res.setHeader('Set-Cookie', [
+            `cf_session=${session.token}; HttpOnly; Secure; SameSite=Lax; Path=/; Max-Age=${7 * 24 * 60 * 60}`,
+            `cf_user_email=${encodeURIComponent(user.email)}; Secure; SameSite=Lax; Path=/; Max-Age=${7 * 24 * 60 * 60}`
+        ]);
+
+        log.info(`[AUTH] Pilot login: ${email} via access code`);
+
+        res.json({
+            success: true,
+            message: `Authenticated as ${email}`,
+            sessionToken: session.token,
+            user: session.payload
+        });
+    } catch (err) {
+        log.error('[AUTH] Pilot login failure:', err);
+        res.status(500).json({ error: 'Login failed', message: err.message });
+    }
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// 5b. Developer Mock Login (development environment ONLY)
 // ─────────────────────────────────────────────────────────────────────────────
 router.post('/dev-login', async (req, res) => {
-    // Block dev-login in production unless explicitly enabled
-    if (process.env.NODE_ENV === 'production' && process.env.ENABLE_DEV_LOGIN !== 'true') {
+    // Hard block: only works when NODE_ENV is literally 'development'
+    if (process.env.NODE_ENV !== 'development') {
         return res.status(403).json({
             error: 'Forbidden',
-            message: 'Developer login is disabled in production. Set ENABLE_DEV_LOGIN=true to override.'
+            message: 'Developer login is only available in development environments.'
         });
     }
 

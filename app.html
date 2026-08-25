@@ -1257,7 +1257,8 @@
                 const clientId = 'demo-client'; // In prod, this would come from the context
                 
                 try {
-                    const res = await fetch(`${window.COMPLIANCE_API_URL}/api/audit?clientId=${clientId}`);
+                    const fetchFn = (window.AuthUI && window.AuthUI.authFetch) ? window.AuthUI.authFetch : fetch;
+                    const res = await fetchFn(`${window.COMPLIANCE_API_URL}/api/audit?clientId=${clientId}`);
                     const logs = await res.json();
                     
                     if (logs && logs.length > 0) {

@@ -387,7 +387,8 @@ window.Evidence = (() => {
         try {
             if (window.showToast) window.showToast('Interrogating cryptographic HMAC-SHA256 signature...');
 
-            const res = await fetch(`${API_BASE}/api/auditor/verify`, {
+            const fetchFn = (window.AuthUI && window.AuthUI.authFetch) ? window.AuthUI.authFetch : fetch;
+            const res = await fetchFn(`${API_BASE}/api/auditor/verify`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ package: packageObj })
