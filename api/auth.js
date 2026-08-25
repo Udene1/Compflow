@@ -65,6 +65,9 @@ function validateEmailDomain(email) {
 // 1. Providers Status Endpoint
 // ─────────────────────────────────────────────────────────────────────────────
 router.get('/providers', (req, res) => {
+    const isDev = process.env.NODE_ENV !== 'production';
+    const devExplicitlyAllowed = process.env.ENABLE_DEV_LOGIN === 'true';
+
     res.json({
         google: {
             enabled: Boolean(process.env.GOOGLE_CLIENT_ID && process.env.GOOGLE_CLIENT_SECRET),
@@ -74,7 +77,7 @@ router.get('/providers', (req, res) => {
             enabled: Boolean(process.env.GITHUB_CLIENT_ID && process.env.GITHUB_CLIENT_SECRET),
             authUrl: '/api/auth/github'
         },
-        devLogin: process.env.NODE_ENV !== 'production' || process.env.ENABLE_DEV_LOGIN === 'true',
+        devLogin: isDev && devExplicitlyAllowed,
         domainRestrictions: {
             allowedDomains: ALLOWED_DOMAINS.length > 0 ? ALLOWED_DOMAINS : 'all',
             rejectPersonalEmails: REJECT_PERSONAL_EMAILS,

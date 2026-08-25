@@ -1,375 +1,248 @@
-// ─── ComplianceFlow AI: Cloud Connect Module ───
-// Simulates OAuth connection to AWS, GCP, Azure
+// ─── ComplianceFlow AI: Cloud Connect & Onboarding Module ───
+// Server-side tenant integration (Zero localStorage secrets, AssumeRole-first)
 
 window.CloudConnect = (() => {
     const state = { 
         providers: {},
-        credentials: {} // Store keys in memory only
+        activeTenant: null,
+        credentials: {} // In-memory runtime session only (NEVER in localStorage)
     };
 
     const STEPS = [
         'Establishing secure handshake...',
-        'Validating identity with provider...',
-        'Verifying audit permission scope...',
-        'Securing governance session...'
+        'Validating AssumeRole trust policy...',
+        'Verifying read-only security audit permissions...',
+        'Registering cloud environment in registry...'
     ];
 
     function init() {
-        // Auto-reconnect saved credentials per provider
+        // Purge any legacy localStorage credentials for security compliance
         ['aws', 'azure', 'gcp', 'hetzner', 'digitalocean'].forEach(p => {
-            const saved = localStorage.getItem(`cf_creds_${p}`) || (p === 'aws' ? localStorage.getItem('cf_aws_creds') : null);
-            if (saved) {
-                try {
-                    state.credentials[p] = JSON.parse(saved);
-                } catch (e) {}
-            }
+            localStorage.removeItem(`cf_creds_${p}`);
         });
+        localStorage.removeItem('cf_aws_creds');
 
-        document.querySelectorAll('.provider-card').forEach(card => {
-            card.addEventListener('click', () => {
-                const provider = card.dataset.provider;
-                if (state.providers[provider]) return; // already connected
-                
-                // If no creds, open settings first
-                if (!state.credentials[provider]) {
-                    openSettings(provider);
-                    return;
+        // Check if server already has tenants for this org
+        checkExistingConnections();
+    }
+
+    async function checkExistingConnections() {
+        try {
+            const fetchFn = (window.AuthUI && window.AuthUI.authFetch) ? window.AuthUI.authFetch : fetch;
+            const res = await fetchFn(`${window.COMPLIANCE_API_URL}/api/tenants`);
+            if (res.ok) {
+                const data = await res.json();
+                const tenants = data.tenants || [];
+                if (tenants.length > 0) {
+                    state.activeTenant = tenants[0];
+                    state.providers[tenants[0].provider] = true;
+                    updateUIForConnectedState(tenants[0]);
                 }
-
-                connect(provider, card);
-            });
-        });
+            }
+        } catch (e) {
+            console.warn('Initial connection check skipped:', e);
+        }
     }
 
-    function openSettings(provider = 'aws') {
-        const modal = document.getElementById('modal-settings');
-        const providerSelect = document.getElementById('setting-provider');
-        if (providerSelect) providerSelect.value = provider;
-        modal.classList.add('active');
-    }
-
-    function closeSettings() {
-        document.getElementById('modal-settings').classList.remove('active');
-    }
-
-    function saveSettings() {
-        const provider = document.getElementById('setting-provider').value;
-        const authMethod = document.getElementById('setting-auth-method').value;
-        const accessKeyId = document.getElementById('setting-access-key').value;
-        const secretAccessKey = document.getElementById('setting-secret-key').value;
-        const roleArn = document.getElementById('setting-role-arn').value;
-        const externalId = document.getElementById('setting-external-id').value;
-        const apiToken = document.getElementById('setting-token').value;
-        const projectId = document.getElementById('setting-project-id').value;
-        const tenantId = document.getElementById('setting-tenant-id').value;
-        const region = document.getElementById('setting-region').value;
-        const reportEmail = document.getElementById('setting-report-email').value;
-
-        if (authMethod === 'keys' && (!accessKeyId || !secretAccessKey)) {
-            alert('Please provide both access key and secret key.');
-            return;
-        }
-        if (authMethod === 'role' && !roleArn) {
-            alert('Please provide the Role ARN.');
-            return;
-        }
-        if (authMethod === 'token' && !apiToken) {
-            alert('Please provide the API Token / JSON Key.');
-            return;
-        }
-
-        const data = { authMethod, accessKeyId, secretAccessKey, roleArn, externalId, apiToken, projectId, tenantId, region, reportEmail };
-        localStorage.setItem(`cf_creds_${provider}`, JSON.stringify(data));
-        if (provider === 'aws') localStorage.setItem('cf_aws_creds', JSON.stringify(data));
-        state.credentials[provider] = data;
-
-        closeSettings();
-        if (window.LiveTerminal) LiveTerminal.log('system', `Credentials saved for ${provider.toUpperCase()}. Ready to connect.`);
+    function updateUIForConnectedState(tenant) {
+        const stepConnect = document.getElementById('step-connect');
+        const numEl = document.getElementById('step-connect-num');
+        const btnRunScan = document.getElementById('btn-run-first-scan');
+        const connectStatus = document.getElementById('aws-connect-status-badge');
         
-        // Find the card and trigger connect
-        const card = document.querySelector(`.provider-card[data-provider="${provider}"]`);
-        if (card) connect(provider, card);
+        if (stepConnect) stepConnect.classList.add('completed');
+        if (numEl) numEl.textContent = '✓';
+        if (btnRunScan) {
+            btnRunScan.disabled = false;
+            btnRunScan.classList.remove('btn-disabled');
+            btnRunScan.classList.add('pulse-glow');
+        }
+        if (connectStatus) {
+            connectStatus.style.display = 'inline-flex';
+            connectStatus.className = 'status-line connected';
+            connectStatus.textContent = `✓ Connected (${tenant.name || tenant.provider.toUpperCase()})`;
+        }
+
+        const tracker = document.getElementById('scheduled-scan-tracker');
+        if (tracker) tracker.style.display = 'block';
+
+        updateChips();
     }
 
-    function toggleAuthMethod() {
-        const provider = document.getElementById('setting-provider').value;
-        const method = document.getElementById('setting-auth-method');
-        const keysGroup = document.getElementById('aws-keys-group');
-        const roleGroup = document.getElementById('aws-role-group');
-        const tokenGroup = document.getElementById('token-group');
-        const tokenLabel = document.getElementById('token-label');
-        const azGcpGroup = document.getElementById('azure-gcp-group');
-        const azTenantGroup = document.getElementById('azure-tenant-group');
-        const projectIdLabel = document.getElementById('project-id-label');
-        const keyIdLabel = document.getElementById('key-id-label');
-        const secretKeyLabel = document.getElementById('secret-key-label');
+    /**
+     * Primary Guided AWS Onboarding Path (CloudFormation -> Role ARN)
+     */
+    async function testAndConnectAWS() {
+        const roleArnInput = document.getElementById('input-aws-role-arn');
+        const externalIdInput = document.getElementById('input-aws-external-id');
+        const emailInput = document.getElementById('input-aws-email');
+        const statusEl = document.getElementById('aws-connect-status-inline');
+        const btnTest = document.getElementById('btn-test-aws-connection');
 
-        const keyIdInput = document.getElementById('setting-access-key');
-        const secretKeyInput = document.getElementById('setting-secret-key');
-        const projectIdInput = document.getElementById('setting-project-id');
-        const tenantIdInput = document.getElementById('setting-tenant-id');
+        const roleArn = roleArnInput ? roleArnInput.value.trim() : '';
+        const externalId = externalIdInput ? externalIdInput.value.trim() : '';
+        const email = emailInput ? emailInput.value.trim() : '';
 
-        // Auto-select best method for provider
-        if (provider === 'hetzner' || provider === 'digitalocean' || provider === 'gcp') {
-            if (method.value !== 'token' && method.value !== 'keys') method.value = 'token';
-        } else if (provider === 'azure') {
-            if (method.value !== 'keys') method.value = 'keys';
+        if (!roleArn) {
+            if (window.showToast) window.showToast('Please paste the Role ARN from your CloudFormation stack output.');
+            if (roleArnInput) roleArnInput.focus();
+            return;
         }
 
-        const selectedMethod = method.value;
-        keysGroup.style.display = selectedMethod === 'keys' ? 'block' : 'none';
-        roleGroup.style.display = selectedMethod === 'role' ? 'block' : 'none';
-        tokenGroup.style.display = selectedMethod === 'token' ? 'block' : 'none';
-
-        // Azure/GCP specific field toggles
-        azGcpGroup.style.display = (provider === 'azure' || provider === 'gcp') ? 'block' : 'none';
-        azTenantGroup.style.display = (provider === 'azure') ? 'block' : 'none';
-
-        if (provider === 'azure') {
-            keyIdLabel.textContent = 'Azure Client ID (Application ID)';
-            keyIdInput.placeholder = 'e.g. 4f31621d-34e1-480c-ae1a-afd2632d171c';
-            secretKeyLabel.textContent = 'Azure Client Secret Value';
-            secretKeyInput.placeholder = 'e.g. Gw78Q~DHYsuswSdV...';
-            projectIdLabel.textContent = 'Azure Subscription ID';
-            projectIdInput.placeholder = 'e.g. f828653f-fe32-433f-be6e-383400598a25';
-            if (tenantIdInput) tenantIdInput.placeholder = 'e.g. 3492487c-fac2-4f53-b3f1-48715b21a4a7';
-        } else if (provider === 'aws') {
-            keyIdLabel.textContent = 'AWS Access Key ID';
-            keyIdInput.placeholder = 'AKIAIOSFODNN7EXAMPLE';
-            secretKeyLabel.textContent = 'AWS Secret Access Key';
-            secretKeyInput.placeholder = 'wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY';
-        } else if (provider === 'gcp') {
-            projectIdLabel.textContent = 'GCP Project ID';
-            projectIdInput.placeholder = 'my-gcp-project-123';
+        if (btnTest) {
+            btnTest.disabled = true;
+            btnTest.textContent = 'Testing connection...';
+        }
+        if (statusEl) {
+            statusEl.style.display = 'block';
+            statusEl.className = 'status-line connecting';
+            statusEl.textContent = 'Validating IAM AssumeRole handshake...';
         }
 
-        if (selectedMethod === 'token') {
-            tokenLabel.textContent = (provider === 'gcp') ? 'Service Account JSON Key' : 'API Token';
+        if (window.LiveTerminal) {
+            LiveTerminal.log('system', `Initiating real AWS STS AssumeRole handshake: ${roleArn}`);
         }
-    }
-
-    async function connect(provider, card) {
-        if (state.providers[provider]) return;
-
-        card.classList.add('selected');
-        const statusEl = document.getElementById('status-' + provider);
-        const barEl = document.getElementById('bar-' + provider);
-        const stepsContainer = document.getElementById('connect-steps');
-
-        statusEl.textContent = 'Connecting...';
-        statusEl.className = 'status-line connecting';
-
-        // Build steps UI (still useful for UX, but now driven by progress)
-        stepsContainer.innerHTML = '<h4 style="margin-bottom:0.75rem; font-size:0.9rem;">Connection Progress</h4>';
-        const stepEls = STEPS.map((text, i) => {
-            const div = document.createElement('div');
-            div.className = 'step-item';
-            div.innerHTML = `<span class="check">○</span> ${text}`;
-            stepsContainer.appendChild(div);
-            return div;
-        });
-
-        if (window.LiveTerminal) LiveTerminal.log('system', `Initiating real connection to ${provider.toUpperCase()}...`);
 
         try {
-            // Update UI to first step
-            updateStepUI(0, stepEls, barEl);
-            if (window.LiveTerminal) LiveTerminal.log('agent', STEPS[0]);
+            const credentials = {
+                authMethod: 'role',
+                roleArn,
+                externalId: externalId || 'CF-AINS-ONBOARDING-SECRET',
+                region: 'us-east-1'
+            };
+
+            state.credentials['aws'] = credentials;
 
             const fetchFn = (window.AuthUI && window.AuthUI.authFetch) ? window.AuthUI.authFetch : fetch;
-            const response = await fetchFn(`${window.COMPLIANCE_API_URL}/api/validate`, {
+            
+            // 1. Validate connection
+            const valRes = await fetchFn(`${window.COMPLIANCE_API_URL}/api/validate`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ 
-                    provider, 
-                    credentials: state.credentials[provider] 
+                body: JSON.stringify({ provider: 'aws', credentials })
+            });
+
+            const valData = await valRes.json();
+            if (!valRes.ok || !valData.success) {
+                throw new Error(valData.error || 'AWS AssumeRole handshake failed. Please verify Role ARN and Trust Policy.');
+            }
+
+            if (window.LiveTerminal) {
+                LiveTerminal.log('output', `Identity verified: ${valData.identity || 'AWS Account'}`);
+            }
+
+            // 2. Automatically register tenant on server
+            const tenantName = `AWS Production (${roleArn.split('/').pop() || 'Account'})`;
+            const tenantRes = await fetchFn(`${window.COMPLIANCE_API_URL}/api/tenants`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    provider: 'aws',
+                    name: tenantName,
+                    email: email || 'admin@compflow.icu',
+                    roleArn,
+                    externalId: externalId || 'CF-AINS-ONBOARDING-SECRET',
+                    scheduleFrequency: 'daily',
+                    autoRemediate: false
                 })
             });
 
-            const data = await response.json();
-
-            if (!response.ok || !data.success) {
-                throw new Error(data.error || "Connection failed");
+            if (!tenantRes.ok) {
+                const tData = await tenantRes.json().catch(() => ({}));
+                console.warn('Tenant registration note:', tData.error);
             }
 
-            // Success Path - Fast-forward UI steps
-            for (let i = 1; i < STEPS.length; i++) {
-                await new Promise(r => setTimeout(r, 400));
-                updateStepUI(i, stepEls, barEl);
-                if (window.LiveTerminal) LiveTerminal.log('agent', STEPS[i]);
+            state.providers['aws'] = true;
+
+            if (statusEl) {
+                statusEl.className = 'status-line connected';
+                statusEl.textContent = '✓ Connected & verified. Ready to run first scan.';
+            }
+            if (btnTest) {
+                btnTest.disabled = false;
+                btnTest.textContent = '✓ Verified';
+                btnTest.className = 'btn btn-success btn-sm';
             }
 
-            barEl.style.width = '100%';
-            statusEl.textContent = '✓ Connected';
-            statusEl.className = 'status-line connected';
-            card.classList.remove('selected');
-            card.classList.add('connected');
+            if (window.showToast) window.showToast('✅ AWS connected & verified. Ready for scan!');
 
-            state.providers[provider] = true;
-            if (window.LiveTerminal) {
-                LiveTerminal.log('output', `${provider.toUpperCase()} Identity Verified: ${data.identity || 'Session Active'}`);
-                LiveTerminal.log('insight', `SUCCESS: Cloud environment connected and validated in real-time.`);
-            }
-
-            updateChips();
-
-            // Update Onboarding Checklist Step 2
-            const stepConnect = document.getElementById('step-connect');
-            if (stepConnect) {
-                stepConnect.classList.add('completed');
-                const numEl = document.getElementById('step-connect-num');
-                if (numEl) numEl.textContent = '✓';
-            }
-            const progressBadge = document.getElementById('checklist-progress-text');
-            if (progressBadge) {
-                progressBadge.textContent = '2 of 4 Steps Complete';
-            }
-
-            // Show Connected Success Banner with immediate Scan CTA
-            stepsContainer.innerHTML += `
-                <div style="background:rgba(16,185,129,0.1); border:1px solid rgba(16,185,129,0.3); padding:1rem; border-radius:8px; margin-top:1rem; display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:0.5rem;">
-                    <div>
-                        <div style="color:#10b981; font-weight:600; font-size:0.9rem;">✅ ${provider.toUpperCase()} Verified & Ready</div>
-                        <div style="font-size:0.78rem; color:var(--text-muted);">Cloud connection active. Proceed to execute your initial compliance scan.</div>
-                    </div>
-                    <button class="btn btn-primary btn-sm" onclick="switchPanel('scan'); if(window.Scanner) Scanner.startScan();">
-                        🔍 Start First Scan →
-                    </button>
-                </div>
-            `;
-
-            // Show the Tracker UI on the Scan Page
-            const tracker = document.getElementById('scheduled-scan-tracker');
-            if (tracker) {
-                tracker.style.display = 'block';
-                updateNextScanUI();
-                
-                const evidence = Evidence.getEvidenceLog();
-                const remediationCount = (evidence || []).filter(e => e.type === 'Remediation Action').length;
-                const statusEl = document.getElementById('last-scan-status');
-                if (statusEl) {
-                    statusEl.innerHTML = `Last Scan: <span style="color:var(--success)">Auto-Remediated ${remediationCount} Issues</span>`;
-                }
-            }
+            // Trigger UI transitions
+            updateUIForConnectedState({ provider: 'aws', name: tenantName });
+            if (window.TenantManager) TenantManager.loadTenants();
 
         } catch (err) {
-            console.error("Connection failed:", err);
-            statusEl.textContent = '✕ Failed';
-            statusEl.className = 'status-line failed';
-            card.classList.remove('selected');
-            
-            // Mark current step as failed
-            const currentStep = stepEls.find(el => el.classList.contains('active')) || stepEls[0];
-            currentStep.classList.remove('active');
-            currentStep.classList.add('error');
-            currentStep.querySelector('.check').textContent = '✕';
-            
-            if (window.LiveTerminal) LiveTerminal.log('insight', `CONNECTION ERROR: ${err.message}`);
-            showToast(`Connection failed: ${err.message}`);
-
-            // If it was an auto-connect failure, clear the bad state to stop the loop
-            if (localStorage.getItem('cf_aws_creds')) {
-                console.warn("Clearing invalid saved credentials.");
-                localStorage.removeItem('cf_aws_creds');
+            console.error('AWS Connect Error:', err);
+            if (statusEl) {
+                statusEl.className = 'status-line failed';
+                statusEl.textContent = `✕ Connection failed: ${err.message}`;
             }
+            if (btnTest) {
+                btnTest.disabled = false;
+                btnTest.textContent = 'Fix credentials & Retry';
+                btnTest.className = 'btn btn-danger btn-sm';
+            }
+            if (window.showToast) window.showToast(`Connection failed: ${err.message}`);
         }
     }
 
-    function updateStepUI(index, stepEls, barEl) {
-        // Mark previous as done
-        for (let i = 0; i < index; i++) {
-            stepEls[i].classList.remove('active');
-            stepEls[i].classList.add('done');
-            stepEls[i].querySelector('.check').textContent = '✓';
-        }
-        
-        stepEls[index].classList.add('active');
-        stepEls[index].querySelector('.check').innerHTML = '<span class="spinner"></span>';
+    function isConnected() {
+        return Object.values(state.providers).some(Boolean) || state.activeTenant !== null;
+    }
 
-        const pct = Math.round(((index + 1) / STEPS.length) * 100);
-        barEl.style.width = pct + '%';
+    function getProviders() {
+        const active = Object.keys(state.providers).filter(k => state.providers[k]);
+        if (active.length > 0) return active;
+        if (state.activeTenant) return [state.activeTenant.provider];
+        return ['aws'];
+    }
+
+    function getCredentials(provider) {
+        if (state.credentials[provider]) return state.credentials[provider];
+        if (state.activeTenant && state.activeTenant.provider === provider) {
+            return {
+                authMethod: 'role',
+                roleArn: state.activeTenant.roleArn,
+                externalId: state.activeTenant.externalId || 'CF-AINS-ONBOARDING-SECRET',
+                region: 'us-east-1'
+            };
+        }
+        return null;
+    }
+
+    function getSettings() {
+        return {
+            reportEmail: (state.activeTenant && state.activeTenant.email) ? state.activeTenant.email : 'compliance@compflow.icu'
+        };
     }
 
     function updateChips() {
         const container = document.getElementById('connection-chips');
-        container.innerHTML = '';
-        Object.keys(state.providers).forEach(p => {
-            const chip = document.createElement('div');
-            chip.className = 'conn-chip';
-            chip.innerHTML = `<span class="dot"></span> ${p.toUpperCase()}`;
-            container.appendChild(chip);
-        });
-    }
-
-    function isConnected() {
-        return Object.keys(state.providers).length > 0;
-    }
-
-    function getProviders() {
-        return Object.keys(state.providers);
-    }
-
-    const XOR_KEY = 'CompFlow_Guard_2026';
-
-    function obfuscate(str) {
-        if (!str) return '';
-        // Simple XOR + Base64 to prevent plain-text sniffing
-        let out = "";
-        for (let i = 0; i < str.length; i++) {
-            out += String.fromCharCode(str.charCodeAt(i) ^ XOR_KEY.charCodeAt(i % XOR_KEY.length));
-        }
-        return btoa(out);
-    }
-
-    function getCredentials(provider) {
-        const creds = state.credentials[provider];
-        if (!creds) return null;
+        if (!container) return;
         
-        // Return obfuscated creds for secure transit
-        return {
-            authMethod: creds.authMethod,
-            accessKeyId: obfuscate(creds.accessKeyId),
-            secretAccessKey: obfuscate(creds.secretAccessKey),
-            roleArn: creds.roleArn,
-            externalId: creds.externalId,
-            apiToken: obfuscate(creds.apiToken),
-            tenantId: creds.tenantId,
-            projectId: creds.projectId,
-            subscriptionId: creds.projectId || creds.subscriptionId,
-            region: creds.region,
-            reportEmail: creds.reportEmail,
-            isObfuscated: true
-        };
-    }
-
-    function getSettings() {
-        // Return first active provider's settings
-        const active = Object.keys(state.credentials)[0];
-        return state.credentials[active] || {};
-    }
-
-    function updateNextScanUI() {
-        const el = document.getElementById('next-scan-time');
-        if (!el) return;
-
-        // Calculate next occurrence of 12:00 PM UTC
-        const now = new Date();
-        const next = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate(), 12, 0, 0));
-        
-        // If 12:00 UTC already passed today, set to tomorrow
-        if (now >= next) {
-            next.setUTCDate(next.getUTCDate() + 1);
+        const connected = getProviders();
+        if (connected.length === 0) {
+            container.innerHTML = '';
+            return;
         }
 
-        // Handle weekends (Cron is MON-FRI)
-        const day = next.getUTCDay();
-        if (day === 0) next.setUTCDate(next.getUTCDate() + 1); // Sun -> Mon
-        if (day === 6) next.setUTCDate(next.getUTCDate() + 2); // Sat -> Mon
-
-        el.textContent = 'Next Autonomous Scan: ' + next.toLocaleDateString([], { weekday: 'long' }) + ' at ' + next.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) + ' UTC';
+        container.innerHTML = connected.map(p => `
+            <span class="chip connected" style="font-size:0.75rem; background:rgba(16,185,129,0.15); color:#10b981; border:1px solid rgba(16,185,129,0.3); padding:3px 8px; border-radius:12px; display:inline-flex; align-items:center; gap:4px;">
+                <span class="dot" style="width:6px; height:6px; border-radius:50%; background:#10b981;"></span>
+                ${p.toUpperCase()} Connected
+            </span>
+        `).join('');
     }
 
-    return { init, isConnected, getProviders, getCredentials, getSettings, openSettings, closeSettings, saveSettings, toggleAuthMethod, updateNextScanUI };
+    document.addEventListener('DOMContentLoaded', init);
+
+    return {
+        init,
+        testAndConnectAWS,
+        isConnected,
+        getProviders,
+        getCredentials,
+        getSettings,
+        updateChips,
+        checkExistingConnections
+    };
 })();
-
-document.addEventListener('DOMContentLoaded', CloudConnect.init);

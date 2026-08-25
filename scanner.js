@@ -115,9 +115,14 @@ window.Scanner = (() => {
             if (progressBadge) {
                 progressBadge.textContent = '3 of 4 Steps Complete';
             }
+
+            // Transition from Mode A (Activation) to Mode B (Activated App)
+            if (window.AuthUI && typeof window.AuthUI.setMode === 'function') {
+                window.AuthUI.setMode('app');
+            }
             
             btn.disabled = false;
-            btn.textContent = 'Re-scan';
+            btn.textContent = 'Run scan';
         } catch (err) {
             console.error(err);
             LiveTerminal.log('insight', `SCAN FAILED: ${err.message}`);
@@ -443,7 +448,7 @@ window.Scanner = (() => {
 
     function getResources() { return scannedResources; }
 
-    return { init, getResources, markFixed, updateEvidenceBadge, updateScore, runBackgroundScan, simulateDrift };
+    return { init, startScan, getResources, getScannedResources: () => scannedResources, markFixed, updateEvidenceBadge, updateScore, runBackgroundScan, simulateDrift };
 })();
 
 document.addEventListener('DOMContentLoaded', Scanner.init);

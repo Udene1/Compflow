@@ -3057,3 +3057,38 @@ input:checked + .slider:before { transform: translateX(16px); }
     color: var(--text-dim);
 }
 
+/* ─── Mode A (Activation) Progressive Disclosure Rules ─── */
+.app-layout.mode-activation .sidebar-nav .nav-section-label:not(:first-child) {
+    display: none;
+}
+
+.app-layout.mode-activation .sidebar-footer {
+    display: none;
+}
+
+.aws-activation-box {
+    transition: border-color 0.3s ease, box-shadow 0.3s ease;
+}
+
+.aws-activation-box:hover {
+    border-color: rgba(16, 185, 129, 0.6);
+    box-shadow: 0 12px 35px rgba(16, 185, 129, 0.1);
+}
+
+.pulse-glow {
+    animation: pulseButtonGlow 2s infinite ease-in-out;
+}
+
+@keyframes pulseButtonGlow {
+    0% {
+        box-shadow: 0 0 0 0 rgba(99, 102, 241, 0.6);
+    }
+    70% {
+        box-shadow: 0 0 0 15px rgba(99, 102, 241, 0);
+    }
+    100% {
+        box-shadow: 0 0 0 0 rgba(99, 102, 241, 0);
+    }
+}
+
+

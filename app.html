@@ -176,59 +176,93 @@
                     </div>
                 </div>
 
-                <!-- ══════ Panel: Connect ══════ -->
+                <!-- ══════ Panel: Connect (Mode A Primary Funnel) ══════ -->
                 <div class="panel active" id="panel-connect">
-                    <h3 style="margin-bottom: 0.5rem;">Connect Your Cloud</h3>
-                    <p style="color:var(--text-muted); margin-bottom: 1rem; font-size: 0.9rem;">
-                        Select a provider to authorize read/write access for scanning and auto-remediation.
-                    </p>
-
-                    <div class="onboarding-banner" style="background: rgba(16, 185, 129, 0.1); border: 1px solid rgba(16,185,129,0.3); padding: 1rem; border-radius: 8px; margin-bottom: 2rem; display: flex; justify-content: space-between; align-items: center;">
-                        <div>
-                            <h4 style="color: #10b981; margin-bottom: 0.25rem;">Secure AWS Onboarding</h4>
-                            <p style="font-size: 0.85rem; color: var(--text-muted);">Welcome to ComplianceFlow. Let's secure your cloud. Use our automated template to provision a mathematically provable Least-Privilege cross-account role.</p>
-                        </div>
-                        <a href="complianceflow-iam-setup.yaml" download class="btn btn-primary btn-sm">📦 Download CloudFormation</a>
+                    <div class="activation-funnel-header" style="margin-bottom: 1.5rem;">
+                        <h2 style="font-size: 1.5rem; font-weight: 700; color: #fff; margin-bottom: 0.25rem;">Get to your first scan</h2>
+                        <p style="color:var(--text-muted); font-size: 0.9rem;">
+                            Step 2 · Connect your cloud infrastructure using our secure AssumeRole CloudFormation template.
+                        </p>
                     </div>
 
-                    <div class="provider-grid">
-                        <div class="provider-card" data-provider="aws">
-                            <div class="provider-icon">☁️</div>
-                            <h3>Amazon Web Services</h3>
-                            <p>IAM, S3, EC2, RDS, Lambda, VPC</p>
-                            <div class="status-line" id="status-aws"></div>
-                            <div class="connect-progress"><div class="bar" id="bar-aws"></div></div>
+                    <!-- Primary AWS Path Card -->
+                    <div class="aws-activation-box" style="background: linear-gradient(145deg, rgba(15, 23, 42, 0.9), rgba(10, 15, 28, 0.95)); border: 1px solid rgba(16, 185, 129, 0.35); border-radius: 12px; padding: 1.75rem; margin-bottom: 1.5rem; box-shadow: 0 10px 30px rgba(0,0,0,0.5);">
+                        <div style="display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 1.25rem; flex-wrap: wrap; gap: 0.75rem;">
+                            <div>
+                                <div style="display:flex; align-items:center; gap:0.5rem;">
+                                    <span style="font-size: 1.5rem;">☁️</span>
+                                    <h3 style="font-size: 1.2rem; color: #fff; margin: 0;">Connect AWS (Recommended)</h3>
+                                </div>
+                                <p style="font-size: 0.82rem; color: var(--text-muted); margin-top: 0.25rem;">Least-privilege read/audit cross-account role</p>
+                            </div>
+                            <a href="complianceflow-iam-setup.yaml" download class="btn btn-secondary btn-sm" style="display:inline-flex; align-items:center; gap:6px;">
+                                📦 Download CloudFormation template
+                            </a>
                         </div>
-                        <div class="provider-card" data-provider="gcp">
-                            <div class="provider-icon">🌐</div>
-                            <h3>Google Cloud Platform</h3>
-                            <p>IAM, GCS, GCE, Cloud SQL, Functions</p>
-                            <div class="status-line" id="status-gcp"></div>
-                            <div class="connect-progress"><div class="bar" id="bar-gcp"></div></div>
+
+                        <div class="aws-steps-list" style="font-size: 0.84rem; color: var(--text); line-height: 1.6; margin-bottom: 1.25rem; background: rgba(0,0,0,0.25); padding: 1rem; border-radius: 8px; border: 1px solid rgba(255,255,255,0.05);">
+                            <div><strong>1.</strong> Download the CloudFormation template above.</div>
+                            <div><strong>2.</strong> Create the stack in your AWS Management Console.</div>
+                            <div><strong>3.</strong> Paste the generated <code>Role ARN</code> and <code>External ID</code> below:</div>
                         </div>
-                        <div class="provider-card" data-provider="azure">
-                            <div class="provider-icon">🔷</div>
-                            <h3>Microsoft Azure</h3>
-                            <p>AD, Blob Storage, VMs, SQL DB</p>
-                            <div class="status-line" id="status-azure"></div>
-                            <div class="connect-progress"><div class="bar" id="bar-azure"></div></div>
+
+                        <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 1rem; margin-bottom: 1.25rem;">
+                            <div class="input-group">
+                                <label style="font-size: 0.8rem; font-weight: 600; color: #fff; margin-bottom: 4px; display: block;">Role ARN <span style="color:#ef4444;">*</span></label>
+                                <input type="text" id="input-aws-role-arn" placeholder="arn:aws:iam::123456789012:role/ComplianceFlow-Role" style="width:100%; padding:0.65rem 0.8rem; background:rgba(0,0,0,0.3); border:1px solid rgba(255,255,255,0.12); border-radius:6px; color:#fff; font-size:0.85rem; font-family:var(--font-mono);">
+                            </div>
+                            <div class="input-group">
+                                <label style="font-size: 0.8rem; font-weight: 600; color: #fff; margin-bottom: 4px; display: block;">External ID</label>
+                                <input type="text" id="input-aws-external-id" value="CF-AINS-ONBOARDING-SECRET" placeholder="Handshake secret" style="width:100%; padding:0.65rem 0.8rem; background:rgba(0,0,0,0.3); border:1px solid rgba(255,255,255,0.12); border-radius:6px; color:#fff; font-size:0.85rem; font-family:var(--font-mono);">
+                            </div>
                         </div>
-                        <div class="provider-card" data-provider="hetzner">
-                            <div class="provider-icon">🚀</div>
-                            <h3>Hetzner Cloud</h3>
-                            <p>Servers, Firewalls, Volumes, Networks</p>
-                            <div class="status-line" id="status-hetzner"></div>
-                            <div class="connect-progress"><div class="bar" id="bar-hetzner"></div></div>
-                        </div>
-                        <div class="provider-card" data-provider="digitalocean">
-                            <div class="provider-icon">🌊</div>
-                            <h3>DigitalOcean</h3>
-                            <p>Droplets, Firewalls, VPC, Spaces</p>
-                            <div class="status-line" id="status-digitalocean"></div>
-                            <div class="connect-progress"><div class="bar" id="bar-digitalocean"></div></div>
+
+                        <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:0.75rem;">
+                            <div id="aws-connect-status-inline" class="status-line" style="display:none; font-size:0.82rem;"></div>
+                            <button class="btn btn-primary" id="btn-test-aws-connection" onclick="CloudConnect.testAndConnectAWS()">
+                                🔌 Test connection
+                            </button>
                         </div>
                     </div>
-                    <div class="connect-steps" id="connect-steps"></div>
+
+                    <!-- Collapsible Other Cloud Providers -->
+                    <details class="other-providers-details" style="background:rgba(255,255,255,0.02); border:1px solid rgba(255,255,255,0.06); border-radius:10px; padding:0.75rem 1rem; margin-bottom:1.5rem;">
+                        <summary style="font-size:0.85rem; font-weight:600; color:var(--text-muted); cursor:pointer;">
+                            Other cloud providers (GCP, Azure, DigitalOcean, Hetzner)
+                        </summary>
+                        <div class="provider-grid" style="margin-top:1rem;">
+                            <div class="provider-card" data-provider="gcp" onclick="CloudConnect.openSettings('gcp')">
+                                <div class="provider-icon">🌐</div>
+                                <h3>Google Cloud Platform</h3>
+                                <p>Service Account Key / Project ID</p>
+                            </div>
+                            <div class="provider-card" data-provider="azure" onclick="CloudConnect.openSettings('azure')">
+                                <div class="provider-icon">🔷</div>
+                                <h3>Microsoft Azure</h3>
+                                <p>Entra ID / Client Secret</p>
+                            </div>
+                            <div class="provider-card" data-provider="hetzner" onclick="CloudConnect.openSettings('hetzner')">
+                                <div class="provider-icon">🚀</div>
+                                <h3>Hetzner Cloud</h3>
+                                <p>API Token</p>
+                            </div>
+                            <div class="provider-card" data-provider="digitalocean" onclick="CloudConnect.openSettings('digitalocean')">
+                                <div class="provider-icon">🌊</div>
+                                <h3>DigitalOcean</h3>
+                                <p>Personal Access Token</p>
+                            </div>
+                        </div>
+                    </details>
+
+                    <!-- Full-Width Primary Action: Run First Scan -->
+                    <div class="first-scan-cta-box" style="margin-top: 1.5rem; text-align: center;">
+                        <button class="btn btn-primary btn-lg" id="btn-run-first-scan" onclick="switchPanel('scan'); if(window.Scanner) Scanner.startScan();" style="width: 100%; padding: 1rem; font-size: 1.05rem; font-weight: 700; justify-content: center;" disabled>
+                            🔍 Run first scan →
+                        </button>
+                        <p style="font-size: 0.78rem; color: var(--text-dim); margin-top: 0.5rem;">
+                            Connect your cloud above to unlock real-time compliance discovery.
+                        </p>
+                    </div>
                 </div>
 
                 <!-- ══════ Panel: Tenants (Multi-Tenancy) ══════ -->
@@ -1028,58 +1062,21 @@
         </div>
     </div>
 
-    <!-- ══════ Full-Screen Auth Gate Overlay ══════ -->
+    <!-- ══════ Honest Auth Gate Overlay ══════ -->
     <div class="auth-gate-overlay" id="auth-gate-overlay">
         <div class="auth-gate-card">
-            <div class="auth-gate-badge">Enterprise Security Gateway</div>
             <div class="auth-gate-logo">
                 ComplianceFlow<span>AI</span>
             </div>
-            <h2>Enterprise Cloud Compliance & Continuous Governance</h2>
-            <p class="auth-gate-subtitle">
-                Sign in to your organization workspace to manage continuous multi-cloud posture, automated drift remediation, and SOC2 / ISO 27001 auditor evidence.
-            </p>
+            <h2>Sign in to continue</h2>
+            <p class="auth-gate-subtitle">Use your work Google or GitHub account</p>
 
-            <div class="auth-gate-actions">
-                <button class="btn btn-sso-google" onclick="AuthUI.signInWithGoogle()">
-                    <svg width="18" height="18" viewBox="0 0 24 24"><path fill="#4285F4" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z"/><path fill="#34A853" d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z"/><path fill="#FBBC05" d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.06H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.94l2.85-2.22.81-.63z"/><path fill="#EA4335" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.06l3.66 2.84c.87-2.6 3.3-4.52 6.16-4.52z"/></svg>
-                    <span>Sign in with Google Workspace</span>
-                </button>
-                <button class="btn btn-sso-github" onclick="AuthUI.signInWithGitHub()">
-                    <svg width="18" height="18" viewBox="0 0 24 24" fill="#fff"><path d="M12 0C5.37 0 0 5.37 0 12c0 5.31 3.435 9.795 8.205 11.385.6.105.825-.255.825-.57 0-.285-.015-1.23-.015-2.235-3.015.555-3.795-.735-4.035-1.41-.135-.345-.72-1.41-1.23-1.695-.42-.225-1.02-.78-.015-.795.945-.015 1.62.87 1.845 1.23 1.08 1.815 2.805 1.305 3.495.99.105-.78.42-1.305.765-1.605-2.67-.3-5.46-1.335-5.46-5.925 0-1.305.465-2.385 1.23-3.225-.12-.3-.54-1.53.12-3.18 0 0 1.005-.315 3.3 1.23.96-.27 1.98-.405 3-.405s2.04.135 3 .405c2.295-1.56 3.3-1.23 3.3-1.23.66 1.65.24 2.88.12 3.18.765.84 1.23 1.905 1.23 3.225 0 4.605-2.805 5.625-5.475 5.925.435.375.81 1.095.81 2.22 0 1.605-.015 2.895-.015 3.3 0 .315.225.69.825.57A12.02 12.02 0 0024 12c0-6.63-5.37-12-12-12z"/></svg>
-                    <span>Sign in with GitHub Enterprise</span>
-                </button>
+            <div class="auth-gate-actions" id="auth-gate-dynamic-actions">
+                <!-- Dynamically populated from /api/auth/providers -->
             </div>
 
-            <div class="auth-gate-divider">
-                <span>OR STAGING / PILOT DEV PORTAL</span>
-            </div>
-
-            <div class="auth-dev-grid">
-                <button class="btn btn-dev-role" onclick="AuthUI.quickDevLogin('ADMIN')">
-                    <strong>👑 Admin</strong>
-                    <small>Full governance</small>
-                </button>
-                <button class="btn btn-dev-role" onclick="AuthUI.quickDevLogin('ENGINEER')">
-                    <strong>⚙️ Engineer</strong>
-                    <small>Scan & validate</small>
-                </button>
-                <button class="btn btn-dev-role" onclick="AuthUI.quickDevLogin('AUDITOR')">
-                    <strong>⚖️ Auditor</strong>
-                    <small>Read-only evidence</small>
-                </button>
-            </div>
-
-            <div class="auth-gate-footer">
-                <div class="auth-trust-pills">
-                    <span>🛡️ SOC2 Type II</span>
-                    <span>🇪🇺 GDPR</span>
-                    <span>🏥 HIPAA</span>
-                    <span>🌐 ISO 27001</span>
-                </div>
-                <div class="auth-security-notice">
-                    🔒 Protected by enterprise session hashing & multi-tenant organization isolation.
-                </div>
+            <div style="font-size:0.75rem; color:var(--text-dim); margin-top:1.25rem; border-top:1px solid rgba(255,255,255,0.06); padding-top:0.75rem;">
+                Need a pilot account? Contact <a href="mailto:support@compflow.icu" style="color:var(--primary); text-decoration:none;">support@compflow.icu</a>
             </div>
         </div>
     </div>
