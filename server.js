@@ -13,6 +13,7 @@ import { handler as chatHandler } from './api/chat.js';
 import jobStatusHandler from './api/job-status.js';
 import jobStreamHandler from './api/job-stream.js';
 import auditorHandler from './api/auditor.js';
+import remediateHandler from './api/remediate.js';
 import authRouter from './api/auth.js';
 import { handler as workerHandler } from './worker.js';
 import { listenWorkerQueue } from './core/queue.js';
@@ -217,6 +218,13 @@ app.post('/api/chat',
     heavyActionLimiter,
     requireAuth([ROLES.ENGINEER]),
     lambdaAdapter(chatHandler)
+);
+
+// ── Remediation Engine (ENGINEER+ can trigger dry-run & live auto-fixes) ──
+app.all(['/api/remediate', '/api/remediation'],
+    heavyActionLimiter,
+    requireAuth([ROLES.ENGINEER]),
+    remediateHandler
 );
 
 // ── Auditor Portal ──
