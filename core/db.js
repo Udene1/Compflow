@@ -13,12 +13,22 @@ class MemoryFallbackPool {
     async query(sql, params = []) {
         // Simple mock query evaluator for fallback mode
         if (sql.includes('SELECT * FROM tenants')) {
+            if (sql.includes('WHERE org_id = $1') && params.length > 0) {
+                return { rows: this.tenants.filter(t => t.org_id === params[0]) };
+            }
+            if (sql.includes('WHERE id = $1 AND org_id = $2') && params.length >= 2) {
+                const found = this.tenants.filter(t => t.id === params[0] && t.org_id === params[1]);
+                return { rows: found };
+            }
+            if (sql.includes('WHERE id = $1') && params.length > 0) {
+                return { rows: this.tenants.filter(t => t.id === params[0]) };
+            }
             return { rows: this.tenants };
         }
         if (sql.includes('INSERT INTO tenants')) {
-            const [id, name, provider, roleArn, apiToken, email, autoRemediate, status] = params;
+            const [id, orgId, name, provider, roleArn, apiToken, email, autoRemediate, status] = params;
             const existingIdx = this.tenants.findIndex(t => t.id === id);
-            const record = { id, name, provider, role_arn: roleArn, api_token: apiToken, email, auto_remediate: autoRemediate, status, created_at: new Date() };
+            const record = { id, org_id: orgId || 'org_default', name, provider, role_arn: roleArn, api_token: apiToken, email, auto_remediate: autoRemediate, status, created_at: new Date() };
             if (existingIdx >= 0) {
                 this.tenants[existingIdx] = record;
             } else {
@@ -123,6 +133,7 @@ export async function initDb() {
 
         CREATE TABLE IF NOT EXISTS tenants (
             id VARCHAR(64) PRIMARY KEY,
+            org_id VARCHAR(64) DEFAULT 'org_default',
             name VARCHAR(255) NOT NULL,
             provider VARCHAR(64) NOT NULL,
             role_arn TEXT,
@@ -133,6 +144,8 @@ export async function initDb() {
             created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
             updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
         );
+        CREATE INDEX IF NOT EXISTS idx_tenants_org_id ON tenants(org_id);
+        ALTER TABLE tenants ADD COLUMN IF NOT EXISTS org_id VARCHAR(64) DEFAULT 'org_default';
 
         -- Multi-Tenant Team Authentication & SSO Schema
         CREATE TABLE IF NOT EXISTS organizations (

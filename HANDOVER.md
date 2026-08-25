@@ -18,17 +18,18 @@
 10. [SOC2 Third-Party Auditor Portal](#10-soc2-third-party-auditor-portal)
 11. [Custom Policy Rules Engine](#11-custom-policy-rules-engine)
 12. [Autonomous Scheduled Sweeps](#12-autonomous-scheduled-sweeps)
-13. [Every Integration & Why It Was Chosen](#13-every-integration--why-it-was-chosen)
-14. [Database & Queue Architecture](#14-database--queue-architecture)
-15. [Security Model & Credential Handling](#15-security-model--credential-handling)
-16. [API Endpoints Reference](#16-api-endpoints-reference)
-17. [Frontend Dashboard](#17-frontend-dashboard)
-18. [Infrastructure & Deployment](#18-infrastructure--deployment)
-19. [Testing Strategy](#19-testing-strategy)
-20. [Environment Variables](#20-environment-variables)
-21. [Production Domains & URLs](#21-production-domains--urls)
-22. [Known Limitations & Future Roadmap](#22-known-limitations--future-roadmap)
-23. [Glossary of Compliance Terms](#23-glossary-of-compliance-terms)
+13. [CI/CD Pull Request Compliance Gate](#13-cicd-pull-request-compliance-gate-shift-left-iac-security)
+14. [Every Integration & Why It Was Chosen](#14-every-integration--why-it-was-chosen)
+15. [Database & Queue Architecture](#15-database--queue-architecture)
+16. [Security Model & Credential Handling](#16-security-model--credential-handling)
+17. [API Endpoints Reference](#17-api-endpoints-reference)
+18. [Frontend Dashboard](#18-frontend-dashboard)
+19. [Infrastructure & Deployment](#19-infrastructure--deployment)
+20. [Testing Strategy](#20-testing-strategy)
+21. [Environment Variables](#21-environment-variables)
+22. [Production Domains & URLs](#22-production-domains--urls)
+23. [Known Limitations & Future Roadmap](#23-known-limitations--future-roadmap)
+24. [Glossary of Compliance Terms](#24-glossary-of-compliance-terms)
 
 ---
 
@@ -657,7 +658,39 @@ Instead of manually triggering scans, the scheduler runs automatically on a cron
 
 ---
 
-## 13. Every Integration & Why It Was Chosen
+## 13. CI/CD Pull Request Compliance Gate (Shift-Left IaC Security)
+
+**Files:** `scripts/iac-compliance-check.js`, `.github/workflows/compliance-gate.yml`
+
+### What This Does & Who It Is For
+The CI/CD Compliance Gate is a **"shift-left" automated security barrier** designed for:
+1. **Customer Engineering Teams**: Organizations using ComplianceFlow can drop this GitHub Action into their application and infrastructure repositories. Whenever developers open a Pull Request modifying Infrastructure-as-Code (Terraform, Bicep, CloudFormation, ARM templates), ComplianceFlow automatically analyzes the code and blocks merge if critical compliance violations exist.
+2. **Internal Repository Dogfooding**: Runs on ComplianceFlow's own repository to guarantee that all internal infrastructure and demo templates adhere to strict SOC 2 and ISO 27001 policies.
+
+### Zero-Credential Static Analysis Engine
+Unlike runtime scans that query live cloud APIs, the IaC analyzer performs **pure static analysis** directly on repository code — requiring **zero cloud credentials, API keys, or AWS/Azure secrets** in GitHub Actions.
+
+### Rule Categories Evaluated:
+| Rule ID | Category | Severity | What It Catches |
+|:--------|:---------|:---------|:----------------|
+| `TF-SEC-001` | Public Access | **Critical** | S3 `public-read`/`public-read-write`, Azure public blob access, unblocked public access blocks |
+| `TF-SEC-002` | Encryption | **Critical** | `storage_encrypted = false`, disabled TLS 1.2+, empty KMS key IDs |
+| `TF-SEC-003` | Open Ports | **Critical** | Security groups/NSGs allowing `0.0.0.0/0` (SSH port 22, RDP port 3389, full ranges) |
+| `TF-IAM-001` | IAM Wildcards | **Critical** | Policies granting `Action: "*"` or `Principal: "*"` |
+| `TF-SEC-004` | Observability | **High** | Disabled CloudTrail multi-region or log validation, disabled VPC flow logs |
+| `TF-SEC-005` | Resilience | **High** | 0-day backup retention period, disabled point-in-time recovery (PITR) |
+| `TF-GOV-001` | Region Guard | **Warning** | Deployments targeting unapproved cloud regions |
+| `TF-GOV-002` | Mandatory Tags | **Warning** | Resources missing required tags (`Environment`, `Owner`, `DataClassification`) |
+
+### How Customer Teams Integrate It:
+1. Copy `scripts/iac-compliance-check.js` into their repo's `scripts/` directory.
+2. Add `.github/workflows/compliance-gate.yml` to their `.github/workflows/` directory.
+3. Every Pull Request will receive an automated sticky comment with visual status badges, line-by-line findings, and remediation steps.
+4. Merge is automatically blocked on exit code `1` (critical findings).
+
+---
+
+## 14. Every Integration & Why It Was Chosen
 
 ### Runtime & Language
 | Technology | Why |
