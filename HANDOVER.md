@@ -818,8 +818,28 @@ To protect backend computing power and LLM API quotas from malicious exhaustion:
      - `POST /api/scan` (full multi-service scan)
      - `POST /api/trigger` (autonomous tenant dispatch)
      - `POST /api/chat` (Gemini LLM queries)
-4. **Reverse Proxy Trust**:
+4. **Auth Endpoint Rate Limiter**:
+   - Limit: **50 requests per 15 minutes per IP** on authentication endpoints to prevent brute-force attacks.
+5. **Reverse Proxy Trust**:
    - Configured `app.set('trust proxy', 1)` to evaluate client IPs through Cloudflare (`CF-Connecting-IP`) or Nginx (`X-Forwarded-For`).
+
+### Authentication & Role-Based Access Control (RBAC)
+ComplianceFlow enforces strict server-side authentication across all sensitive endpoints using cryptographic HMAC-SHA256 session tokens.
+
+#### RBAC Role Hierarchy:
+```
+OWNER (100) > ADMIN (80) > ENGINEER (60) > AUDITOR (40) > VIEWER (20)
+```
+- **OWNER**: Full organization control, user management, billing, and system configuration.
+- **ADMIN**: Infrastructure monitoring, job queue management, trigger autonomous sweeps, tenant registration.
+- **ENGINEER**: Initiate cloud scans, execute safe remediations, validate cloud credentials, interact with AI assistant.
+- **AUDITOR**: Read-only access to audit trail, export cryptographically signed compliance bundles, verify packages.
+- **VIEWER**: Read-only dashboard view, view job status, stream real-time scan logs.
+
+#### Enterprise Domain & Organization Restrictions:
+- **Hosted Domain (`hd`) Enforcement**: Configurable via `ALLOWED_DOMAINS` (e.g. `ALLOWED_DOMAINS=company.com`). Rejects personal email accounts (`gmail.com`, `yahoo.com`) if `REJECT_PERSONAL_EMAILS=true`.
+- **GitHub Organization Membership**: Restricts GitHub SSO logins to members of specific organizations via `ALLOWED_GITHUB_ORGS`.
+- **Server-Side Session Invalidation**: `/api/auth/logout` adds the session token hash to an in-memory revocation list with automatic TTL cleanup, instantly rejecting any further requests.
 
 ---
 
@@ -827,31 +847,30 @@ To protect backend computing power and LLM API quotas from malicious exhaustion:
 
 **Base URL:** `https://api.compflow.icu`
 
-| Method | Endpoint | Purpose |
-|:-------|:---------|:--------|
-| `GET` | `/health` | Health check. Returns `{"status":"OK"}`. |
-| `POST` | `/api/scan` | Trigger an ad-hoc scan for a provider with credentials. |
-| `POST` | `/api/trigger` | Dispatch a scan for a registered tenant by ID. |
-| `GET/POST` | `/api/tenants` | List or register cloud environments. |
-| `POST` | `/api/tenants/toggle` | Enable/disable auto-remediation for a tenant. |
-| `ALL` | `/api/validate` | Validate cloud credentials without scanning. |
-| `POST` | `/api/chat` | AI compliance assistant (Gemini-powered). |
-| `GET` | `/api/job-status?jobId=X` | Poll the status/progress of a running job. |
-| `GET` | `/api/job-stream?jobId=X` | Server-Sent Events (SSE) live stream of job progress. |
-| `GET` | `/api/audit?clientId=X` | Fetch DynamoDB audit trail logs. |
-| `POST` | `/api/auditor/token` | Generate time-limited auditor access token. |
-| `GET` | `/api/auditor/export?token=X` | Download signed evidence bundle. |
-| `POST` | `/api/auditor/verify` | Verify evidence package integrity. |
-| `POST` | `/api/monitoring` | Submit monitoring/job tracking data. |
-| `POST` | `/api/jobs` | Lambda-compatible job management endpoint. |
-| `GET` | `/api/auth/providers` | Check status of configured SSO providers (Google, GitHub). |
-| `GET` | `/api/auth/google` | Initiate Google Workspace OAuth 2.0 login. |
-| `GET` | `/api/auth/google/callback` | Exchange Google OAuth code & issue session cookie. |
-| `GET` | `/api/auth/github` | Initiate GitHub Developer OAuth login. |
-| `GET` | `/api/auth/github/callback` | Exchange GitHub OAuth code & issue session cookie. |
-| `GET` | `/api/auth/me` | Fetch currently authenticated user, tenant org & role. |
-| `POST` | `/api/auth/dev-login` | Staging/testing mock login. |
-| `POST` | `/api/auth/logout` | Invalidate session and clear HTTP-only session cookie. |
+| Method | Endpoint | Min Role | Purpose |
+|:-------|:---------|:---------|:--------|
+| `GET` | `/health` | *Public* | Health check. Returns `{"status":"OK"}`. |
+| `GET` | `/api/auth/providers` | *Public* | Check status of configured SSO providers (Google, GitHub). |
+| `GET` | `/api/auth/google` | *Public* | Initiate Google Workspace OAuth 2.0 login. |
+| `GET` | `/api/auth/google/callback` | *Public* | Exchange Google OAuth code & issue session cookie. |
+| `GET` | `/api/auth/github` | *Public* | Initiate GitHub Developer OAuth login. |
+| `GET` | `/api/auth/github/callback` | *Public* | Exchange GitHub OAuth code & issue session cookie. |
+| `POST` | `/api/auth/dev-login` | *Public / Dev* | Staging/testing mock login (disabled in production unless `ENABLE_DEV_LOGIN=true`). |
+| `POST` | `/api/auth/logout` | *Public* | Revoke session server-side and clear HTTP-only session cookie. |
+| `GET` | `/api/auth/me` | `VIEWER` | Fetch currently authenticated user, tenant org & role. |
+| `POST` | `/api/scan` | `ENGINEER` | Trigger an ad-hoc scan for a provider with credentials. |
+| `POST` | `/api/trigger` | `ADMIN` | Dispatch autonomous sweeps for registered tenants. |
+| `GET` | `/api/tenants` | `VIEWER` | List registered cloud environments for user's organization. |
+| `POST` | `/api/tenants` | `ADMIN` | Register a new cloud environment. |
+| `PATCH` | `/api/tenants` | `ADMIN` | Modify tenant settings (e.g. toggle auto-remediation). |
+| `POST` | `/api/tenants/toggle` | `ADMIN` | Enable/disable auto-remediation for a tenant. |
+| `POST` | `/api/validate` | `ENGINEER` | Validate cloud credentials without scanning. |
+| `POST` | `/api/chat` | `ENGINEER` | AI compliance assistant (Gemini-powered). |
+| `GET` | `/api/job-status?jobId=X` | `VIEWER` | Poll the status/progress of a running job. |
+| `GET` | `/api/job-stream?jobId=X` | `VIEWER` | Server-Sent Events (SSE) live stream of job progress. |
+| `ALL` | `/api/auditor*` | `AUDITOR` | Auditor portal endpoints (token issuance, package export, verify). |
+| `POST` | `/api/monitoring` | `ADMIN` | Submit monitoring/job tracking data. |
+| `POST` | `/api/jobs` | `ADMIN` | Lambda-compatible job management endpoint. |
 
 ---
 
@@ -978,6 +997,29 @@ AWS_SES_FROM_EMAIL=reports@complianceflow.ai
 POSTGRES_HOST=postgres
 POSTGRES_PORT=5432
 POSTGRES_DB=compflow
+# Authentication & Session Security
+AUTH_SECRET=your_cryptographic_hmac_secret_2026
+APP_URL=https://compflow.icu
+API_URL=https://api.compflow.icu
+
+# Google Workspace SSO (OAuth 2.0)
+GOOGLE_CLIENT_ID=your-google-client-id.apps.googleusercontent.com
+GOOGLE_CLIENT_SECRET=your-google-client-secret
+
+# GitHub Enterprise / Developer SSO
+GITHUB_CLIENT_ID=your-github-client-id
+GITHUB_CLIENT_SECRET=your-github-client-secret
+
+# Enterprise Domain & Organization Restrictions (Optional)
+ALLOWED_DOMAINS=yourcompany.com,enterprise.io
+ALLOWED_GITHUB_ORGS=your-github-org
+REJECT_PERSONAL_EMAILS=true
+ENABLE_DEV_LOGIN=false
+
+# PostgreSQL Database (used by Docker Compose)
+POSTGRES_HOST=postgres
+POSTGRES_PORT=5432
+POSTGRES_DB=compflow
 POSTGRES_USER=compflow_user
 POSTGRES_PASSWORD=compflow_pass_secret
 
@@ -1013,13 +1055,14 @@ PORT=3000
 
 ## 22. Known Limitations & Future Roadmap
 
-### Current Limitations
-| Area | Limitation |
-|:-----|:-----------|
-| Authentication | No user login/SSO yet. API is open (relies on network-level access control). |
-| Multi-Tenant Isolation | Tenant data is logically separated by `client_id`, not physically isolated. |
-| PCI-DSS | Framework mapping exists but has fewer control mappings than SOC2/GDPR. |
-| Terraform/IaC | Remediation operates via cloud APIs, not Infrastructure as Code. |
+### Current Status
+| Area | Status |
+|:-----|:-------|
+| Authentication & RBAC | Enforced on all sensitive API routes via `requireAuth` + role hierarchy (`OWNER > ADMIN > ENGINEER > AUDITOR > VIEWER`) + server-side session revocation. |
+| Domain Restrictions | Enforced via Google `hd` parameter + server-side domain allowlist + GitHub organization membership validation. |
+| Multi-Tenant Isolation | Org-scoped data mapping and RBAC role gates active. |
+| CI/CD Compliance Gate | Automated GitHub Action statically analyzes Terraform/IaC on PRs to block non-compliant code. |
+| Auditor Portal | Cryptographically signed HMAC-SHA256 evidence packages with real-time tamper verifier. |
 
 ### Roadmap
 - [x] API Rate Limiting & DDoS Defense (Layer 7 `express-rate-limit` + Cloudflare edge)
@@ -1027,6 +1070,8 @@ PORT=3000
 - [x] Autonomous Scheduled Compliance Sweeps (Daily/Weekly automated sweeps)
 - [x] Custom Organization Governance Policies Engine
 - [x] Team Authentication & SSO (Google Workspace, GitHub OAuth 2.0, Multi-Tenant RBAC)
+- [x] CI/CD Pull Request Compliance Gate (GitHub Action for Terraform/IaC)
+- [x] Route-Level Auth Hardening, RBAC Gates & Server-Side Session Revocation (Phase 0)
 - [ ] Slack / Microsoft Teams Webhook Notifications
 - [ ] Terraform Plan Generation (suggest IaC fixes instead of direct API calls)
 - [ ] Multi-region PostgreSQL replication

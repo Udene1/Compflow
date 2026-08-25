@@ -18,6 +18,10 @@ import { handler as workerHandler } from './worker.js';
 import { listenWorkerQueue } from './core/queue.js';
 import { initDb } from './core/db.js';
 
+// Auth & RBAC Middleware
+import { requireAuth, optionalAuth } from './core/auth_guard.js';
+import { ROLES } from './core/auth.js';
+
 const app = express();
 
 // Trust reverse proxies (Cloudflare, Nginx, Azure ALB)
@@ -46,6 +50,15 @@ const heavyActionLimiter = rateLimit({
     message: { error: 'Too Many Requests', message: 'Heavy operation rate limit exceeded. Please wait 5 minutes before retrying.' }
 });
 
+// Auth endpoint rate limiter (prevents brute-force on login/dev-login)
+const authLimiter = rateLimit({
+    windowMs: 15 * 60 * 1000,
+    limit: 50,
+    standardHeaders: 'draft-7',
+    legacyHeaders: false,
+    message: { error: 'Too Many Requests', message: 'Authentication rate limit exceeded. Please wait before retrying.' }
+});
+
 app.use('/api/', generalLimiter);
 
 const PORT = process.env.PORT || 3000;
@@ -60,7 +73,9 @@ function lambdaAdapter(handler) {
                 headers: req.headers,
                 queryStringParameters: req.query || null,
                 body: JSON.stringify(req.body || {}),
-                requestContext: {}
+                requestContext: {},
+                // Pass authenticated user context to lambda handlers
+                authContext: req.user || null
             };
 
             const result = await handler(event);
@@ -93,23 +108,107 @@ function lambdaAdapter(handler) {
     };
 }
 
-// Map HTTP Routes to Handlers
-app.post('/api/trigger', heavyActionLimiter, lambdaAdapter(schedulerHandler));
-app.all('/api/tenants', tenantsHandler);
-app.all('/api/tenants/toggle', tenantsHandler);
-app.post('/api/scan', heavyActionLimiter, scanHandler);
-app.all('/api/validate', validateHandler);
-app.post('/api/monitoring', lambdaAdapter(monitoringHandler));
-app.post('/api/jobs', lambdaAdapter(jobsHandler));
-app.get('/api/job-status', jobStatusHandler);
-app.get('/api/job-stream', jobStreamHandler);
-app.post('/api/chat', heavyActionLimiter, lambdaAdapter(chatHandler));
-app.all('/api/auditor*', auditorHandler);
-app.use('/api/auth', authRouter);
+// ─────────────────────────────────────────────────────────────────────────────
+// PUBLIC ROUTES — No authentication required
+// ─────────────────────────────────────────────────────────────────────────────
 
-// Health Check Route
+// Health Check
 app.get('/health', (req, res) => {
     res.json({ status: 'OK', timestamp: new Date().toISOString() });
+});
+
+// Authentication Routes (login/logout/callback/providers)
+app.use('/api/auth', authLimiter, authRouter);
+
+// ─────────────────────────────────────────────────────────────────────────────
+// PROTECTED ROUTES — Require valid session + RBAC enforcement
+// ─────────────────────────────────────────────────────────────────────────────
+
+// ── Scan Operations (ENGINEER+ can initiate scans) ──
+app.post('/api/scan',
+    heavyActionLimiter,
+    requireAuth([ROLES.ENGINEER]),
+    scanHandler
+);
+
+// ── Autonomous Sweep Trigger (ADMIN+ can trigger org-wide sweeps) ──
+app.post('/api/trigger',
+    heavyActionLimiter,
+    requireAuth([ROLES.ADMIN]),
+    lambdaAdapter(schedulerHandler)
+);
+
+// ── Tenant / Cloud Connection Management ──
+// GET: Any authenticated user can list tenants (filtered by org)
+// POST/PATCH: Only ADMIN+ can create or modify tenants
+app.get('/api/tenants',
+    requireAuth([ROLES.VIEWER]),
+    tenantsHandler
+);
+app.post('/api/tenants',
+    requireAuth([ROLES.ADMIN]),
+    tenantsHandler
+);
+app.patch('/api/tenants',
+    requireAuth([ROLES.ADMIN]),
+    tenantsHandler
+);
+app.all('/api/tenants/toggle',
+    requireAuth([ROLES.ADMIN]),
+    tenantsHandler
+);
+
+// ── Credential Validation (ENGINEER+ can validate cloud credentials) ──
+app.post('/api/validate',
+    requireAuth([ROLES.ENGINEER]),
+    validateHandler
+);
+
+// ── Job Monitoring & Streaming ──
+// Job status polling: any authenticated user can check their jobs
+app.get('/api/job-status',
+    requireAuth([ROLES.VIEWER]),
+    jobStatusHandler
+);
+// SSE job stream: any authenticated user can stream results
+app.get('/api/job-stream',
+    requireAuth([ROLES.VIEWER]),
+    jobStreamHandler
+);
+
+// ── Infrastructure Monitoring (ADMIN+) ──
+app.post('/api/monitoring',
+    requireAuth([ROLES.ADMIN]),
+    lambdaAdapter(monitoringHandler)
+);
+
+// ── Job Management (ADMIN+ can manage job queue) ──
+app.post('/api/jobs',
+    requireAuth([ROLES.ADMIN]),
+    lambdaAdapter(jobsHandler)
+);
+
+// ── AI Chat (ENGINEER+ can interact with compliance AI) ──
+app.post('/api/chat',
+    heavyActionLimiter,
+    requireAuth([ROLES.ENGINEER]),
+    lambdaAdapter(chatHandler)
+);
+
+// ── Auditor Portal ──
+// Token generation: ADMIN+ can issue auditor tokens
+// Export: AUDITOR+ can download evidence packages (also verified via auditor token)
+// Verify: Any authenticated user can verify package integrity
+app.all('/api/auditor*',
+    requireAuth([ROLES.AUDITOR]),
+    auditorHandler
+);
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Catch-all for undefined API routes
+// ─────────────────────────────────────────────────────────────────────────────
+app.all('/api/*', (req, res) => {
+    res.status(404).json({ error: 'Not Found', message: `API endpoint ${req.method} ${req.path} does not exist.` });
 });
 
 // Initialize Database & Start Worker Daemon
@@ -121,6 +220,8 @@ async function startApp() {
 
     app.listen(PORT, () => {
         console.log(`[HTTP SERVER] ComplianceFlow API server listening on port ${PORT}`);
+        console.log(`[AUTH] Route protection: ENABLED — all /api/* routes require authentication`);
+        console.log(`[RBAC] Role hierarchy: OWNER > ADMIN > ENGINEER > AUDITOR > VIEWER`);
     });
 }
 

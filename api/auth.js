@@ -1,6 +1,6 @@
 import { Router } from 'express';
 import crypto from 'crypto';
-import { createSessionToken, upsertUserFromOAuth, ROLES, validateSessionToken } from '../core/auth.js';
+import { createSessionToken, upsertUserFromOAuth, ROLES, validateSessionToken, revokeSession } from '../core/auth.js';
 import { requireAuth, optionalAuth } from '../core/auth_guard.js';
 import { log } from '../core/logger.js';
 
@@ -8,6 +8,58 @@ const router = Router();
 
 const APP_URL = process.env.APP_URL || 'https://compflow.icu';
 const API_URL = process.env.API_URL || 'https://api.compflow.icu';
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Domain & Organization Restriction Configuration
+// ─────────────────────────────────────────────────────────────────────────────
+// Comma-separated list of allowed email domains. If empty, all domains are allowed.
+// Example: ALLOWED_DOMAINS=acme.com,contoso.org,compflow.icu
+const ALLOWED_DOMAINS = (process.env.ALLOWED_DOMAINS || '')
+    .split(',')
+    .map(d => d.trim().toLowerCase())
+    .filter(Boolean);
+
+// Comma-separated list of allowed GitHub organization logins.
+// Example: ALLOWED_GITHUB_ORGS=acme-corp,contoso-security
+const ALLOWED_GITHUB_ORGS = (process.env.ALLOWED_GITHUB_ORGS || '')
+    .split(',')
+    .map(o => o.trim().toLowerCase())
+    .filter(Boolean);
+
+// Whether to reject personal email domains (gmail.com, yahoo.com, etc.)
+const REJECT_PERSONAL_EMAILS = process.env.REJECT_PERSONAL_EMAILS === 'true';
+
+const PERSONAL_DOMAINS = new Set([
+    'gmail.com', 'yahoo.com', 'hotmail.com', 'outlook.com', 'icloud.com',
+    'aol.com', 'protonmail.com', 'zoho.com', 'mail.com', 'yandex.com'
+]);
+
+/**
+ * Validates that an email domain is allowed by organization policy.
+ * Returns { allowed: true } or { allowed: false, reason: string }
+ */
+function validateEmailDomain(email) {
+    const domain = email.split('@')[1]?.toLowerCase();
+    if (!domain) return { allowed: false, reason: 'Invalid email address format.' };
+
+    // Check personal email rejection
+    if (REJECT_PERSONAL_EMAILS && PERSONAL_DOMAINS.has(domain)) {
+        return {
+            allowed: false,
+            reason: `Personal email domains (${domain}) are not allowed. Please sign in with your corporate email.`
+        };
+    }
+
+    // Check domain allowlist (if configured)
+    if (ALLOWED_DOMAINS.length > 0 && !ALLOWED_DOMAINS.includes(domain)) {
+        return {
+            allowed: false,
+            reason: `Email domain "${domain}" is not authorized. Allowed domains: [${ALLOWED_DOMAINS.join(', ')}]`
+        };
+    }
+
+    return { allowed: true };
+}
 
 // ─────────────────────────────────────────────────────────────────────────────
 // 1. Providers Status Endpoint
@@ -22,12 +74,17 @@ router.get('/providers', (req, res) => {
             enabled: Boolean(process.env.GITHUB_CLIENT_ID && process.env.GITHUB_CLIENT_SECRET),
             authUrl: '/api/auth/github'
         },
-        devLogin: process.env.NODE_ENV !== 'production' || process.env.ENABLE_DEV_LOGIN === 'true'
+        devLogin: process.env.NODE_ENV !== 'production' || process.env.ENABLE_DEV_LOGIN === 'true',
+        domainRestrictions: {
+            allowedDomains: ALLOWED_DOMAINS.length > 0 ? ALLOWED_DOMAINS : 'all',
+            rejectPersonalEmails: REJECT_PERSONAL_EMAILS,
+            allowedGitHubOrgs: ALLOWED_GITHUB_ORGS.length > 0 ? ALLOWED_GITHUB_ORGS : 'all'
+        }
     });
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
-// 2. Google OAuth 2.0 Flow
+// 2. Google OAuth 2.0 Flow (with hd claim enforcement)
 // ─────────────────────────────────────────────────────────────────────────────
 router.get('/google', (req, res) => {
     if (!process.env.GOOGLE_CLIENT_ID) {
@@ -49,6 +106,12 @@ router.get('/google', (req, res) => {
         access_type: 'offline',
         prompt: 'select_account'
     });
+
+    // If only one domain is allowed, enforce Google's hd (hosted domain) parameter
+    // This restricts the Google account picker to only show that domain's accounts
+    if (ALLOWED_DOMAINS.length === 1) {
+        params.set('hd', ALLOWED_DOMAINS[0]);
+    }
 
     res.redirect(`https://accounts.google.com/o/oauth2/v2/auth?${params.toString()}`);
 });
@@ -89,6 +152,23 @@ router.get('/google/callback', async (req, res) => {
         });
         const profile = await profileResponse.json();
 
+        // ── Domain Restriction Enforcement ──
+        const domainCheck = validateEmailDomain(profile.email);
+        if (!domainCheck.allowed) {
+            log.warn(`[AUTH] Domain restriction blocked Google login for ${profile.email}: ${domainCheck.reason}`);
+            return res.redirect(`${APP_URL}/app.html?auth_error=${encodeURIComponent(domainCheck.reason)}`);
+        }
+
+        // ── Google hd (hosted domain) Claim Verification ──
+        // Even if hd was set in the auth URL, verify it server-side (defense in depth)
+        if (ALLOWED_DOMAINS.length > 0 && profile.hd) {
+            if (!ALLOWED_DOMAINS.includes(profile.hd.toLowerCase())) {
+                const reason = `Google Workspace domain "${profile.hd}" is not authorized.`;
+                log.warn(`[AUTH] hd claim mismatch blocked Google login for ${profile.email}: ${reason}`);
+                return res.redirect(`${APP_URL}/app.html?auth_error=${encodeURIComponent(reason)}`);
+            }
+        }
+
         // Upsert user & create session
         const { user, org, role } = await upsertUserFromOAuth(profile, 'google');
         const session = createSessionToken(user, org, role, 7);
@@ -99,6 +179,7 @@ router.get('/google/callback', async (req, res) => {
             `cf_user_email=${encodeURIComponent(user.email)}; Secure; SameSite=Lax; Path=/; Max-Age=${7 * 24 * 60 * 60}`
         ]);
 
+        log.info(`[AUTH] Google OAuth success: ${user.email} (Role: ${role}, Org: ${org.name})`);
         return res.redirect(`${APP_URL}/app.html?auth=success&role=${role}`);
     } catch (err) {
         log.error('[AUTH] Google OAuth callback failure:', err);
@@ -107,7 +188,7 @@ router.get('/google/callback', async (req, res) => {
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
-// 3. GitHub OAuth Flow
+// 3. GitHub OAuth Flow (with org membership enforcement)
 // ─────────────────────────────────────────────────────────────────────────────
 router.get('/github', (req, res) => {
     if (!process.env.GITHUB_CLIENT_ID) {
@@ -123,7 +204,7 @@ router.get('/github', (req, res) => {
     const params = new URLSearchParams({
         client_id: process.env.GITHUB_CLIENT_ID,
         redirect_uri: `${API_URL}/api/auth/github/callback`,
-        scope: 'read:user user:email',
+        scope: 'read:user user:email read:org',
         state
     });
 
@@ -154,6 +235,10 @@ router.get('/github/callback', async (req, res) => {
         });
         const tokenData = await tokenRes.json();
 
+        if (!tokenData.access_token) {
+            throw new Error(tokenData.error_description || 'Failed to obtain GitHub access token');
+        }
+
         // Fetch User Profile & primary email
         const userRes = await fetch('https://api.github.com/user', {
             headers: {
@@ -176,6 +261,32 @@ router.get('/github/callback', async (req, res) => {
             if (primary) profile.email = primary.email;
         }
 
+        // ── Domain Restriction Enforcement ──
+        const domainCheck = validateEmailDomain(profile.email);
+        if (!domainCheck.allowed) {
+            log.warn(`[AUTH] Domain restriction blocked GitHub login for ${profile.email}: ${domainCheck.reason}`);
+            return res.redirect(`${APP_URL}/app.html?auth_error=${encodeURIComponent(domainCheck.reason)}`);
+        }
+
+        // ── GitHub Organization Membership Check ──
+        if (ALLOWED_GITHUB_ORGS.length > 0) {
+            const orgsRes = await fetch('https://api.github.com/user/orgs', {
+                headers: {
+                    Authorization: `token ${tokenData.access_token}`,
+                    'User-Agent': 'ComplianceFlow-Auth'
+                }
+            });
+            const userOrgs = await orgsRes.json();
+            const orgLogins = Array.isArray(userOrgs) ? userOrgs.map(o => o.login.toLowerCase()) : [];
+            const isMember = ALLOWED_GITHUB_ORGS.some(allowed => orgLogins.includes(allowed));
+
+            if (!isMember) {
+                const reason = `GitHub user "${profile.login}" is not a member of required organizations: [${ALLOWED_GITHUB_ORGS.join(', ')}]`;
+                log.warn(`[AUTH] GitHub org restriction blocked: ${reason}`);
+                return res.redirect(`${APP_URL}/app.html?auth_error=${encodeURIComponent(reason)}`);
+            }
+        }
+
         const { user, org, role } = await upsertUserFromOAuth(profile, 'github');
         const session = createSessionToken(user, org, role, 7);
 
@@ -184,6 +295,7 @@ router.get('/github/callback', async (req, res) => {
             `cf_user_email=${encodeURIComponent(user.email)}; Secure; SameSite=Lax; Path=/; Max-Age=${7 * 24 * 60 * 60}`
         ]);
 
+        log.info(`[AUTH] GitHub OAuth success: ${user.email} (Role: ${role}, Org: ${org.name})`);
         return res.redirect(`${APP_URL}/app.html?auth=success&role=${role}`);
     } catch (err) {
         log.error('[AUTH] GitHub OAuth callback failure:', err);
@@ -202,38 +314,74 @@ router.get('/me', requireAuth(), (req, res) => {
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
-// 5. Developer & Testing Mock Login
+// 5. Developer & Testing Mock Login (disabled in production by default)
 // ─────────────────────────────────────────────────────────────────────────────
 router.post('/dev-login', async (req, res) => {
+    // Block dev-login in production unless explicitly enabled
+    if (process.env.NODE_ENV === 'production' && process.env.ENABLE_DEV_LOGIN !== 'true') {
+        return res.status(403).json({
+            error: 'Forbidden',
+            message: 'Developer login is disabled in production. Set ENABLE_DEV_LOGIN=true to override.'
+        });
+    }
+
     const email = req.body?.email || 'admin@compflow.icu';
     const role = req.body?.role || ROLES.ADMIN;
     const name = req.body?.name || 'Compliance Administrator';
 
-    const { user, org } = await upsertUserFromOAuth({ email, name }, 'dev_portal');
-    const session = createSessionToken(user, org, role, 7);
+    // Validate role is a known role
+    if (!Object.values(ROLES).includes(role)) {
+        return res.status(400).json({
+            error: 'Bad Request',
+            message: `Invalid role "${role}". Valid roles: ${Object.values(ROLES).join(', ')}`
+        });
+    }
 
-    res.setHeader('Set-Cookie', [
-        `cf_session=${session.token}; HttpOnly; Secure; SameSite=Lax; Path=/; Max-Age=${7 * 24 * 60 * 60}`,
-        `cf_user_email=${encodeURIComponent(user.email)}; Secure; SameSite=Lax; Path=/; Max-Age=${7 * 24 * 60 * 60}`
-    ]);
+    try {
+        const { user, org } = await upsertUserFromOAuth({ email, name }, 'dev_portal');
+        const session = createSessionToken(user, org, role, 1); // Dev sessions expire in 1 day
 
-    res.json({
-        success: true,
-        message: `Authenticated as ${email} (${role})`,
-        sessionToken: session.token,
-        user: session.payload
-    });
+        res.setHeader('Set-Cookie', [
+            `cf_session=${session.token}; HttpOnly; Secure; SameSite=Lax; Path=/; Max-Age=${24 * 60 * 60}`,
+            `cf_user_email=${encodeURIComponent(user.email)}; Secure; SameSite=Lax; Path=/; Max-Age=${24 * 60 * 60}`
+        ]);
+
+        log.info(`[AUTH] Dev-login: ${email} as ${role}`);
+
+        res.json({
+            success: true,
+            message: `Authenticated as ${email} (${role})`,
+            sessionToken: session.token,
+            user: session.payload
+        });
+    } catch (err) {
+        log.error('[AUTH] Dev-login failure:', err);
+        res.status(500).json({ error: 'Dev login failed', message: err.message });
+    }
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
-// 6. Logout
+// 6. Logout (server-side session invalidation)
 // ─────────────────────────────────────────────────────────────────────────────
 router.post('/logout', (req, res) => {
+    // Extract token to add to server-side revocation list
+    const cookies = req.cookies || {};
+    const token = cookies.cf_session ||
+                  req.headers.authorization?.replace(/^Bearer\s+/i, '');
+    
+    if (token) {
+        revokeSession(token);
+    }
+
+    // Clear all auth cookies with explicit expiry
     res.setHeader('Set-Cookie', [
-        'cf_session=; HttpOnly; Secure; SameSite=Lax; Path=/; Max-Age=0',
-        'cf_user_email=; Secure; SameSite=Lax; Path=/; Max-Age=0'
+        'cf_session=; HttpOnly; Secure; SameSite=Lax; Path=/; Max-Age=0; Expires=Thu, 01 Jan 1970 00:00:00 GMT',
+        'cf_user_email=; Secure; SameSite=Lax; Path=/; Max-Age=0; Expires=Thu, 01 Jan 1970 00:00:00 GMT',
+        'oauth_state=; HttpOnly; Secure; SameSite=Lax; Path=/; Max-Age=0; Expires=Thu, 01 Jan 1970 00:00:00 GMT'
     ]);
-    res.json({ success: true, message: 'Logged out successfully' });
+
+    log.info(`[AUTH] Session revoked and cookies cleared.`);
+    res.json({ success: true, message: 'Logged out successfully. Session revoked.' });
 });
 
 export default router;

@@ -4,6 +4,41 @@ import { log } from './logger.js';
 
 const AUTH_SECRET = process.env.AUTH_SECRET || process.env.JWT_SECRET || 'CompFlow_Auth_Engine_Secret_2026';
 
+// ─── Server-Side Session Revocation List ─────────────────────────────────────
+// In-memory revocation set. In production, use Redis for multi-instance support.
+const _revokedSessions = new Map(); // token_hash -> expiry timestamp
+const REVOCATION_CLEANUP_INTERVAL = 60 * 60 * 1000; // Prune expired entries every hour
+
+// Periodic cleanup of expired revocation entries to prevent memory growth
+setInterval(() => {
+    const now = Date.now();
+    for (const [hash, expiry] of _revokedSessions) {
+        if (expiry < now) _revokedSessions.delete(hash);
+    }
+}, REVOCATION_CLEANUP_INTERVAL).unref();
+
+/**
+ * Revokes a session token server-side (called on logout).
+ * The token is hashed and stored in the revocation set until its natural expiry.
+ */
+export function revokeSession(tokenString) {
+    if (!tokenString) return;
+    const hash = crypto.createHash('sha256').update(tokenString).digest('hex');
+    // Store with generous TTL (7 days max session lifetime)
+    const expiry = Date.now() + (7 * 24 * 60 * 60 * 1000);
+    _revokedSessions.set(hash, expiry);
+    log.info(`[AUTH] Session revoked (hash: ${hash.substring(0, 12)}...)`);
+}
+
+/**
+ * Checks if a session token has been server-side revoked.
+ */
+export function isSessionRevoked(tokenString) {
+    if (!tokenString) return false;
+    const hash = crypto.createHash('sha256').update(tokenString).digest('hex');
+    return _revokedSessions.has(hash);
+}
+
 export const ROLES = {
     OWNER: 'OWNER',
     ADMIN: 'ADMIN',
@@ -80,6 +115,11 @@ export function validateSessionToken(tokenString) {
     }
 
     try {
+        // Check server-side revocation list FIRST (fast rejection)
+        if (isSessionRevoked(tokenString)) {
+            return { valid: false, error: 'Session has been revoked (logged out)' };
+        }
+
         const decoded = JSON.parse(Buffer.from(tokenString, 'base64url').toString('utf8'));
         const { payload, signature } = decoded;
 
