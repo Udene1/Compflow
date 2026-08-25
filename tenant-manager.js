@@ -7,15 +7,34 @@ window.TenantManager = (() => {
 
     async function loadTenants() {
         try {
-            const res = await fetch(`${window.COMPLIANCE_API_URL}/api/tenants`);
-            const data = await res.json();
-            tenants = data.tenants || [];
-            renderTenants();
-            if (window.Evidence && typeof window.Evidence.renderAuditorPanel === 'function') {
-                window.Evidence.renderAuditorPanel();
+            const fetchFn = (window.AuthUI && window.AuthUI.authFetch) ? window.AuthUI.authFetch : fetch;
+            const res = await fetchFn(`${window.COMPLIANCE_API_URL}/api/tenants`);
+            
+            if (res.ok) {
+                const data = await res.json();
+                tenants = data.tenants || [];
+                renderTenants();
+                updateTenantCountUI();
+                
+                if (window.Evidence && typeof window.Evidence.renderAuditorPanel === 'function') {
+                    window.Evidence.renderAuditorPanel();
+                }
             }
         } catch (e) {
             console.error("Failed to load tenants", e);
+        }
+    }
+
+    function updateTenantCountUI() {
+        const countEl = document.getElementById('strip-tenant-count');
+        if (countEl) countEl.textContent = tenants.length;
+
+        // If at least one tenant is registered, update Onboarding Checklist step 2
+        const stepConnect = document.getElementById('step-connect');
+        if (stepConnect && tenants.length > 0) {
+            stepConnect.classList.add('completed');
+            const numEl = document.getElementById('step-connect-num');
+            if (numEl) numEl.textContent = '✓';
         }
     }
 
@@ -66,9 +85,16 @@ window.TenantManager = (() => {
         }).join('');
     }
 
-    function openOnboarding() {
+    function openOnboarding(preselectedProvider = 'aws') {
         const modal = document.getElementById('modal-onboarding');
-        if (modal) modal.classList.add('active');
+        if (modal) {
+            modal.classList.add('active');
+            const providerSelect = document.getElementById('onboard-provider');
+            if (providerSelect) {
+                providerSelect.value = preselectedProvider;
+                updateOnboardFields();
+            }
+        }
     }
 
     function closeOnboarding() {
@@ -193,7 +219,8 @@ window.TenantManager = (() => {
         if (!email) return alert("A reporting email is required for scan report delivery.");
 
         try {
-            const res = await fetch(`${window.COMPLIANCE_API_URL}/api/tenants`, {
+            const fetchFn = (window.AuthUI && window.AuthUI.authFetch) ? window.AuthUI.authFetch : fetch;
+            const res = await fetchFn(`${window.COMPLIANCE_API_URL}/api/tenants`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ 
@@ -209,109 +236,81 @@ window.TenantManager = (() => {
             if (res.ok) {
                 if (provider === 'aws' && quickLink) {
                     window.open(quickLink, '_blank');
-                    showToast("Redirecting to AWS for IAM configuration...");
+                    if (window.showToast) window.showToast("Redirecting to AWS for IAM configuration...");
                 }
                 
-                showToast("Environment registered in Governance Registry.");
+                if (window.showToast) window.showToast("Environment registered in Governance Registry.");
                 closeOnboarding();
                 await loadTenants();
+            } else {
+                const errData = await res.json();
+                alert(errData.error || "Failed to register tenant");
             }
         } catch (e) {
-            showToast("Error saving tenant: " + e.message);
+            if (window.showToast) window.showToast("Error saving tenant: " + e.message);
         }
     }
 
     async function toggleAuto(id, enabled) {
         try {
-            await fetch(`${window.COMPLIANCE_API_URL}/api/tenants/toggle`, {
-                method: 'POST',
+            const fetchFn = (window.AuthUI && window.AuthUI.authFetch) ? window.AuthUI.authFetch : fetch;
+            const res = await fetchFn(`${window.COMPLIANCE_API_URL}/api/tenants`, {
+                method: 'PATCH',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ id, autoRemediate: enabled })
             });
-            showToast(`Auto-Remediation ${enabled ? 'Enabled' : 'Disabled'}`);
-        } catch (e) { console.error(e); }
-    }
-
-    async function runScan(id) {
-        const now = Date.now();
-        const COOLDOWN = 30000; 
-        window._lastTriggerTime = window._lastTriggerTime || {};
-        if (window._lastTriggerTime[id] && (now - window._lastTriggerTime[id] < COOLDOWN)) {
-            const remaining = Math.ceil((COOLDOWN - (now - window._lastTriggerTime[id])) / 1000);
-            showToast(`Wait ${remaining}s before re-triggering this tenant.`);
-            return;
-        }
-
-        showToast("Dispatching autonomous scan task...");
-        if (window.LiveTerminal) LiveTerminal.log('system', `Manual scan triggered for tenant: ${id}`);
-        window._lastTriggerTime[id] = now;
-
-        try {
-            const triggerRes = await fetch(`${window.COMPLIANCE_API_URL}/api/trigger`, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ clientId: id })
-            });
-
-            if (!triggerRes.ok) throw new Error("Failed to dispatch scan");
-            
-            if (window.LiveTerminal) LiveTerminal.log('agent', `Scan queued for ${id}. Awaiting cloud agent results...`);
-        } catch (e) {
-            if (window.LiveTerminal) LiveTerminal.log('insight', `Trigger Failed: ${e.message}`);
-        }
-    }
-
-    async function triggerAutonomousSweep(frequency = 'all') {
-        try {
-            if (window.showToast) window.showToast(`Initiating autonomous sweep [Frequency: ${frequency.toUpperCase()}]...`);
-            if (window.LiveTerminal) LiveTerminal.log('system', `Triggering multi-tenant automated compliance sweep...`);
-
-            const res = await fetch(`${window.COMPLIANCE_API_URL}/api/trigger`, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ frequency })
-            });
-
-            const data = await res.json();
             if (res.ok) {
-                if (window.showToast) window.showToast(`✓ Sweep triggered across ${data.triggeredCount || 'registered'} environments.`);
-                if (window.LiveTerminal) LiveTerminal.log('system', `Autonomous sweep running: ${data.message || 'Scanning active'}`);
-            } else {
-                throw new Error(data.error || `HTTP ${res.status}`);
+                if (window.showToast) window.showToast(`Auto-remediation ${enabled ? 'enabled' : 'disabled'} for tenant.`);
             }
-        } catch (e) {
-            console.error('Sweep error:', e);
-            if (window.showToast) window.showToast(`Sweep error: ${e.message}`);
+        } catch(e) {
+            console.error("Toggle error", e);
+        }
+    }
+
+    async function runScan(tenantId) {
+        if (window.showToast) window.showToast(`Triggering scan for tenant ${tenantId}...`);
+        if (window.switchPanel) window.switchPanel('scan');
+        if (window.Scanner) window.Scanner.startScan();
+    }
+
+    async function triggerAutonomousSweep(scope = 'all') {
+        if (window.showToast) window.showToast(`Triggering autonomous sweep for ${scope} tenants...`);
+        try {
+            const fetchFn = (window.AuthUI && window.AuthUI.authFetch) ? window.AuthUI.authFetch : fetch;
+            const res = await fetchFn(`${window.COMPLIANCE_API_URL}/api/trigger`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ frequency: 'daily' })
+            });
+            if (res.ok) {
+                if (window.showToast) window.showToast("Autonomous sweep job dispatched successfully!");
+            }
+        } catch(e) {
+            if (window.showToast) window.showToast("Sweep trigger failed: " + e.message);
         }
     }
 
     async function removeTenant(id) {
-        if (!confirm("Are you sure you want to remove this environment?")) return;
-        try {
-            tenants = tenants.filter(t => t.id !== id);
-            renderTenants();
-            showToast("Environment removed from registry.");
-        } catch (e) { console.error(e); }
+        if (!confirm("Are you sure you want to remove this cloud environment from the governance registry?")) return;
+        tenants = tenants.filter(t => t.id !== id);
+        renderTenants();
+        updateTenantCountUI();
+        if (window.showToast) window.showToast("Tenant removed.");
     }
 
-    function getTenants() {
-        return tenants;
-    }
+    document.addEventListener('DOMContentLoaded', init);
 
-    return { 
-        init, 
+    return {
+        init,
         loadTenants,
-        getTenants,
-        openOnboarding, 
-        closeOnboarding, 
-        saveTenant, 
-        toggleAuto, 
-        runScan, 
+        openOnboarding,
+        closeOnboarding,
+        updateOnboardFields,
+        updatePathPreview,
+        saveTenant,
+        toggleAuto,
+        runScan,
         triggerAutonomousSweep,
-        removeTenant, 
-        updateOnboardFields, 
-        updatePathPreview 
+        removeTenant
     };
 })();
-
-document.addEventListener('DOMContentLoaded', TenantManager.init);

@@ -61,13 +61,19 @@ window.Scanner = (() => {
             const settings = CloudConnect.getSettings();
             const email = settings.reportEmail;
 
-            const triggerRes = await fetch(`${BASE_URL}/api/scan`, {
+            const fetchFn = (window.AuthUI && window.AuthUI.authFetch) ? window.AuthUI.authFetch : fetch;
+            const triggerRes = await fetchFn(`${BASE_URL}/api/scan`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ provider, credentials, clientId, email })
             });
 
-            if (!triggerRes.ok) throw new Error(`HTTP ${triggerRes.status}`);
+            if (!triggerRes.ok) {
+                if (triggerRes.status === 401) {
+                    throw new Error("Authentication required. Please sign in to trigger scans.");
+                }
+                throw new Error(`HTTP ${triggerRes.status}`);
+            }
 
             let triggerData;
             try {
@@ -93,6 +99,22 @@ window.Scanner = (() => {
             document.getElementById('scan-progress-fill').style.width = '100%';
 
             displayResults(scannedResources);
+
+            // Update Onboarding Checklist Step 3 & 4
+            const stepScan = document.getElementById('step-scan');
+            if (stepScan) {
+                stepScan.classList.add('completed');
+                const numEl = document.getElementById('step-scan-num');
+                if (numEl) numEl.textContent = '✓';
+            }
+            const stepEvidence = document.getElementById('step-evidence');
+            if (stepEvidence) {
+                stepEvidence.classList.add('ready');
+            }
+            const progressBadge = document.getElementById('checklist-progress-text');
+            if (progressBadge) {
+                progressBadge.textContent = '3 of 4 Steps Complete';
+            }
             
             btn.disabled = false;
             btn.textContent = 'Re-scan';

@@ -1,5 +1,5 @@
 // ─── ComplianceFlow AI: Team Authentication & SSO UI Module ───
-// Manages user session, OAuth SSO login, Dev Login, and Header Profile Pill
+// Manages user session, OAuth SSO login, Dev Login, Header Profile Pill, and Auth Gate
 
 window.AuthUI = (() => {
     let currentUser = null;
@@ -8,11 +8,68 @@ window.AuthUI = (() => {
     async function init() {
         renderAuthWidget();
         await fetchCurrentUser();
+        handleOAuthCallbackParams();
+    }
+
+    /**
+     * Centralized authenticated fetch wrapper that guarantees:
+     * - credentials: 'include' (for secure HttpOnly session cookies)
+     * - Authorization header with bearer token if present
+     * - Automatic 401 interception to trigger auth gate
+     */
+    async function authFetch(url, options = {}) {
+        const token = localStorage.getItem('cf_auth_token');
+        const headers = options.headers ? { ...options.headers } : {};
+
+        if (token && !headers['Authorization']) {
+            headers['Authorization'] = `Bearer ${token}`;
+        }
+        if (!headers['Content-Type'] && !(options.body instanceof FormData)) {
+            headers['Content-Type'] = 'application/json';
+        }
+
+        const fetchOptions = {
+            ...options,
+            headers,
+            credentials: 'include'
+        };
+
+        const response = await fetch(url, fetchOptions);
+
+        if (response.status === 401) {
+            console.warn('[AUTH] 401 Unauthorized received for', url);
+            currentUser = null;
+            renderAuthWidget();
+            showAuthGate();
+            if (window.showToast) window.showToast('Session expired. Please sign in.');
+        }
+
+        return response;
+    }
+
+    function handleOAuthCallbackParams() {
+        const urlParams = new URLSearchParams(window.location.search);
+        const authStatus = urlParams.get('auth');
+        const authError = urlParams.get('auth_error');
+        const role = urlParams.get('role');
+
+        if (authError) {
+            if (window.showToast) window.showToast(`Authentication Error: ${authError}`);
+            showAuthGate();
+            // Clean URL query params
+            window.history.replaceState({}, document.title, window.location.pathname);
+            return;
+        }
+
+        if (authStatus === 'success') {
+            if (window.showToast) window.showToast(`✨ Welcome! Signed in successfully${role ? ` (${role})` : ''}.`);
+            // Clean URL query params
+            window.history.replaceState({}, document.title, window.location.pathname);
+        }
     }
 
     async function fetchCurrentUser() {
         try {
-            // Check session token in localStorage or cookie
             const token = localStorage.getItem('cf_auth_token');
             const headers = { 'Content-Type': 'application/json' };
             if (token) headers['Authorization'] = `Bearer ${token}`;
@@ -26,14 +83,60 @@ window.AuthUI = (() => {
                 const data = await res.json();
                 currentUser = data.user;
                 if (data.token) localStorage.setItem('cf_auth_token', data.token);
+                hideAuthGate();
             } else {
                 currentUser = null;
+                showAuthGate();
             }
         } catch (e) {
             console.warn('Auth check skipped (offline or not logged in):', e);
             currentUser = null;
+            showAuthGate();
         }
+
         renderAuthWidget();
+        updateStatusStrip();
+        updateOnboardingChecklist();
+    }
+
+    function showAuthGate() {
+        const gate = document.getElementById('auth-gate-overlay');
+        if (gate) gate.classList.add('active');
+    }
+
+    function hideAuthGate() {
+        const gate = document.getElementById('auth-gate-overlay');
+        if (gate) gate.classList.remove('active');
+    }
+
+    function updateStatusStrip() {
+        const strip = document.getElementById('org-status-strip');
+        if (!strip) return;
+
+        if (currentUser) {
+            strip.style.display = 'flex';
+            const orgNameEl = document.getElementById('strip-org-name');
+            const userRoleEl = document.getElementById('strip-user-role');
+            if (orgNameEl) orgNameEl.textContent = currentUser.orgName || 'Workspace';
+            if (userRoleEl) userRoleEl.textContent = (currentUser.role || 'VIEWER').toUpperCase();
+        } else {
+            strip.style.display = 'none';
+        }
+    }
+
+    function updateOnboardingChecklist() {
+        const card = document.getElementById('onboarding-checklist-card');
+        if (!card) return;
+
+        if (currentUser) {
+            card.style.display = 'block';
+            const stepAuth = document.getElementById('step-auth');
+            const stepAuthDesc = document.getElementById('step-auth-desc');
+            if (stepAuth) stepAuth.classList.add('completed');
+            if (stepAuthDesc) stepAuthDesc.textContent = `${currentUser.email} (${currentUser.role})`;
+        } else {
+            card.style.display = 'none';
+        }
     }
 
     function renderAuthWidget() {
@@ -67,11 +170,11 @@ window.AuthUI = (() => {
                 <div class="profile-dropdown-menu" id="profile-dropdown-menu">
                     <div class="dropdown-header">
                         <div class="dropdown-email">${escapeHtml(currentUser.email)}</div>
-                        <div class="dropdown-sub">Signed in via ${currentUser.provider || 'SSO'}</div>
+                        <div class="dropdown-sub">Org: ${escapeHtml(currentUser.orgName || 'Primary')} · Role: ${(currentUser.role || 'VIEWER').toUpperCase()}</div>
                     </div>
                     <div class="dropdown-divider"></div>
                     <button class="dropdown-item" onclick="AuthUI.openAuthModal()">
-                        <span class="item-icon">🔄</span> Switch Role / Account
+                        <span class="item-icon">🔄</span> Switch Account / Role
                     </button>
                     <button class="dropdown-item text-danger" onclick="AuthUI.logout()">
                         <span class="item-icon">🚪</span> Sign Out
@@ -80,7 +183,7 @@ window.AuthUI = (() => {
             `;
         } else {
             container.innerHTML = `
-                <button class="btn btn-primary btn-sm btn-auth-trigger" onclick="AuthUI.openAuthModal()">
+                <button class="btn btn-primary btn-sm btn-auth-trigger" onclick="AuthUI.showAuthGate()">
                     <span class="icon">🔐</span> Sign In / SSO
                 </button>
             `;
@@ -101,7 +204,6 @@ window.AuthUI = (() => {
         if (menu) menu.classList.toggle('active');
     }
 
-    // Close menu when clicking outside
     document.addEventListener('click', (e) => {
         const menu = document.getElementById('profile-dropdown-menu');
         if (menu && !e.target.closest('#auth-profile-widget')) {
@@ -133,22 +235,29 @@ window.AuthUI = (() => {
             const res = await fetch(`${API_BASE}/api/auth/dev-login`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
+                credentials: 'include',
                 body: JSON.stringify({ role })
             });
 
             if (!res.ok) throw new Error('Dev login failed');
             const data = await res.json();
             
-            if (data.token) localStorage.setItem('cf_auth_token', data.token);
+            if (data.sessionToken) localStorage.setItem('cf_auth_token', data.sessionToken);
             currentUser = data.user;
             
             renderAuthWidget();
+            hideAuthGate();
             closeAuthModal();
+            updateStatusStrip();
+            updateOnboardingChecklist();
 
             if (window.showToast) window.showToast(`Signed in as ${data.user.name} (${role})`);
             if (window.LiveTerminal) {
                 LiveTerminal.log('system', `Auth session established for ${data.user.email} [${role}]`);
             }
+
+            // Reload tenants to scope to newly authenticated org
+            if (window.TenantManager) TenantManager.loadTenants();
         } catch (e) {
             if (window.showToast) window.showToast(`Login failed: ${e.message}`);
             console.error('Dev Login Error:', e);
@@ -173,10 +282,13 @@ window.AuthUI = (() => {
         localStorage.removeItem('cf_auth_token');
         currentUser = null;
         renderAuthWidget();
+        showAuthGate();
+        updateStatusStrip();
+        updateOnboardingChecklist();
         
         if (window.showToast) window.showToast('Signed out successfully.');
         if (window.LiveTerminal) {
-            LiveTerminal.log('system', 'User session terminated. Reverted to anonymous viewer.');
+            LiveTerminal.log('system', 'User session terminated.');
         }
     }
 
@@ -199,20 +311,23 @@ window.AuthUI = (() => {
         })[m]);
     }
 
-    // Auto-init on load
     document.addEventListener('DOMContentLoaded', init);
 
     return {
         init,
+        authFetch,
         fetchCurrentUser,
         getUser,
         hasPermission,
+        showAuthGate,
+        hideAuthGate,
         openAuthModal,
         closeAuthModal,
         signInWithGoogle,
         signInWithGitHub,
         quickDevLogin,
         logout,
-        toggleProfileMenu
+        toggleProfileMenu,
+        updateOnboardingChecklist
     };
 })();

@@ -759,6 +759,36 @@ Note: "ADVISORY — $3,000/mo subscription required"`
         return null;
     }
 
+    let isDryRun = true; // Default to safe Dry-Run mode
+
+    function setDryRunMode(enabled) {
+        isDryRun = enabled;
+        const btnDryRun = document.getElementById('btn-mode-dryrun');
+        const btnApply = document.getElementById('btn-mode-apply');
+        const badge = document.getElementById('remediation-mode-badge');
+        
+        if (btnDryRun && btnApply) {
+            if (isDryRun) {
+                btnDryRun.classList.add('active');
+                btnApply.classList.remove('active');
+                if (badge) {
+                    badge.style.color = '#10b981';
+                    badge.textContent = '● Dry-Run Active: Simulates changes without cloud mutations';
+                }
+            } else {
+                btnDryRun.classList.remove('active');
+                btnApply.classList.add('active');
+                if (badge) {
+                    badge.style.color = '#f59e0b';
+                    badge.textContent = '⚡ Live Fix Active: Mutations will be applied to cloud resources';
+                }
+            }
+        }
+        if (window.showToast) {
+            window.showToast(`Remediation mode: ${isDryRun ? '🛡️ Dry-Run (Safety Preview)' : '⚡ Live Fix (Apply Changes)'}`);
+        }
+    }
+
     function fixSingle(resourceId) {
         const issue = issues.find(i => i.id === resourceId);
         if (!issue) return;
@@ -777,9 +807,12 @@ Note: "ADVISORY — $3,000/mo subscription required"`
         btn.disabled = true;
         btn.innerHTML = '<span class="spinner"></span>';
 
-        LiveTerminal.log('action', `EXECUTING REAL FIX: ${issue.type} "${issue.name}" — ${issue.issue}`);
+        const actionText = isDryRun ? 'SIMULATING DRY-RUN FIX' : 'EXECUTING LIVE FIX';
+        LiveTerminal.log('action', `${actionText}: ${issue.type} "${issue.name}" — ${issue.issue}`);
 
-        fetch(`${window.COMPLIANCE_API_URL}/api/remediate`, {
+        const fetchFn = (window.AuthUI && window.AuthUI.authFetch) ? window.AuthUI.authFetch : fetch;
+
+        fetchFn(`${window.COMPLIANCE_API_URL}/api/remediate`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ 
@@ -787,7 +820,9 @@ Note: "ADVISORY — $3,000/mo subscription required"`
                 credentials, 
                 resourceType: issue.type, 
                 resourceName: issue.name, 
-                issue: issue.issue 
+                issue: issue.issue,
+                findingCode: issue.technicalId || issue.findingCode,
+                dryRun: isDryRun
             })
         })
         .then(res => res.json())
@@ -795,24 +830,38 @@ Note: "ADVISORY — $3,000/mo subscription required"`
             if (data.error) throw new Error(data.error);
 
             const card = document.getElementById('rem-card-' + resourceId);
-            const badge = card.querySelector('.severity-badge');
+            const badge = card ? card.querySelector('.severity-badge') : null;
+
+            if (data.dryRun) {
+                // Dry Run Result
+                btn.textContent = '🛡️ Dry-Run OK';
+                btn.className = 'btn btn-secondary btn-sm';
+                btn.disabled = false;
+                LiveTerminal.log('insight', `[DRY-RUN RESULT]: ${data.message}`);
+                if (window.showToast) window.showToast(`Dry-Run Validated: ${issue.name} can be safely remediated.`);
+                return;
+            }
 
             if (data.advisory) {
                 // Advisory — not auto-fixable, show info state
                 btn.textContent = 'ⓘ Advisory';
                 btn.className = 'btn btn-warning btn-sm';
                 btn.disabled = true;
-                card.classList.add('fixed');
-                badge.className = 'severity-badge warning';
-                badge.textContent = '⚠ advisory';
+                if (card) card.classList.add('fixed');
+                if (badge) {
+                    badge.className = 'severity-badge warning';
+                    badge.textContent = '⚠ advisory';
+                }
                 LiveTerminal.log('insight', `ADVISORY: ${data.message}`);
             } else {
                 // Real fix applied
                 btn.textContent = '✓ Fixed';
                 btn.className = 'btn btn-success btn-sm';
-                card.classList.add('fixed');
-                badge.className = 'severity-badge pass';
-                badge.textContent = '✓ pass';
+                if (card) card.classList.add('fixed');
+                if (badge) {
+                    badge.className = 'severity-badge pass';
+                    badge.textContent = '✓ pass';
+                }
                 Scanner.markFixed(resourceId);
                 LiveTerminal.log('output', `SUCCESS: ${issue.type} "${issue.name}" remediated via real-world API call.`);
             }
@@ -879,5 +928,5 @@ Note: "ADVISORY — $3,000/mo subscription required"`
         }
     }
 
-    return { buildFromScan, fixSingle, fixAll };
+    return { buildFromScan, fixSingle, fixAll, setDryRunMode, getDryRunMode: () => isDryRun };
 })();

@@ -255,7 +255,8 @@ window.Evidence = (() => {
         try {
             if (window.showToast) window.showToast('Generating HMAC-SHA256 Auditor Token...');
             
-            const res = await fetch(`${API_BASE}/api/auditor/token`, {
+            const fetchFn = (window.AuthUI && window.AuthUI.authFetch) ? window.AuthUI.authFetch : fetch;
+            const res = await fetchFn(`${API_BASE}/api/auditor/token`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ tenantId, auditorEmail, expiresInHours })
@@ -282,6 +283,18 @@ window.Evidence = (() => {
             if (tokenExpires) tokenExpires.textContent = new Date(data.expiresAt).toLocaleString();
             if (portalLink) {
                 portalLink.value = fullExportUrl;
+            }
+
+            // Update Onboarding Checklist Step 4
+            const stepEvidence = document.getElementById('step-evidence');
+            if (stepEvidence) {
+                stepEvidence.classList.add('completed');
+                const numEl = document.getElementById('step-evidence-num');
+                if (numEl) numEl.textContent = '✓';
+            }
+            const progressBadge = document.getElementById('checklist-progress-text');
+            if (progressBadge) {
+                progressBadge.textContent = '4 of 4 Steps Complete (Audit Ready 🎉)';
             }
 
             if (window.showToast) window.showToast('✓ Auditor Access Token Generated!');
@@ -313,7 +326,8 @@ window.Evidence = (() => {
             const token = latestAuditorToken || '';
             const url = token ? `${API_BASE}/api/auditor/export?token=${token}` : `${API_BASE}/api/auditor/export`;
             
-            const res = await fetch(url);
+            const fetchFn = (window.AuthUI && window.AuthUI.authFetch) ? window.AuthUI.authFetch : fetch;
+            const res = await fetchFn(url);
             if (!res.ok) {
                 throw new Error(`Export failed: HTTP ${res.status}`);
             }
@@ -328,6 +342,18 @@ window.Evidence = (() => {
             link.href = dataUri;
             link.download = `ComplianceFlow_SOC2_Auditor_Package_${Date.now()}.json`;
             link.click();
+
+            // Update Onboarding Checklist Step 4
+            const stepEvidence = document.getElementById('step-evidence');
+            if (stepEvidence) {
+                stepEvidence.classList.add('completed');
+                const numEl = document.getElementById('step-evidence-num');
+                if (numEl) numEl.textContent = '✓';
+            }
+            const progressBadge = document.getElementById('checklist-progress-text');
+            if (progressBadge) {
+                progressBadge.textContent = '4 of 4 Steps Complete (Audit Ready 🎉)';
+            }
 
             if (window.showToast) window.showToast('📦 Signed evidence package downloaded.');
             if (window.LiveTerminal) {

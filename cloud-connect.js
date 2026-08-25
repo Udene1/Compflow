@@ -176,7 +176,8 @@ window.CloudConnect = (() => {
             updateStepUI(0, stepEls, barEl);
             if (window.LiveTerminal) LiveTerminal.log('agent', STEPS[0]);
 
-            const response = await fetch(`${window.COMPLIANCE_API_URL}/api/validate`, {
+            const fetchFn = (window.AuthUI && window.AuthUI.authFetch) ? window.AuthUI.authFetch : fetch;
+            const response = await fetchFn(`${window.COMPLIANCE_API_URL}/api/validate`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ 
@@ -211,6 +212,31 @@ window.CloudConnect = (() => {
             }
 
             updateChips();
+
+            // Update Onboarding Checklist Step 2
+            const stepConnect = document.getElementById('step-connect');
+            if (stepConnect) {
+                stepConnect.classList.add('completed');
+                const numEl = document.getElementById('step-connect-num');
+                if (numEl) numEl.textContent = '✓';
+            }
+            const progressBadge = document.getElementById('checklist-progress-text');
+            if (progressBadge) {
+                progressBadge.textContent = '2 of 4 Steps Complete';
+            }
+
+            // Show Connected Success Banner with immediate Scan CTA
+            stepsContainer.innerHTML += `
+                <div style="background:rgba(16,185,129,0.1); border:1px solid rgba(16,185,129,0.3); padding:1rem; border-radius:8px; margin-top:1rem; display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:0.5rem;">
+                    <div>
+                        <div style="color:#10b981; font-weight:600; font-size:0.9rem;">✅ ${provider.toUpperCase()} Verified & Ready</div>
+                        <div style="font-size:0.78rem; color:var(--text-muted);">Cloud connection active. Proceed to execute your initial compliance scan.</div>
+                    </div>
+                    <button class="btn btn-primary btn-sm" onclick="switchPanel('scan'); if(window.Scanner) Scanner.startScan();">
+                        🔍 Start First Scan →
+                    </button>
+                </div>
+            `;
 
             // Show the Tracker UI on the Scan Page
             const tracker = document.getElementById('scheduled-scan-tracker');

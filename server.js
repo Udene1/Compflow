@@ -27,7 +27,31 @@ const app = express();
 // Trust reverse proxies (Cloudflare, Nginx, Azure ALB)
 app.set('trust proxy', 1);
 
-app.use(cors());
+// ── Production CORS Configuration with Origin Whitelist ──
+const ALLOWED_ORIGINS = [
+    'https://compflow.icu',
+    'https://www.compflow.icu',
+    'https://api.compflow.icu',
+    'http://localhost:3000',
+    'http://127.0.0.1:3000',
+    'http://localhost:5173',
+    'http://127.0.0.1:5173'
+];
+
+app.use(cors({
+    origin: (origin, callback) => {
+        // Allow requests with no origin (curl, server-to-server, mobile probes)
+        if (!origin) return callback(null, true);
+        if (ALLOWED_ORIGINS.includes(origin) || origin.endsWith('.compflow.icu')) {
+            return callback(null, true);
+        }
+        return callback(new Error(`CORS blocked for origin: ${origin}`));
+    },
+    credentials: true,
+    methods: ['GET', 'POST', 'PATCH', 'PUT', 'DELETE', 'OPTIONS'],
+    allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With']
+}));
+
 app.use(express.json({ limit: '10mb' }));
 
 // ── Rate Limiting & DoS Defense ──
