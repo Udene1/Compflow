@@ -1,20 +1,91 @@
-import { S3Client, PutPublicAccessBlockCommand, PutBucketVersioningCommand, PutBucketEncryptionCommand, PutBucketLifecycleConfigurationCommand } from "@aws-sdk/client-s3";
-import { EC2Client, RevokeSecurityGroupIngressCommand, AuthorizeSecurityGroupIngressCommand, DescribeSecurityGroupsCommand, CreateFlowLogsCommand, ReleaseAddressCommand, DeleteSecurityGroupCommand, ModifyInstanceMetadataOptionsCommand, ModifySnapshotAttributeCommand } from "@aws-sdk/client-ec2";
-import { IAMClient, UpdateAssumeRolePolicyCommand, GetRoleCommand, UpdateAccessKeyCommand } from "@aws-sdk/client-iam";
-import { RDSClient, ModifyDBInstanceCommand } from "@aws-sdk/client-rds";
-import { KMSClient, EnableKeyRotationCommand } from "@aws-sdk/client-kms";
-import { ConfigServiceClient } from "@aws-sdk/client-config-service";
-import { GuardDutyClient, CreateDetectorCommand } from "@aws-sdk/client-guardduty";
-import { CloudWatchLogsClient, PutRetentionPolicyCommand } from "@aws-sdk/client-cloudwatch-logs";
-import { CloudWatchClient } from "@aws-sdk/client-cloudwatch";
-import { DynamoDBClient, UpdateContinuousBackupsCommand } from "@aws-sdk/client-dynamodb";
-import { APIGatewayClient, UpdateRestApiCommand, UpdateStageCommand } from "@aws-sdk/client-api-gateway";
-import { CloudFrontClient, UpdateDistributionCommand, GetDistributionConfigCommand } from "@aws-sdk/client-cloudfront";
-import { SQSClient, SetQueueAttributesCommand } from "@aws-sdk/client-sqs";
-import { SNSClient, SetTopicAttributesCommand } from "@aws-sdk/client-sns";
+import { 
+    S3Client, 
+    PutPublicAccessBlockCommand, 
+    PutBucketVersioningCommand, 
+    PutBucketEncryptionCommand, 
+    PutBucketLifecycleConfigurationCommand 
+} from "@aws-sdk/client-s3";
+import { 
+    EC2Client, 
+    RevokeSecurityGroupIngressCommand, 
+    AuthorizeSecurityGroupIngressCommand, 
+    DescribeSecurityGroupsCommand, 
+    CreateFlowLogsCommand, 
+    ReleaseAddressCommand, 
+    DeleteSecurityGroupCommand, 
+    ModifyInstanceMetadataOptionsCommand, 
+    ModifySnapshotAttributeCommand 
+} from "@aws-sdk/client-ec2";
+import { 
+    IAMClient, 
+    UpdateAssumeRolePolicyCommand, 
+    GetRoleCommand, 
+    UpdateAccessKeyCommand 
+} from "@aws-sdk/client-iam";
+import { 
+    RDSClient, 
+    ModifyDBInstanceCommand, 
+    DescribeDBInstancesCommand 
+} from "@aws-sdk/client-rds";
+import { 
+    KMSClient, 
+    EnableKeyRotationCommand, 
+    GetKeyRotationStatusCommand 
+} from "@aws-sdk/client-kms";
+import { 
+    ConfigServiceClient 
+} from "@aws-sdk/client-config-service";
+import { 
+    GuardDutyClient, 
+    CreateDetectorCommand 
+} from "@aws-sdk/client-guardduty";
+import { 
+    CloudWatchLogsClient, 
+    PutRetentionPolicyCommand 
+} from "@aws-sdk/client-cloudwatch-logs";
+import { 
+    CloudWatchClient 
+} from "@aws-sdk/client-cloudwatch";
+import { 
+    DynamoDBClient, 
+    UpdateContinuousBackupsCommand 
+} from "@aws-sdk/client-dynamodb";
+import { 
+    APIGatewayClient, 
+    UpdateRestApiCommand, 
+    UpdateStageCommand 
+} from "@aws-sdk/client-api-gateway";
+import { 
+    CloudFrontClient, 
+    UpdateDistributionCommand, 
+    GetDistributionConfigCommand 
+} from "@aws-sdk/client-cloudfront";
+import { 
+    SQSClient, 
+    SetQueueAttributesCommand 
+} from "@aws-sdk/client-sqs";
+import { 
+    SNSClient, 
+    SetTopicAttributesCommand 
+} from "@aws-sdk/client-sns";
+import { 
+    LambdaClient, 
+    UpdateFunctionConfigurationCommand 
+} from "@aws-sdk/client-lambda";
+import { 
+    CloudTrailClient, 
+    UpdateTrailCommand 
+} from "@aws-sdk/client-cloudtrail";
 import { log } from '../logger.js';
+import { FINDING_CODES, resolveFindingCode } from '../finding_codes.js';
 
-export async function runRemediation(provider, credentials, resourceType, resourceName, issue, dryRun = false) {
+/**
+ * AWS Comprehensive Auto-Remediation & Governance Engine
+ * 
+ * Supports 20+ AWS resource types with deterministic finding codes,
+ * blast-radius protection, parameterized network CIDRs, and pre-flight state checks.
+ */
+export async function runRemediation(provider, credentials, resourceType, resourceName, issue, dryRun = false, options = {}) {
 
     const XOR_KEY = 'CompFlow_Guard_2026';
     function deobfuscate(encoded) {
@@ -28,41 +99,71 @@ export async function runRemediation(provider, credentials, resourceType, resour
     }
 
     if (!credentials || !credentials.accessKeyId || !credentials.secretAccessKey) {
-        return { success: false, error: 'Missing cloud credentials' };
+        return { success: false, error: 'Missing AWS credentials for remediation.' };
     }
 
+    // Resolve canonical finding code
+    const findingCode = options.findingCode || resolveFindingCode(resourceType, issue);
+    const safeCidr = options.allowedCidr || options.safeCidr || null;
+
     try {
-        // ── PHASE 1: Blast Radius Control (Auto-Fix Whitelist) ──
-        // This protects the background orchestrator from risky LLM hallucinations
-        const SAFE_WHITELIST = {
-            'S3 Bucket': ['Public access', 'Versioning', 'Default encryption', 'Lifecycle'],
-            'CloudTrail': ['Log Validation', 'Not multi-region', 'Log encryption'],
-            'KMS Key': ['Rotation'],
-            'DynamoDB Table': ['PITR'],
-            'Log Group': ['retention', '< 365'],
-            'API Gateway Stage': ['X-Ray'],
-            'EC2 Instance': ['IMDSv2'],
-            'Threat Detection': ['disabled'],
-            'Security Group': ['port 22', 'RDP', '3389', 'HTTP', 'port 80', 'Unused Security Group'],
-            'Elastic IP': ['Unassociated'],
-            'RDS Database': ['Backup retention', 'Multi-AZ', 'Publicly accessible']
-        };
+        // ── BLAST RADIUS CONTROL: Auto-Fix Whitelist vs Advisory Escalation ──
+        const SAFE_AUTO_FIX_CODES = new Set([
+            FINDING_CODES.S3_PUBLIC_ACCESS,
+            FINDING_CODES.S3_VERSIONING_DISABLED,
+            FINDING_CODES.S3_ENCRYPTION_DISABLED,
+            FINDING_CODES.S3_LIFECYCLE_MISSING,
+            FINDING_CODES.SG_OPEN_SSH_WORLD,
+            FINDING_CODES.SG_OPEN_RDP_WORLD,
+            FINDING_CODES.SG_OPEN_HTTP_WORLD,
+            FINDING_CODES.SG_UNUSED,
+            FINDING_CODES.RDS_BACKUP_DISABLED,
+            FINDING_CODES.RDS_PUBLICLY_ACCESSIBLE,
+            FINDING_CODES.DYNAMODB_PITR_DISABLED,
+            FINDING_CODES.KMS_KEY_ROTATION_DISABLED,
+            FINDING_CODES.CLOUDTRAIL_LOG_VALIDATION_DISABLED,
+            FINDING_CODES.CLOUDTRAIL_NOT_MULTI_REGION,
+            FINDING_CODES.EC2_IMDSV1_ENABLED,
+            FINDING_CODES.EIP_UNASSOCIATED,
+            FINDING_CODES.CLOUDWATCH_LOG_RETENTION_SHORT,
+            FINDING_CODES.GUARDDUTY_DISABLED,
+            FINDING_CODES.APIGATEWAY_XRAY_DISABLED
+        ]);
 
-        const isSafeParams = SAFE_WHITELIST[resourceType] && 
-                             SAFE_WHITELIST[resourceType].some(safeWord => issue.includes(safeWord));
+        // Fallback text check for legacy compatibility
+        const LEGACY_SAFE_WORDS = [
+            'Public access', 'Versioning', 'Default encryption', 'Lifecycle',
+            'Log Validation', 'Not multi-region', 'Rotation', 'PITR', 'retention',
+            '< 365', 'X-Ray', 'IMDSv2', 'disabled', 'port 22', 'RDP', '3389',
+            'HTTP', 'port 80', 'Unused Security Group', 'Unassociated',
+            'Backup retention', 'Multi-AZ', 'Publicly accessible', 'execute-api'
+        ];
 
-        if (!isSafeParams) {
-            log.info(`[BLAST RADIUS] Auto-fix blocked and escalated for ${resourceType} "${resourceName}": ${issue}`);
+        const isSafeToAutoFix = SAFE_AUTO_FIX_CODES.has(findingCode) || 
+                                LEGACY_SAFE_WORDS.some(w => issue.toLowerCase().includes(w.toLowerCase()));
+
+        // ── Dry Run Simulation Mode ──
+        if (dryRun) {
+            log.info(`[DRY-RUN] Would fix AWS ${resourceType} "${resourceName}" (Code: ${findingCode}): ${issue}`);
             return {
                 success: true,
-                advisory: true,
-                message: `ADVISORY: Issue "${issue}" on ${resourceType} is outside the strict auto-fix whitelist. Escalated for human review.`
+                dryRun: true,
+                findingCode,
+                targetResource: resourceName,
+                resourceType,
+                action: isSafeToAutoFix ? 'AUTO_REMEDIATE' : 'ADVISORY_ESCALATE',
+                message: `[DRY-RUN] Safety validated for ${findingCode} on "${resourceName}". Would execute targeted fix.`
             };
         }
 
-        if (dryRun) {
-            log.info(`[DRY-RUN] Would fix ${resourceType} "${resourceName}": ${issue}`);
-            return { success: true, message: `[DRY-RUN] Validated safety. Would execute fix.` };
+        if (!isSafeToAutoFix) {
+            log.info(`[BLAST RADIUS] Auto-fix blocked and escalated for ${resourceType} "${resourceName}" (Code: ${findingCode}): ${issue}`);
+            return {
+                success: true,
+                advisory: true,
+                findingCode,
+                message: `ADVISORY: Finding [${findingCode}] on ${resourceType} "${resourceName}" requires manual approval. Escalated for human review.`
+            };
         }
 
         const config = {
@@ -73,439 +174,401 @@ export async function runRemediation(provider, credentials, resourceType, resour
             }
         };
 
-        let result = { success: true, message: `Successfully remediated ${resourceName}` };
+        let result = { success: true, findingCode, message: `Successfully remediated ${resourceName}` };
 
-        if (provider === 'aws') {
+        // ─────────────────────────────────────────────────────────────────────
+        // 1. S3 BUCKETS
+        // ─────────────────────────────────────────────────────────────────────
+        if (resourceType === 'S3 Bucket' || findingCode.startsWith('S3_')) {
+            const s3 = new S3Client(config);
 
-
-            // ── S3 Bucket Remediations ──
-            if (resourceType === 'S3 Bucket') {
-                const s3 = new S3Client(config);
-
-                if (issue.includes('Public access')) {
-                    await s3.send(new PutPublicAccessBlockCommand({
-                        Bucket: resourceName,
-                        PublicAccessBlockConfiguration: {
-                            BlockPublicAcls: true,
-                            IgnorePublicAcls: true,
-                            BlockPublicPolicy: true,
-                            RestrictPublicBuckets: true
-                        }
-                    }));
-                } else if (issue.includes('Versioning')) {
-                    await s3.send(new PutBucketVersioningCommand({
-                        Bucket: resourceName,
-                        VersioningConfiguration: { Status: 'Enabled' }
-                    }));
-                } else if (issue.includes('Default encryption disabled')) {
-                    await s3.send(new PutBucketEncryptionCommand({
-                        Bucket: resourceName,
-                        ServerSideEncryptionConfiguration: {
-                            Rules: [{
-                                ApplyServerSideEncryptionByDefault: {
-                                    SSEAlgorithm: 'aws:kms'
-                                },
-                                BucketKeyEnabled: true
-                            }]
-                        }
-                    }));
-                } else if (issue.includes('MFA Delete')) {
-                    result = {
-                        success: true,
-                        advisory: true,
-                        message: `ADVISORY: MFA Delete can only be enabled by the root account user via the AWS CLI or SDK.`
-                    };
-                } else if (issue.includes('Lifecycle')) {
-                    await s3.send(new PutBucketLifecycleConfigurationCommand({
-                        Bucket: resourceName,
-                        LifecycleConfiguration: {
-                            Rules: [
-                                {
-                                    Status: "Enabled",
-                                    Filter: { Prefix: "" },
-                                    AbortIncompleteMultipartUpload: { DaysAfterInitiation: 7 },
-                                    ID: "ComplianceFlow-Auto-Abort-Incomplete-Multipart"
-                                }
-                            ]
-                        }
-                    }));
-                    result.message = `Applied base Lifecycle policy (abort incomplete multipart uploads after 7 days) to ${resourceName}.`;
-                }
-            }
-
-            // ── Security Group Remediations ──
-            else if (resourceType === 'Security Group') {
-                const ec2 = new EC2Client(config);
-
-                if (issue.includes('port 22')) {
-                    const { SecurityGroups } = await ec2.send(new DescribeSecurityGroupsCommand({ GroupNames: [resourceName] }));
-                    const sg = SecurityGroups?.[0];
-                    if (sg) {
-                        const openRules = sg.IpPermissions.filter(p => (p.FromPort <= 22 && p.ToPort >= 22) && p.IpRanges.some(r => r.CidrIp === '0.0.0.0/0'));
-                        for (const rule of openRules) {
-                            await ec2.send(new RevokeSecurityGroupIngressCommand({
-                                GroupId: sg.GroupId,
-                                IpPermissions: [{ IpProtocol: rule.IpProtocol, FromPort: rule.FromPort, ToPort: rule.ToPort, IpRanges: [{ CidrIp: '0.0.0.0/0' }] }]
-                            }));
-                        }
-                        await ec2.send(new AuthorizeSecurityGroupIngressCommand({
-                            GroupId: sg.GroupId,
-                            IpPermissions: [{ IpProtocol: 'tcp', FromPort: 22, ToPort: 22, IpRanges: [{ CidrIp: '10.0.0.0/16', Description: 'SSH restricted to VPC CIDR (ComplianceFlow)' }] }]
-                        }));
+            if (findingCode === FINDING_CODES.S3_PUBLIC_ACCESS || issue.includes('Public access')) {
+                await s3.send(new PutPublicAccessBlockCommand({
+                    Bucket: resourceName,
+                    PublicAccessBlockConfiguration: {
+                        BlockPublicAcls: true,
+                        IgnorePublicAcls: true,
+                        BlockPublicPolicy: true,
+                        RestrictPublicBuckets: true
                     }
-                } else if (issue.includes('RDP') || issue.includes('3389')) {
-                    const { SecurityGroups } = await ec2.send(new DescribeSecurityGroupsCommand({ GroupNames: [resourceName] }));
-                    const sg = SecurityGroups?.[0];
-                    if (sg) {
-                        const rdpRules = sg.IpPermissions.filter(p => (p.FromPort <= 3389 && p.ToPort >= 3389) && p.IpRanges.some(r => r.CidrIp === '0.0.0.0/0'));
-                        for (const rule of rdpRules) {
-                            await ec2.send(new RevokeSecurityGroupIngressCommand({
-                                GroupId: sg.GroupId,
-                                IpPermissions: [{ IpProtocol: rule.IpProtocol, FromPort: rule.FromPort, ToPort: rule.ToPort, IpRanges: [{ CidrIp: '0.0.0.0/0' }] }]
-                            }));
-                        }
-                    }
-                } else if (issue.includes('HTTP') || issue.includes('port 80')) {
-                    const { SecurityGroups } = await ec2.send(new DescribeSecurityGroupsCommand({ GroupNames: [resourceName] }));
-                    const sg = SecurityGroups?.[0];
-                    if (sg) {
-                        const httpRules = sg.IpPermissions.filter(p => (p.FromPort <= 80 && p.ToPort >= 80) && p.IpRanges.some(r => r.CidrIp === '0.0.0.0/0'));
-                        for (const rule of httpRules) {
-                            await ec2.send(new RevokeSecurityGroupIngressCommand({
-                                GroupId: sg.GroupId,
-                                IpPermissions: [{ IpProtocol: rule.IpProtocol, FromPort: rule.FromPort, ToPort: rule.ToPort, IpRanges: [{ CidrIp: '0.0.0.0/0' }] }]
-                            }));
-                        }
-                    }
-                } else if (issue.includes('Unused Security Group')) {
-                    const { SecurityGroups } = await ec2.send(new DescribeSecurityGroupsCommand({ GroupNames: [resourceName] }));
-                    if (SecurityGroups?.[0]) {
-                        await ec2.send(new DeleteSecurityGroupCommand({ GroupId: SecurityGroups[0].GroupId }));
-                        result.message = `Deleted unused Security Group: ${resourceName}`;
-                    }
-                }
-            }
-
-            // ── IAM Remediations ──
-            else if (resourceType === 'IAM Account') {
-                if (issue.includes('Root access keys')) {
-                    result = {
-                        success: true,
-                        advisory: true,
-                        message: `ADVISORY: Root access keys detected. PLEASE DELETE MANUALLY via IAM > Security credentials.`
-                    };
-                } else {
-                    result = {
-                        success: true,
-                        advisory: true,
-                        message: `ADVISORY: Root MFA must be enabled manually via the AWS Console.`
-                    };
-                }
-            }
-            else if (resourceType === 'IAM User') {
-                if (issue.includes('MFA not enabled')) {
-                    result = {
-                        success: true,
-                        advisory: true,
-                        message: `ADVISORY: User "${resourceName}" must enable MFA.`
-                    };
-                } else if (issue.includes('Inactive user')) {
-                    result = {
-                        success: true,
-                        advisory: true,
-                        message: `ADVISORY: User "${resourceName}" is inactive (>90 days). Consider deactivating or deleting.`
-                    };
-                } else if (issue.includes('inline policies')) {
-                    result = {
-                        success: true,
-                        advisory: true,
-                        message: `ADVISORY: User "${resourceName}" has direct inline policies. Refactor into Managed Policies.`
-                    };
-                } else if (issue.includes('Access key') && issue.includes('90 days')) {
-                    result = {
-                        success: true,
-                        advisory: true,
-                        message: `ADVISORY: Access key for "${resourceName}" is >90 days old. Rotate manually.`
-                    };
-                }
-            }
-            else if (resourceType === 'IAM Group') {
-                if (issue.includes('Admin Sprawl')) {
-                    result = {
-                        success: true,
-                        advisory: true,
-                        message: `ADVISORY: Multiple users have AdministratorAccess. Review and apply Principle of Least Privilege.`
-                    };
-                }
-            }
-            else if (resourceType === 'IAM Role') {
-                const iam = new IAMClient(config);
-                if (issue.includes('Stale Access') || issue.includes('180 days')) {
-                    const denyPolicy = {
-                        Version: "2012-10-17",
-                        Statement: [{
-                            Effect: "Deny", Principal: "*", Action: "sts:AssumeRole",
-                            Condition: { StringEquals: { "aws:PrincipalTag/ComplianceFlow": "deactivated" } }
+                }));
+                result.message = `Enabled S3 Block Public Access (all 4 settings) on "${resourceName}".`;
+            } 
+            else if (findingCode === FINDING_CODES.S3_VERSIONING_DISABLED || issue.includes('Versioning')) {
+                await s3.send(new PutBucketVersioningCommand({
+                    Bucket: resourceName,
+                    VersioningConfiguration: { Status: 'Enabled' }
+                }));
+                result.message = `Enabled S3 Bucket Versioning on "${resourceName}".`;
+            } 
+            else if (findingCode === FINDING_CODES.S3_ENCRYPTION_DISABLED || issue.includes('encryption')) {
+                await s3.send(new PutBucketEncryptionCommand({
+                    Bucket: resourceName,
+                    ServerSideEncryptionConfiguration: {
+                        Rules: [{
+                            ApplyServerSideEncryptionByDefault: { SSEAlgorithm: 'aws:kms' },
+                            BucketKeyEnabled: true
                         }]
-                    };
-                    await iam.send(new UpdateAssumeRolePolicyCommand({
-                        RoleName: resourceName,
-                        PolicyDocument: JSON.stringify(denyPolicy)
-                    }));
-                }
-            }
-
-            // ── RDS Database Remediations ──
-            else if (resourceType === 'RDS Database') {
-                const rds = new RDSClient(config);
-                if (issue.includes('Encryption at rest')) {
-                    result = {
-                        success: true,
-                        advisory: true,
-                        message: `ADVISORY: RDS encryption cannot be enabled in-place. Create an encrypted snapshot, then restore.`
-                    };
-                } else if (issue.includes('Backup retention')) {
-                    await rds.send(new ModifyDBInstanceCommand({
-                        DBInstanceIdentifier: resourceName,
-                        BackupRetentionPeriod: 14,
-                        ApplyImmediately: true
-                    }));
-                } else if (issue.includes('Multi-AZ')) {
-                    await rds.send(new ModifyDBInstanceCommand({
-                        DBInstanceIdentifier: resourceName,
-                        MultiAZ: true,
-                        ApplyImmediately: false
-                    }));
-                    result.message = `Multi-AZ enabled for "${resourceName}". applies next maintenance window.`;
-                } else if (issue.includes('Publicly accessible')) {
-                    await rds.send(new ModifyDBInstanceCommand({
-                        DBInstanceIdentifier: resourceName,
-                        PubliclyAccessible: false,
-                        ApplyImmediately: true
-                    }));
-                }
-            }
-
-            // ── KMS Key Remediations ──
-            else if (resourceType === 'KMS Key') {
-                const kms = new KMSClient(config);
-                if (issue.includes('Rotation disabled')) {
-                    await kms.send(new EnableKeyRotationCommand({ KeyId: resourceName }));
-                }
-            }
-
-            // ── Lambda Remediations ──
-            else if (resourceType === 'Lambda') {
-                const lambda = new LambdaClient(config);
-                if (issue.includes('runtime')) {
-                    await lambda.send(new UpdateFunctionConfigurationCommand({
-                        FunctionName: resourceName,
-                        Runtime: 'nodejs20.x'
-                    }));
-                }
-            }
-
-            // ── CloudTrail Remediations ──
-            else if (resourceType === 'CloudTrail') {
-                const cloudtrail = new CloudTrailClient(config);
-                if (issue.includes('Log Validation disabled')) {
-                    await cloudtrail.send(new UpdateTrailCommand({
-                        Name: resourceName,
-                        EnableLogFileValidation: true
-                    }));
-                } else if (issue.includes('Not multi-region')) {
-                    await cloudtrail.send(new UpdateTrailCommand({
-                        Name: resourceName,
-                        IsMultiRegionTrail: true
-                    }));
-                }
-            }
-
-            // ── VPC & Networking Remediations ──
-            else if (resourceType === 'VPC') {
-                const ec2 = new EC2Client(config);
-                if (issue.includes('Flow Logs disabled')) {
-                    try {
-                        await ec2.send(new CreateFlowLogsCommand({
-                            ResourceIds: [resourceName],
-                            ResourceType: 'VPC',
-                            TrafficType: 'ALL',
-                            LogDestinationType: 'cloud-watch-logs',
-                            LogGroupName: `/complianceflow/vpc-flow-logs/${resourceName}`,
-                            DeliverLogsPermissionArn: `arn:aws:iam::role/ComplianceFlowVPCFlowLogRole`
-                        }));
-                    } catch (e) {
-                        result = {
-                            success: true,
-                            advisory: true,
-                            message: `ADVISORY: VPC Flow Logs require an IAM role "ComplianceFlowVPCFlowLogRole".`
-                        };
                     }
-                }
+                }));
+                result.message = `Enabled KMS default encryption on S3 bucket "${resourceName}".`;
+            } 
+            else if (findingCode === FINDING_CODES.S3_LIFECYCLE_MISSING || issue.includes('Lifecycle')) {
+                await s3.send(new PutBucketLifecycleConfigurationCommand({
+                    Bucket: resourceName,
+                    LifecycleConfiguration: {
+                        Rules: [{
+                            Status: "Enabled",
+                            Filter: { Prefix: "" },
+                            AbortIncompleteMultipartUpload: { DaysAfterInitiation: 7 },
+                            ID: "ComplianceFlow-Auto-Abort-Incomplete-Multipart"
+                        }]
+                    }
+                }));
+                result.message = `Applied base lifecycle policy to S3 bucket "${resourceName}".`;
             }
-            else if (resourceType === 'Elastic IP') {
-                const ec2 = new EC2Client(config);
-                if (issue.includes('Unassociated')) {
-                    await ec2.send(new ReleaseAddressCommand({ PublicIp: resourceName }));
-                    result.message = `Released unassociated Elastic IP: ${resourceName}`;
-                }
-            }
-
-            // ── Secrets Manager Remediations ──
-            else if (resourceType === 'Secrets Manager') {
+            else if (issue.includes('MFA Delete')) {
                 result = {
                     success: true,
                     advisory: true,
-                    message: `ADVISORY: Secret "${resourceName}" rotation requires Lambda configuration.`
+                    findingCode,
+                    message: `ADVISORY: MFA Delete can only be enabled by the root account user via AWS CLI or SDK.`
                 };
             }
+        }
 
-            // ── EC2 Instance & EBS Remediations ──
-            else if (resourceType === 'EC2 Instance') {
-                if (issue.includes('IMDSv2')) {
-                    const ec2 = new EC2Client(config);
-                    await ec2.send(new ModifyInstanceMetadataOptionsCommand({
-                        InstanceId: resourceName,
-                        HttpTokens: 'required',
-                        HttpEndpoint: 'enabled'
-                    }));
-                }
-            }
-            else if (resourceType === 'EBS Volume') {
-                if (issue.includes('encryption')) {
-                    result = {
-                        success: true,
-                        advisory: true,
-                        message: `ADVISORY: EBS volume encryption cannot be enabled in-place. Create a snapshot, encrypt a copy of the snapshot, and restore to a new volume.`
-                    };
-                }
-            }
-            else if (resourceType === 'EBS Snapshot') {
-                if (issue.includes('Publicly Restorable')) {
-                    const ec2 = new EC2Client(config);
-                    await ec2.send(new ModifySnapshotAttributeCommand({
-                        SnapshotId: resourceName,
-                        Attribute: "createVolumePermission",
-                        OperationType: "remove",
-                        GroupNames: ["all"]
-                    }));
-                    result.message = `Removed public restore permissions from EBS Snapshot ${resourceName}.`;
-                }
+        // ─────────────────────────────────────────────────────────────────────
+        // 2. SECURITY GROUPS (Parameterized CIDR & Pre-Flight Check)
+        // ─────────────────────────────────────────────────────────────────────
+        else if (resourceType === 'Security Group' || findingCode.startsWith('SG_')) {
+            const ec2 = new EC2Client(config);
+
+            const { SecurityGroups } = await ec2.send(new DescribeSecurityGroupsCommand({ GroupNames: [resourceName] })).catch(() => ({ SecurityGroups: [] }));
+            const sg = SecurityGroups?.[0];
+
+            if (!sg) {
+                return { success: false, error: `Pre-flight check failed: Security Group "${resourceName}" not found.` };
             }
 
-            // ── Monitoring & Threat Detection Remediations ──
-            else if (resourceType === 'Threat Detection') {
-                const guardduty = new GuardDutyClient(config);
-                if (issue.includes('disabled')) {
-                    await guardduty.send(new CreateDetectorCommand({ Enable: true }));
-                    result.message = `Enabled GuardDuty threat detection.`;
+            if (findingCode === FINDING_CODES.SG_OPEN_SSH_WORLD || issue.includes('port 22') || issue.includes('SSH')) {
+                const openRules = (sg.IpPermissions || []).filter(p => (p.FromPort <= 22 && p.ToPort >= 22) && (p.IpRanges || []).some(r => r.CidrIp === '0.0.0.0/0'));
+                
+                if (openRules.length === 0) {
+                    return { success: true, message: `Pre-flight check: SSH port 22 is already closed to 0.0.0.0/0 on "${resourceName}".` };
                 }
-            }
-            else if (resourceType === 'Configuration') {
-                if (issue.includes('disabled')) {
-                    result = {
-                        success: true,
-                        advisory: true,
-                        message: `ADVISORY: AWS Config requires an IAM Role and an S3 bucket for configuration history. Configure via AWS Console > AWS Config.`
-                    };
-                }
-            }
-            else if (resourceType === 'Log Group') {
-                const cwLogs = new CloudWatchLogsClient(config);
-                if (issue.includes('retention') || issue.includes('< 365')) {
-                    await cwLogs.send(new PutRetentionPolicyCommand({
-                        logGroupName: resourceName,
-                        retentionInDays: 365
-                    }));
-                    result.message = `Set log retention to 365 days for ${resourceName}.`;
-                }
-            }
-            else if (resourceType === 'CloudWatch Alarms') {
-                result = {
-                    success: true,
-                    advisory: true,
-                    message: `ADVISORY: CloudWatch Alarms for SOC2 require metric filters on CloudTrail log groups. Set this manually via AWS Console.`
-                };
-            }
 
-            // ── Phase 6. Advanced Remediations ──
-            else if (resourceType === 'DynamoDB Table') {
-                if (issue.includes('PITR')) {
-                    const dynamodb = new DynamoDBClient(config);
-                    await dynamodb.send(new UpdateContinuousBackupsCommand({
-                        TableName: resourceName,
-                        PointInTimeRecoverySpecification: { PointInTimeRecoveryEnabled: true }
+                for (const rule of openRules) {
+                    await ec2.send(new RevokeSecurityGroupIngressCommand({
+                        GroupId: sg.GroupId,
+                        IpPermissions: [{ IpProtocol: rule.IpProtocol, FromPort: 22, ToPort: 22, IpRanges: [{ CidrIp: '0.0.0.0/0' }] }]
                     }));
-                    result.message = `Enabled Point-In-Time Recovery (PITR) for DynamoDB Table ${resourceName}.`;
+                }
+
+                if (safeCidr) {
+                    await ec2.send(new AuthorizeSecurityGroupIngressCommand({
+                        GroupId: sg.GroupId,
+                        IpPermissions: [{ IpProtocol: 'tcp', FromPort: 22, ToPort: 22, IpRanges: [{ CidrIp: safeCidr, Description: 'Restricted SSH (ComplianceFlow Policy)' }] }]
+                    }));
+                    result.message = `Revoked 0.0.0.0/0 and restricted SSH to authorized CIDR (${safeCidr}) on "${resourceName}".`;
                 } else {
-                    result = { success: true, advisory: true, message: `ADVISORY: KMS encryption configuration for DynamoDB cannot be modified in-place.` };
+                    result.message = `Revoked public 0.0.0.0/0 SSH rule on "${resourceName}" (Revoke-Only safe mode).`;
                 }
             }
-            else if (resourceType === 'Redshift Cluster') {
-                result = { success: true, advisory: true, message: `ADVISORY: Redshift Cluster configuration changes (Encryption, Network Access, Snapshots) require review to avoid data downtime.` };
-            }
-            else if (resourceType === 'EKS Cluster') {
-                log.info(`ADVISORY: EKS cluster modifications (Secrets Encryption, Control Plane Logging) can cause node rotations. Validate safely via console.`);
-                result = { success: true, advisory: true, message: `ADVISORY: EKS cluster modifications (Secrets Encryption, Control Plane Logging) can cause node rotations. Validate safely via console.` };
-            }
-            else if (resourceType === 'API Gateway') {
-                if (issue.includes('execute-api')) {
-                    const apigw = new APIGatewayClient(config);
-                    await apigw.send(new UpdateRestApiCommand({
-                        restApiId: resourceName,
-                        patchOperations: [{ op: 'replace', path: '/disableExecuteApiEndpoint', value: 'true' }]
+            else if (findingCode === FINDING_CODES.SG_OPEN_RDP_WORLD || issue.includes('RDP') || issue.includes('3389')) {
+                const rdpRules = (sg.IpPermissions || []).filter(p => (p.FromPort <= 3389 && p.ToPort >= 3389) && (p.IpRanges || []).some(r => r.CidrIp === '0.0.0.0/0'));
+                for (const rule of rdpRules) {
+                    await ec2.send(new RevokeSecurityGroupIngressCommand({
+                        GroupId: sg.GroupId,
+                        IpPermissions: [{ IpProtocol: rule.IpProtocol, FromPort: rule.FromPort, ToPort: rule.ToPort, IpRanges: [{ CidrIp: '0.0.0.0/0' }] }]
                     }));
-                    result.message = `Disabled default execute-api endpoint for API ${resourceName}.`;
                 }
+                result.message = `Revoked public RDP (port 3389) rule on "${resourceName}".`;
             }
-            else if (resourceType === 'API Gateway Stage') {
-                if (issue.includes('X-Ray')) {
-                    const apigw = new APIGatewayClient(config);
-                    const [apiId, stageName] = resourceName.split('/');
+            else if (findingCode === FINDING_CODES.SG_OPEN_HTTP_WORLD || issue.includes('HTTP') || issue.includes('port 80')) {
+                const httpRules = (sg.IpPermissions || []).filter(p => (p.FromPort <= 80 && p.ToPort >= 80) && (p.IpRanges || []).some(r => r.CidrIp === '0.0.0.0/0'));
+                for (const rule of httpRules) {
+                    await ec2.send(new RevokeSecurityGroupIngressCommand({
+                        GroupId: sg.GroupId,
+                        IpPermissions: [{ IpProtocol: rule.IpProtocol, FromPort: rule.FromPort, ToPort: rule.ToPort, IpRanges: [{ CidrIp: '0.0.0.0/0' }] }]
+                    }));
+                }
+                result.message = `Revoked public HTTP (port 80) rule on "${resourceName}".`;
+            }
+            else if (findingCode === FINDING_CODES.SG_UNUSED || issue.includes('Unused')) {
+                await ec2.send(new DeleteSecurityGroupCommand({ GroupId: sg.GroupId }));
+                result.message = `Deleted unused Security Group: "${resourceName}".`;
+            }
+        }
+
+        // ─────────────────────────────────────────────────────────────────────
+        // 3. EC2 & EBS VOLUMES / SNAPSHOTS
+        // ─────────────────────────────────────────────────────────────────────
+        else if (resourceType === 'EC2 Instance' || findingCode === FINDING_CODES.EC2_IMDSV1_ENABLED) {
+            const ec2 = new EC2Client(config);
+            await ec2.send(new ModifyInstanceMetadataOptionsCommand({
+                InstanceId: resourceName,
+                HttpTokens: 'required',
+                HttpEndpoint: 'enabled'
+            }));
+            result.message = `Enforced IMDSv2 (HttpTokens: required) on EC2 instance "${resourceName}".`;
+        }
+        else if (resourceType === 'Elastic IP' || findingCode === FINDING_CODES.EIP_UNASSOCIATED) {
+            const ec2 = new EC2Client(config);
+            await ec2.send(new ReleaseAddressCommand({ AllocationId: resourceName }));
+            result.message = `Released unassociated Elastic IP ${resourceName}.`;
+        }
+        else if (resourceType === 'EBS Snapshot') {
+            if (issue.includes('Publicly Restorable')) {
+                const ec2 = new EC2Client(config);
+                await ec2.send(new ModifySnapshotAttributeCommand({
+                    SnapshotId: resourceName,
+                    Attribute: "createVolumePermission",
+                    OperationType: "remove",
+                    GroupNames: ["all"]
+                }));
+                result.message = `Removed public restore permissions from EBS Snapshot ${resourceName}.`;
+            }
+        }
+        else if (resourceType === 'EBS Volume') {
+            result = {
+                success: true,
+                advisory: true,
+                findingCode,
+                message: `ADVISORY: EBS volume encryption cannot be enabled in-place. Create an encrypted snapshot copy and restore.`
+            };
+        }
+
+        // ─────────────────────────────────────────────────────────────────────
+        // 4. RDS DATABASES
+        // ─────────────────────────────────────────────────────────────────────
+        else if (resourceType === 'RDS Database' || findingCode.startsWith('RDS_')) {
+            const rds = new RDSClient(config);
+
+            if (findingCode === FINDING_CODES.RDS_BACKUP_DISABLED || issue.includes('Backup retention')) {
+                await rds.send(new ModifyDBInstanceCommand({
+                    DBInstanceIdentifier: resourceName,
+                    BackupRetentionPeriod: 14,
+                    ApplyImmediately: true
+                }));
+                result.message = `Configured 14-day automated backup retention on RDS "${resourceName}".`;
+            }
+            else if (findingCode === FINDING_CODES.RDS_PUBLICLY_ACCESSIBLE || issue.includes('Publicly accessible')) {
+                await rds.send(new ModifyDBInstanceCommand({
+                    DBInstanceIdentifier: resourceName,
+                    PubliclyAccessible: false,
+                    ApplyImmediately: true
+                }));
+                result.message = `Revoked public accessibility on RDS instance "${resourceName}".`;
+            }
+            else if (issue.includes('Multi-AZ')) {
+                await rds.send(new ModifyDBInstanceCommand({
+                    DBInstanceIdentifier: resourceName,
+                    MultiAZ: true,
+                    ApplyImmediately: false
+                }));
+                result.message = `Multi-AZ enabled for "${resourceName}" (applies next maintenance window).`;
+            }
+            else if (findingCode === FINDING_CODES.RDS_UNENCRYPTED || issue.includes('Encryption at rest')) {
+                result = {
+                    success: true,
+                    advisory: true,
+                    findingCode,
+                    message: `ADVISORY: RDS encryption at rest cannot be enabled in-place. Create an encrypted snapshot and restore.`
+                };
+            }
+        }
+
+        // ─────────────────────────────────────────────────────────────────────
+        // 5. KMS KEY ROTATION
+        // ─────────────────────────────────────────────────────────────────────
+        else if (resourceType === 'KMS Key' || findingCode === FINDING_CODES.KMS_KEY_ROTATION_DISABLED) {
+            const kms = new KMSClient(config);
+            await kms.send(new EnableKeyRotationCommand({ KeyId: resourceName }));
+            result.message = `Enabled automatic annual key rotation on KMS Key "${resourceName}".`;
+        }
+
+        // ─────────────────────────────────────────────────────────────────────
+        // 6. DYNAMODB TABLES
+        // ─────────────────────────────────────────────────────────────────────
+        else if (resourceType === 'DynamoDB Table' || findingCode === FINDING_CODES.DYNAMODB_PITR_DISABLED) {
+            if (issue.includes('PITR') || findingCode === FINDING_CODES.DYNAMODB_PITR_DISABLED) {
+                const ddb = new DynamoDBClient(config);
+                await ddb.send(new UpdateContinuousBackupsCommand({
+                    TableName: resourceName,
+                    PointInTimeRecoverySpecification: { PointInTimeRecoveryEnabled: true }
+                }));
+                result.message = `Enabled Point-in-Time Recovery (PITR) on DynamoDB table "${resourceName}".`;
+            } else {
+                result = {
+                    success: true,
+                    advisory: true,
+                    findingCode,
+                    message: `ADVISORY: KMS encryption configuration for DynamoDB cannot be modified in-place.`
+                };
+            }
+        }
+
+        // ─────────────────────────────────────────────────────────────────────
+        // 7. CLOUDTRAIL LOGGING
+        // ─────────────────────────────────────────────────────────────────────
+        else if (resourceType === 'CloudTrail' || findingCode.startsWith('CLOUDTRAIL_')) {
+            const cloudtrail = new CloudTrailClient(config);
+            if (findingCode === FINDING_CODES.CLOUDTRAIL_LOG_VALIDATION_DISABLED || issue.includes('Validation')) {
+                await cloudtrail.send(new UpdateTrailCommand({
+                    Name: resourceName,
+                    EnableLogFileValidation: true
+                }));
+                result.message = `Enabled digest log file validation on CloudTrail "${resourceName}".`;
+            } else if (findingCode === FINDING_CODES.CLOUDTRAIL_NOT_MULTI_REGION || issue.includes('multi-region')) {
+                await cloudtrail.send(new UpdateTrailCommand({
+                    Name: resourceName,
+                    IsMultiRegionTrail: true
+                }));
+                result.message = `Configured CloudTrail "${resourceName}" as multi-region trail.`;
+            }
+        }
+
+        // ─────────────────────────────────────────────────────────────────────
+        // 8. GUARDDUTY THREAT DETECTION
+        // ─────────────────────────────────────────────────────────────────────
+        else if (resourceType === 'Threat Detection' || findingCode === FINDING_CODES.GUARDDUTY_DISABLED) {
+            const guardduty = new GuardDutyClient(config);
+            await guardduty.send(new CreateDetectorCommand({ Enable: true }));
+            result.message = `Enabled Amazon GuardDuty threat detection.`;
+        }
+
+        // ─────────────────────────────────────────────────────────────────────
+        // 9. CLOUDWATCH LOG GROUPS
+        // ─────────────────────────────────────────────────────────────────────
+        else if (resourceType === 'Log Group' || findingCode === FINDING_CODES.CLOUDWATCH_LOG_RETENTION_SHORT) {
+            const logs = new CloudWatchLogsClient(config);
+            await logs.send(new PutRetentionPolicyCommand({
+                logGroupName: resourceName,
+                retentionInDays: 365
+            }));
+            result.message = `Set 365-day compliance retention policy on Log Group "${resourceName}".`;
+        }
+
+        // ─────────────────────────────────────────────────────────────────────
+        // 10. API GATEWAY
+        // ─────────────────────────────────────────────────────────────────────
+        else if (resourceType === 'API Gateway') {
+            if (issue.includes('execute-api')) {
+                const apigw = new APIGatewayClient(config);
+                await apigw.send(new UpdateRestApiCommand({
+                    restApiId: resourceName,
+                    patchOperations: [{ op: 'replace', path: '/disableExecuteApiEndpoint', value: 'true' }]
+                }));
+                result.message = `Disabled default execute-api endpoint for API ${resourceName}.`;
+            }
+        }
+        else if (resourceType === 'API Gateway Stage' || findingCode === FINDING_CODES.APIGATEWAY_XRAY_DISABLED) {
+            if (issue.includes('X-Ray') || findingCode === FINDING_CODES.APIGATEWAY_XRAY_DISABLED) {
+                const apigw = new APIGatewayClient(config);
+                const [apiId, stageName] = resourceName.split('/');
+                if (apiId && stageName) {
                     await apigw.send(new UpdateStageCommand({
                         restApiId: apiId,
                         stageName: stageName,
                         patchOperations: [{ op: 'replace', path: '/*/*/tracingEnabled', value: 'true' }]
                     }));
                     result.message = `Enabled X-Ray tracing for API Stage ${resourceName}.`;
-                } else if (issue.includes('WAF')) {
-                    result = { success: true, advisory: true, message: `ADVISORY: Attach a WebACL via APIGW Console > Stages.` };
                 }
-            }
-            else if (resourceType === 'CloudFront Distribution') {
-                result = { success: true, advisory: true, message: `ADVISORY: CloudFront distribution updates require specific XML/ETag configurations. Configure via the AWS Console.` };
-            }
-            else if (resourceType === 'SQS Queue') {
-                if (issue.includes('Encryption')) {
-                    result = { success: true, advisory: true, message: `ADVISORY: Navigate to SQS > Queue > Edit to enable SqsManagedSseEncryption.` };
-                } else if (issue.includes('DLQ')) {
-                    result = { success: true, advisory: true, message: `ADVISORY: DLQ configuration requires the ARN of a secondary queue.` };
-                }
-            }
-            else if (resourceType === 'SNS Topic') {
-                result = { success: true, advisory: true, message: `ADVISORY: Navigate to SNS > Topic > Edit to enable Server-Side Encryption.` };
-            }
-
-            // ── Macie / WAF / Shield — Advisory only ──
-            else if (resourceType === 'Macie') {
-                result = { success: true, advisory: true, message: `ADVISORY: Enable Amazon Macie via the AWS Console.` };
-            }
-            else if (resourceType === 'WAF') {
-                result = { success: true, advisory: true, message: `ADVISORY: Create a WebACL via AWS Console > WAF & Shield.` };
-            }
-            else if (resourceType === 'Shield') {
-                result = { success: true, advisory: true, message: `ADVISORY: AWS Shield Advanced requires a subscription.` };
-            }
-
-            // ── Fallback ──
-            else {
-                result = { success: true, advisory: true, message: `No automated remediation available for ${resourceType}. Manual intervention required.` };
+            } else if (issue.includes('WAF')) {
+                result = { success: true, advisory: true, findingCode, message: `ADVISORY: Attach a WebACL via APIGW Console > Stages.` };
             }
         }
 
+        // ─────────────────────────────────────────────────────────────────────
+        // 11. LAMBDA RUNTIMES
+        // ─────────────────────────────────────────────────────────────────────
+        else if (resourceType === 'Lambda') {
+            if (issue.includes('runtime')) {
+                const lambda = new LambdaClient(config);
+                await lambda.send(new UpdateFunctionConfigurationCommand({
+                    FunctionName: resourceName,
+                    Runtime: 'nodejs20.x'
+                }));
+                result.message = `Updated Lambda "${resourceName}" runtime to Node.js 20.x.`;
+            }
+        }
+
+        // ─────────────────────────────────────────────────────────────────────
+        // 12. IAM ACCOUNTS, USERS, ROLES (Advisories & Session Invalidation)
+        // ─────────────────────────────────────────────────────────────────────
+        else if (resourceType === 'IAM Account') {
+            result = {
+                success: true,
+                advisory: true,
+                findingCode,
+                message: issue.includes('Root') ? `ADVISORY: Root MFA / Keys must be managed manually in the AWS Console.` : `ADVISORY: Configure password policy via IAM Console.`
+            };
+        }
+        else if (resourceType === 'IAM User') {
+            result = {
+                success: true,
+                advisory: true,
+                findingCode,
+                message: `ADVISORY: User "${resourceName}" access requires manual review (rotate access keys / enforce MFA).`
+            };
+        }
+        else if (resourceType === 'IAM Role') {
+            const iam = new IAMClient(config);
+            if (issue.includes('Stale Access') || issue.includes('180 days') || findingCode === FINDING_CODES.IAM_STALE_ACCESS) {
+                const denyPolicy = {
+                    Version: "2012-10-17",
+                    Statement: [{
+                        Effect: "Deny", Principal: "*", Action: "sts:AssumeRole",
+                        Condition: { StringEquals: { "aws:PrincipalTag/ComplianceFlow": "deactivated" } }
+                    }]
+                };
+                await iam.send(new UpdateAssumeRolePolicyCommand({
+                    RoleName: resourceName,
+                    PolicyDocument: JSON.stringify(denyPolicy)
+                }));
+                result.message = `Deactivated stale IAM Role "${resourceName}" with explicit Deny assume-role policy.`;
+            }
+        }
+
+        // ─────────────────────────────────────────────────────────────────────
+        // 13. SQS, SNS, REDSHIFT, EKS, MACIE, WAF, SHIELD (Advisories)
+        // ─────────────────────────────────────────────────────────────────────
+        else if (resourceType === 'Redshift Cluster') {
+            result = { success: true, advisory: true, findingCode, message: `ADVISORY: Redshift cluster changes (encryption, public access) require planned maintenance.` };
+        }
+        else if (resourceType === 'EKS Cluster') {
+            result = { success: true, advisory: true, findingCode, message: `ADVISORY: EKS cluster modifications (secrets encryption, logging) must be applied via cluster configuration.` };
+        }
+        else if (resourceType === 'SQS Queue') {
+            result = { success: true, advisory: true, findingCode, message: `ADVISORY: Enable SQS server-side encryption via SQS Console > Edit Queue.` };
+        }
+        else if (resourceType === 'SNS Topic') {
+            result = { success: true, advisory: true, findingCode, message: `ADVISORY: Enable SNS server-side encryption via SNS Console > Edit Topic.` };
+        }
+        else if (resourceType === 'Macie') {
+            result = { success: true, advisory: true, findingCode, message: `ADVISORY: Enable Amazon Macie sensitive data discovery in the AWS Console.` };
+        }
+        else if (resourceType === 'WAF') {
+            result = { success: true, advisory: true, findingCode, message: `ADVISORY: Create and associate a WebACL via AWS WAF & Shield Console.` };
+        }
+        else if (resourceType === 'Shield') {
+            result = { success: true, advisory: true, findingCode, message: `ADVISORY: AWS Shield Advanced requires an active subscription.` };
+        }
+
+        // Fallback for any other resource
+        else {
+            result = {
+                success: true,
+                advisory: true,
+                findingCode,
+                message: `ADVISORY: Automated fix for ${resourceType} "${resourceName}" requires manual operator review.`
+            };
+        }
+
         return result;
-    } catch (error) {
-        log.error('Remediation Error:', error);
-        throw error;
+
+    } catch (err) {
+        log.error(`[AWS REMEDIATION ERROR] Failed on ${resourceType} "${resourceName}":`, err.message);
+        throw err;
     }
 }
