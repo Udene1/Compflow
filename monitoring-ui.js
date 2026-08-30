@@ -7,8 +7,11 @@ const HealthMonitor = {
     async refresh() {
         try {
             console.log("➤ Refreshing System Health...");
-            const response = await fetch(this.API_URL, {
+            const fetchFn = (window.AuthUI && window.AuthUI.authFetch) ? window.AuthUI.authFetch : fetch;
+            const response = await fetchFn(this.API_URL, {
                 method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                credentials: 'include',
                 body: JSON.stringify({ clientId: 'default' })
             });
             const data = await response.json();

@@ -1138,6 +1138,128 @@ PORT=3000
 
 ---
 
-*Last updated: August 24, 2026*
-*ComplianceFlow AI v2.0.0*
+## 25. Creating OAuth Apps (Required for SSO Login)
+
+Before Google or GitHub login will work in production, you must create OAuth apps and set their credentials in `.env`. This is a one-time manual step in each provider's developer console.
+
+---
+
+### 25.1 Google OAuth 2.0 App
+
+**Where:** [https://console.cloud.google.com/apis/credentials](https://console.cloud.google.com/apis/credentials)
+
+**Steps:**
+
+1. Open the Google Cloud Console. Select your project (or create a new one called `complianceflow-prod`).
+2. In the left sidebar → **APIs & Services** → **Credentials**.
+3. Click **+ CREATE CREDENTIALS** → **OAuth client ID**.
+4. Set **Application type** to **Web application**.
+5. Set **Name** to `ComplianceFlow Production`.
+6. Under **Authorized JavaScript origins** — add:
+   ```
+   https://www.compflow.icu
+   https://compflow.icu
+   http://localhost:3000
+   ```
+7. Under **Authorized redirect URIs** — add:
+   ```
+   https://api.compflow.icu/api/auth/google/callback
+   http://localhost:3000/api/auth/google/callback
+   ```
+8. Click **CREATE**. A dialog will show your **Client ID** and **Client Secret**.
+9. Copy both values and set them in `.env`:
+   ```bash
+   GOOGLE_CLIENT_ID=<your-client-id>
+   GOOGLE_CLIENT_SECRET=<your-client-secret>
+   ```
+10. Go to **OAuth consent screen** (left sidebar) and ensure:
+    - **User type**: External (or Internal if you have a Workspace org)
+    - **App name**: ComplianceFlow AI
+    - **Authorized domains**: `compflow.icu`
+    - **Scopes**: `openid`, `email`, `profile` (these are already requested by the code)
+    - **Publishing status**: Set to **In production** (otherwise only test users can log in)
+
+> **Workspace note:** If you want to restrict login to users from a specific Google Workspace domain (e.g., only `acme.com` employees), set `ALLOWED_DOMAINS=acme.com` in `.env`. The code will enforce this server-side and optionally pass `hd=acme.com` in the Google auth URL to pre-filter the account picker.
+
+---
+
+### 25.2 GitHub OAuth App
+
+**Where:** [https://github.com/settings/applications/new](https://github.com/settings/applications/new)
+
+**Steps:**
+
+1. Go to **GitHub → Settings → Developer settings → OAuth Apps → New OAuth App**.
+2. Fill in the form:
+   - **Application name**: `ComplianceFlow`
+   - **Homepage URL**: `https://www.compflow.icu`
+   - **Authorization callback URL**: `https://api.compflow.icu/api/auth/github/callback`
+3. Click **Register application**.
+4. On the next page, copy the **Client ID**.
+5. Click **Generate a new client secret** → copy the secret immediately (it won't be shown again).
+6. Set both in `.env`:
+   ```bash
+   GITHUB_CLIENT_ID=<your-client-id>
+   GITHUB_CLIENT_SECRET=<your-client-secret>
+   ```
+
+> **For local development:** Create a second GitHub OAuth app with callback URL `http://localhost:3000/api/auth/github/callback`. Use its credentials in your local `.env` (with `NODE_ENV=development`).
+
+> **GitHub org restriction:** If you want to restrict login to members of a specific GitHub organization, set `ALLOWED_GITHUB_ORGS=your-org-name` in `.env`. The code will call `GET /user/orgs` after login and reject users not in the list. Note: this checks *public* org membership by default (the `read:org` scope is already requested).
+
+---
+
+### 25.3 After Setting Credentials
+
+1. Update `.env` on the production server with both `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, `GITHUB_CLIENT_ID`, `GITHUB_CLIENT_SECRET`.
+2. Restart the server: `pm2 restart complianceflow` (or `node server.js`).
+3. Verify providers are live:
+   ```bash
+   curl -s https://api.compflow.icu/api/auth/providers | jq .
+   # Should return: { "google": { "enabled": true, ... }, "github": { "enabled": true, ... } }
+   ```
+4. Open `https://www.compflow.icu/app.html` in a browser — the auth gate should now show real **Continue with Google** and **Continue with GitHub** buttons.
+
+---
+
+### 25.4 Production Auth Checklist
+
+Run these curl commands after deploying:
+
+```bash
+# 1. Providers must show enabled: true
+curl -s https://api.compflow.icu/api/auth/providers | jq '{google:.google.enabled, github:.github.enabled}'
+
+# 2. Unauthenticated API access must return 401
+curl -s -o /dev/null -w "%{http_code}\n" https://api.compflow.icu/api/tenants
+# Expected: 401
+
+# 3. Dev-login must return 403 in production
+curl -s -o /dev/null -w "%{http_code}\n" -X POST https://api.compflow.icu/api/auth/dev-login
+# Expected: 403
+
+# 4. CORS preflight must include Allow-Credentials
+curl -sI -X OPTIONS \
+  -H "Origin: https://www.compflow.icu" \
+  -H "Access-Control-Request-Method: GET" \
+  https://api.compflow.icu/api/auth/me \
+  | grep -i "access-control"
+# Expected: access-control-allow-credentials: true
+```
+
+Then in a browser:
+- [ ] Click **Continue with Google** → redirected to `accounts.google.com` (real OAuth, not fake)
+- [ ] Complete Google login → redirected back → `https://www.compflow.icu/app.html?auth=success`
+- [ ] Toast: "Welcome! Signed in successfully."
+- [ ] Refresh page → still authenticated (cookie persists)
+- [ ] Open DevTools → Application → Cookies → `api.compflow.icu` → `cf_session` cookie present with `HttpOnly`, `Secure`, `SameSite=None`
+- [ ] Network tab: `GET /api/tenants` request includes `Cookie: cf_session=...` header
+- [ ] Fresh user sees Connect panel + Pilot Activation Checklist (not full empty dashboard)
+- [ ] Sign out → auth gate reappears → `GET /api/auth/me` returns `401`
+- [ ] No OWNER/ADMIN/ENGINEER/AUDITOR quick-login buttons visible in prod UI
+
+---
+
+*Last updated: August 30, 2026*  
+*ComplianceFlow AI v2.4-iron-clad*  
 *Generated from source code analysis by the engineering team.*

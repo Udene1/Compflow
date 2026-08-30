@@ -8,6 +8,32 @@ const router = Router();
 
 const APP_URL = process.env.APP_URL || 'https://compflow.icu';
 const API_URL = process.env.API_URL || 'https://api.compflow.icu';
+const IS_PRODUCTION = process.env.NODE_ENV === 'production';
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Cross-Subdomain Cookie Helpers
+// www.compflow.icu → api.compflow.icu requires SameSite=None + Domain cookie.
+// ─────────────────────────────────────────────────────────────────────────────
+function buildSessionCookies(token, email, maxAgeSec = 7 * 24 * 60 * 60) {
+    // Production: SameSite=None required for cross-subdomain (www ↔ api)
+    // Domain=.compflow.icu shares cookie across all subdomains
+    const sameSite = IS_PRODUCTION ? 'None' : 'Lax';
+    const domainAttr = IS_PRODUCTION ? ' Domain=.compflow.icu;' : '';
+    return [
+        `cf_session=${token}; HttpOnly; Secure; SameSite=${sameSite};${domainAttr} Path=/; Max-Age=${maxAgeSec}`,
+        `cf_user_email=${encodeURIComponent(email)}; Secure; SameSite=${sameSite};${domainAttr} Path=/; Max-Age=${maxAgeSec}`
+    ];
+}
+
+function buildClearCookies() {
+    const sameSite = IS_PRODUCTION ? 'None' : 'Lax';
+    const domainAttr = IS_PRODUCTION ? ' Domain=.compflow.icu;' : '';
+    return [
+        `cf_session=; HttpOnly; Secure; SameSite=${sameSite};${domainAttr} Path=/; Max-Age=0; Expires=Thu, 01 Jan 1970 00:00:00 GMT`,
+        `cf_user_email=; Secure; SameSite=${sameSite};${domainAttr} Path=/; Max-Age=0; Expires=Thu, 01 Jan 1970 00:00:00 GMT`,
+        `oauth_state=; HttpOnly; Secure; SameSite=Lax; Path=/; Max-Age=0; Expires=Thu, 01 Jan 1970 00:00:00 GMT`
+    ];
+}
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Domain & Organization Restriction Configuration
@@ -70,11 +96,11 @@ router.get('/providers', (req, res) => {
     res.json({
         google: {
             enabled: Boolean(process.env.GOOGLE_CLIENT_ID && process.env.GOOGLE_CLIENT_SECRET),
-            authUrl: '/api/auth/google'
+            authUrl: `${API_URL}/api/auth/google`
         },
         github: {
             enabled: Boolean(process.env.GITHUB_CLIENT_ID && process.env.GITHUB_CLIENT_SECRET),
-            authUrl: '/api/auth/github'
+            authUrl: `${API_URL}/api/auth/github`
         },
         devLogin: isDev,
         pilotAccess: Boolean(process.env.PILOT_ACCESS_CODE),
@@ -177,10 +203,7 @@ router.get('/google/callback', async (req, res) => {
         const session = createSessionToken(user, org, role, 7);
 
         // Set secure session cookie & redirect to dashboard
-        res.setHeader('Set-Cookie', [
-            `cf_session=${session.token}; HttpOnly; Secure; SameSite=Lax; Path=/; Max-Age=${7 * 24 * 60 * 60}`,
-            `cf_user_email=${encodeURIComponent(user.email)}; Secure; SameSite=Lax; Path=/; Max-Age=${7 * 24 * 60 * 60}`
-        ]);
+        res.setHeader('Set-Cookie', buildSessionCookies(session.token, user.email));
 
         log.info(`[AUTH] Google OAuth success: ${user.email} (Role: ${role}, Org: ${org.name})`);
         return res.redirect(`${APP_URL}/app.html?auth=success&role=${role}`);
@@ -293,10 +316,7 @@ router.get('/github/callback', async (req, res) => {
         const { user, org, role } = await upsertUserFromOAuth(profile, 'github');
         const session = createSessionToken(user, org, role, 7);
 
-        res.setHeader('Set-Cookie', [
-            `cf_session=${session.token}; HttpOnly; Secure; SameSite=Lax; Path=/; Max-Age=${7 * 24 * 60 * 60}`,
-            `cf_user_email=${encodeURIComponent(user.email)}; Secure; SameSite=Lax; Path=/; Max-Age=${7 * 24 * 60 * 60}`
-        ]);
+        res.setHeader('Set-Cookie', buildSessionCookies(session.token, user.email));
 
         log.info(`[AUTH] GitHub OAuth success: ${user.email} (Role: ${role}, Org: ${org.name})`);
         return res.redirect(`${APP_URL}/app.html?auth=success&role=${role}`);
@@ -350,10 +370,7 @@ router.post('/pilot-login', async (req, res) => {
         const { user, org } = await upsertUserFromOAuth({ email, name: name || email.split('@')[0] }, 'pilot_code');
         const session = createSessionToken(user, org, ROLES.ADMIN, 7);
 
-        res.setHeader('Set-Cookie', [
-            `cf_session=${session.token}; HttpOnly; Secure; SameSite=Lax; Path=/; Max-Age=${7 * 24 * 60 * 60}`,
-            `cf_user_email=${encodeURIComponent(user.email)}; Secure; SameSite=Lax; Path=/; Max-Age=${7 * 24 * 60 * 60}`
-        ]);
+        res.setHeader('Set-Cookie', buildSessionCookies(session.token, email));
 
         log.info(`[AUTH] Pilot login: ${email} via access code`);
 
@@ -397,10 +414,7 @@ router.post('/dev-login', async (req, res) => {
         const { user, org } = await upsertUserFromOAuth({ email, name }, 'dev_portal');
         const session = createSessionToken(user, org, role, 1); // Dev sessions expire in 1 day
 
-        res.setHeader('Set-Cookie', [
-            `cf_session=${session.token}; HttpOnly; Secure; SameSite=Lax; Path=/; Max-Age=${24 * 60 * 60}`,
-            `cf_user_email=${encodeURIComponent(user.email)}; Secure; SameSite=Lax; Path=/; Max-Age=${24 * 60 * 60}`
-        ]);
+        res.setHeader('Set-Cookie', buildSessionCookies(session.token, user.email, 24 * 60 * 60));
 
         log.info(`[AUTH] Dev-login: ${email} as ${role}`);
 
@@ -429,12 +443,8 @@ router.post('/logout', (req, res) => {
         revokeSession(token);
     }
 
-    // Clear all auth cookies with explicit expiry
-    res.setHeader('Set-Cookie', [
-        'cf_session=; HttpOnly; Secure; SameSite=Lax; Path=/; Max-Age=0; Expires=Thu, 01 Jan 1970 00:00:00 GMT',
-        'cf_user_email=; Secure; SameSite=Lax; Path=/; Max-Age=0; Expires=Thu, 01 Jan 1970 00:00:00 GMT',
-        'oauth_state=; HttpOnly; Secure; SameSite=Lax; Path=/; Max-Age=0; Expires=Thu, 01 Jan 1970 00:00:00 GMT'
-    ]);
+    // Clear all auth cookies with explicit expiry (must match Domain attr)
+    res.setHeader('Set-Cookie', buildClearCookies());
 
     log.info(`[AUTH] Session revoked and cookies cleared.`);
     res.json({ success: true, message: 'Logged out successfully. Session revoked.' });

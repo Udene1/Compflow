@@ -73,9 +73,11 @@ const ChatEngine = {
         try {
             const context = this._getContext();
 
-            const res = await fetch(`${window.COMPLIANCE_API_URL}/api/chat`, {
+            const fetchFn = (window.AuthUI && window.AuthUI.authFetch) ? window.AuthUI.authFetch : fetch;
+            const res = await fetchFn(`${window.COMPLIANCE_API_URL}/api/chat`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
+                credentials: 'include',
                 body: JSON.stringify({ query, context })
             });
 

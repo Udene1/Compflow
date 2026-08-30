@@ -10,8 +10,11 @@ const ScanHistory = {
 
         try {
             const clientId = localStorage.getItem('cf_client_id') || 'default';
-            const response = await fetch(this.API_URL, {
+            const fetchFn = (window.AuthUI && window.AuthUI.authFetch) ? window.AuthUI.authFetch : fetch;
+            const response = await fetchFn(this.API_URL, {
                 method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                credentials: 'include',
                 body: JSON.stringify({ action: 'history', clientId })
             });
             const { history } = await response.json();
@@ -53,8 +56,11 @@ const ScanHistory = {
         terminal.innerHTML = '<div class="log-entry system">➤ Initializing historical replay for session ' + jobId + '...</div>';
         
         try {
-            const response = await fetch(this.API_URL, {
+            const fetchFn = (window.AuthUI && window.AuthUI.authFetch) ? window.AuthUI.authFetch : fetch;
+            const response = await fetchFn(this.API_URL, {
                 method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                credentials: 'include',
                 body: JSON.stringify({ action: 'details', jobId })
             });
             const { job } = await response.json();

@@ -121,7 +121,7 @@
             <div class="page-content">
 
                 <!-- ─── Top Organization Status Strip ─── -->
-                <div class="org-status-strip" id="org-status-strip" style="display:none; margin-bottom:1.25rem; background:rgba(255,255,255,0.03); border:1px solid rgba(255,255,255,0.08); padding:0.6rem 1rem; border-radius:8px; display:flex; justify-content:space-between; align-items:center; font-size:0.8rem; color:var(--text-muted); flex-wrap:wrap; gap:0.5rem;">
+                <div class="org-status-strip" id="org-status-strip" style="display:none; margin-bottom:1.25rem; background:rgba(255,255,255,0.03); border:1px solid rgba(255,255,255,0.08); padding:0.6rem 1rem; border-radius:8px; justify-content:space-between; align-items:center; font-size:0.8rem; color:var(--text-muted); flex-wrap:wrap; gap:0.5rem;">
                     <div style="display:flex; gap:1.25rem; align-items:center; flex-wrap:wrap;">
                         <span>🏢 Workspace: <strong id="strip-org-name" style="color:#fff;">Loading...</strong></span>
                         <span>👤 Role: <strong id="strip-user-role" style="color:var(--primary); background:rgba(99,102,241,0.15); padding:2px 6px; border-radius:4px;">VIEWER</strong></span>
@@ -129,7 +129,7 @@
                     </div>
                     <div style="display:flex; gap:0.75rem; align-items:center;">
                         <span id="strip-autopilot-status" style="color:#10b981; font-weight:600;">● Autopilot: Active</span>
-                        <button class="btn btn-secondary btn-xs" onclick="AuthUI.openAuthModal()">Switch Workspace</button>
+                        <button class="btn btn-secondary btn-xs" id="btn-switch-workspace" onclick="AuthUI.logout(event)" style="display:none;">Sign out</button>
                     </div>
                 </div>
 
@@ -1082,41 +1082,53 @@
     </div>
 
     <!-- ══════ Switch Account / Role Modal ══════ -->
-    <div class="modal" id="modal-auth">
-        <div class="modal-backdrop" onclick="AuthUI.closeAuthModal()"></div>
+    <div class="modal" id="modal-account">
+        <div class="modal-backdrop" onclick="AuthUI.closeAccountModal()"></div>
         <div class="modal-content" style="max-width: 480px;">
             <div class="modal-header">
                 <h3>Identity & Role Management</h3>
-                <button class="modal-close" onclick="AuthUI.closeAuthModal()">×</button>
+                <button class="modal-close" onclick="AuthUI.closeAccountModal()">×</button>
             </div>
             <div class="modal-body">
-                <p style="font-size:0.85rem; color:var(--text-muted); margin-bottom:1.25rem;">
-                    Select an identity role to test permissions and tenant isolation.
-                </p>
-                <div style="display:flex; flex-direction:column; gap:0.6rem;">
-                    <button class="btn btn-secondary" style="justify-content:flex-start; text-align:left; padding:0.75rem;" onclick="AuthUI.quickDevLogin('OWNER')">
-                        <div>
-                            <div style="font-weight:600; color:#fff;">👑 OWNER</div>
-                            <div style="font-size:0.72rem; color:var(--text-muted);">Full administrative control & billing access</div>
-                        </div>
-                    </button>
-                    <button class="btn btn-secondary" style="justify-content:flex-start; text-align:left; padding:0.75rem;" onclick="AuthUI.quickDevLogin('ADMIN')">
-                        <div>
-                            <div style="font-weight:600; color:#fff;">🛡️ ADMIN</div>
-                            <div style="font-size:0.72rem; color:var(--text-muted);">Trigger scans, edit policies, auto-remediate drift</div>
-                        </div>
-                    </button>
-                    <button class="btn btn-secondary" style="justify-content:flex-start; text-align:left; padding:0.75rem;" onclick="AuthUI.quickDevLogin('ENGINEER')">
-                        <div>
-                            <div style="font-weight:600; color:#fff;">⚙️ ENGINEER</div>
-                            <div style="font-size:0.72rem; color:var(--text-muted);">Run scans and validate cloud credentials</div>
-                        </div>
-                    </button>
-                    <button class="btn btn-secondary" style="justify-content:flex-start; text-align:left; padding:0.75rem;" onclick="AuthUI.quickDevLogin('AUDITOR')">
-                        <div>
-                            <div style="font-weight:600; color:#fff;">⚖️ AUDITOR</div>
-                            <div style="font-size:0.72rem; color:var(--text-muted);">Read-only access to evidence vault and compliance reports</div>
-                        </div>
+                <!-- Dev-only role picker (hidden in production by auth-ui.js) -->
+                <div id="dev-roles-section">
+                    <p style="font-size:0.85rem; color:var(--text-muted); margin-bottom:1.25rem;">
+                        Select an identity role to test permissions and tenant isolation.
+                    </p>
+                    <div style="display:flex; flex-direction:column; gap:0.6rem;">
+                        <button class="btn btn-secondary" style="justify-content:flex-start; text-align:left; padding:0.75rem;" onclick="AuthUI.quickDevLogin('OWNER')">
+                            <div>
+                                <div style="font-weight:600; color:#fff;">👑 OWNER</div>
+                                <div style="font-size:0.72rem; color:var(--text-muted);">Full administrative control & billing access</div>
+                            </div>
+                        </button>
+                        <button class="btn btn-secondary" style="justify-content:flex-start; text-align:left; padding:0.75rem;" onclick="AuthUI.quickDevLogin('ADMIN')">
+                            <div>
+                                <div style="font-weight:600; color:#fff;">🛡️ ADMIN</div>
+                                <div style="font-size:0.72rem; color:var(--text-muted);">Trigger scans, edit policies, auto-remediate drift</div>
+                            </div>
+                        </button>
+                        <button class="btn btn-secondary" style="justify-content:flex-start; text-align:left; padding:0.75rem;" onclick="AuthUI.quickDevLogin('ENGINEER')">
+                            <div>
+                                <div style="font-weight:600; color:#fff;">⚙️ ENGINEER</div>
+                                <div style="font-size:0.72rem; color:var(--text-muted);">Run scans and validate cloud credentials</div>
+                            </div>
+                        </button>
+                        <button class="btn btn-secondary" style="justify-content:flex-start; text-align:left; padding:0.75rem;" onclick="AuthUI.quickDevLogin('AUDITOR')">
+                            <div>
+                                <div style="font-weight:600; color:#fff;">⚖️ AUDITOR</div>
+                                <div style="font-size:0.72rem; color:var(--text-muted);">Read-only access to evidence vault and compliance reports</div>
+                            </div>
+                        </button>
+                    </div>
+                </div>
+                <!-- Production: sign-out only -->
+                <div id="prod-account-section" style="display:none;">
+                    <p style="font-size:0.85rem; color:var(--text-muted); margin-bottom:1rem;">
+                        Signed in via SSO. To switch accounts, sign out and re-authenticate.
+                    </p>
+                    <button class="btn btn-secondary" style="width:100%; padding:0.75rem;" onclick="AuthUI.logout(event)">
+                        Sign out
                     </button>
                 </div>
             </div>

@@ -10,7 +10,8 @@ window.AuthUI = (() => {
     async function init() {
         await fetchProviders();
         await fetchCurrentUser();
-        handleOAuthCallbackParams();
+        // handleOAuthCallbackParams() is called inside fetchCurrentUser()
+        // after auth state is definitively known — ensures gate close & toast fire in order.
     }
 
     // ─── Core: Authenticated fetch wrapper ───
@@ -55,6 +56,7 @@ window.AuthUI = (() => {
             console.warn('Providers fetch skipped:', e);
         }
         renderAuthGateContent();
+        enforceProductionGuards();
     }
 
     function handleOAuthCallbackParams() {
@@ -92,17 +94,21 @@ window.AuthUI = (() => {
                 currentUser = data.user;
                 if (data.token) localStorage.setItem('cf_auth_token', data.token);
                 hideAuthGate();
+                updateChecklistStep1();
                 await evaluateAppMode();
+                handleOAuthCallbackParams();
             } else {
                 currentUser = null;
                 showAuthGate();
                 setMode('activation');
+                handleOAuthCallbackParams();
             }
         } catch (e) {
             console.warn('Auth check skipped:', e);
             currentUser = null;
             showAuthGate();
             setMode('activation');
+            handleOAuthCallbackParams();
         }
 
         renderHeaderWidget();
@@ -117,9 +123,12 @@ window.AuthUI = (() => {
             const tRes = await authFetch(`${API_BASE}/api/tenants`);
             const tData = tRes.ok ? await tRes.json() : { tenants: [] };
             const tenants = tData.tenants || [];
-            const hasScanned = window.Scanner && window.Scanner.getScannedResources && window.Scanner.getScannedResources().length > 0;
+            const hasScanned = (window.Scanner && window.Scanner.getScannedResources && window.Scanner.getScannedResources().length > 0);
 
-            if (tenants.length > 0 && hasScanned) {
+            // Consider connected tenants as evidence of prior scan (persists across refresh)
+            const hasConnectedTenant = tenants.some(t => t.status === 'active' || t.status === 'connected');
+
+            if (tenants.length > 0 && (hasScanned || hasConnectedTenant)) {
                 setMode('app');
             } else {
                 setMode('activation');
@@ -334,10 +343,14 @@ window.AuthUI = (() => {
             strip.style.display = 'flex';
             const orgNameEl = document.getElementById('strip-org-name');
             const userRoleEl = document.getElementById('strip-user-role');
+            const switchBtn = document.getElementById('btn-switch-workspace');
             if (orgNameEl) orgNameEl.textContent = currentUser.orgName || 'Workspace';
             if (userRoleEl) userRoleEl.textContent = (currentUser.role || 'VIEWER').toUpperCase();
+            if (switchBtn) switchBtn.style.display = '';
         } else {
             strip.style.display = 'none';
+            const switchBtn = document.getElementById('btn-switch-workspace');
+            if (switchBtn) switchBtn.style.display = 'none';
         }
     }
 
@@ -363,9 +376,15 @@ window.AuthUI = (() => {
         }
     }
 
-    // ─── SSO redirects ───
-    function signInWithGoogle() { window.location.href = `${API_BASE}/api/auth/google`; }
-    function signInWithGitHub() { window.location.href = `${API_BASE}/api/auth/github`; }
+    // ─── SSO redirects (use full URL from providers API) ───
+    function signInWithGoogle() {
+        const url = authProviders.google?.authUrl || `${API_BASE}/api/auth/google`;
+        window.location.href = url;
+    }
+    function signInWithGitHub() {
+        const url = authProviders.github?.authUrl || `${API_BASE}/api/auth/github`;
+        window.location.href = url;
+    }
 
     // ─── Dev login (development ONLY) ───
     async function quickDevLogin(role = 'ADMIN') {
@@ -425,6 +444,49 @@ window.AuthUI = (() => {
         return String(str).replace(/[&<>"']/g, m => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#039;' })[m]);
     }
 
+    // ─── Production guard: hide dev-only UI elements ───
+    function enforceProductionGuards() {
+        const isDevMode = authProviders.devLogin === true;
+
+        // Role-picker modal sections
+        const devRoles = document.getElementById('dev-roles-section');
+        const prodSection = document.getElementById('prod-account-section');
+        if (devRoles) devRoles.style.display = isDevMode ? '' : 'none';
+        if (prodSection) prodSection.style.display = isDevMode ? 'none' : '';
+
+        // Switch Workspace button in org status strip
+        const switchBtn = document.getElementById('btn-switch-workspace');
+        if (switchBtn) {
+            if (isDevMode) {
+                switchBtn.textContent = 'Switch Role';
+                switchBtn.onclick = () => { if (window.AuthUI.openAccountModal) window.AuthUI.openAccountModal(); };
+            } else {
+                switchBtn.textContent = 'Sign out';
+                switchBtn.onclick = (e) => logout(e);
+            }
+        }
+    }
+
+    // ─── Account modal open/close (renamed from modal-auth to avoid ID conflict with cloud settings modal) ───
+    function openAccountModal() {
+        const modal = document.getElementById('modal-account');
+        if (modal) modal.classList.add('active');
+    }
+    function closeAccountModal() {
+        const modal = document.getElementById('modal-account');
+        if (modal) modal.classList.remove('active');
+    }
+
+    // ─── Update checklist step 1 with actual provider/email ───
+    function updateChecklistStep1() {
+        const desc = document.getElementById('step-auth-desc');
+        if (!desc || !currentUser) return;
+        const providerMap = { google: 'Google', github: 'GitHub', pilot_code: 'Pilot Code', dev_portal: 'Dev Portal' };
+        const providerLabel = providerMap[currentUser.provider] || (currentUser.provider || 'SSO');
+        const displayName = currentUser.name || currentUser.email || 'unknown';
+        desc.textContent = `Signed in via ${providerLabel} — ${escapeHtml(displayName)}`;
+    }
+
     document.addEventListener('DOMContentLoaded', init);
 
     return {
@@ -432,6 +494,8 @@ window.AuthUI = (() => {
         showAuthGate, hideAuthGate,
         signInWithGoogle, signInWithGitHub,
         pilotLogin, quickDevLogin, logout,
-        evaluateAppMode, setMode
+        evaluateAppMode, setMode,
+        openAuthModal: openAccountModal, closeAuthModal: closeAccountModal,  // legacy aliases
+        openAccountModal, closeAccountModal
     };
 })();

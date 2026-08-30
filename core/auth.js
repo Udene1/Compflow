@@ -2,7 +2,24 @@ import crypto from 'crypto';
 import pool from './db.js';
 import { log } from './logger.js';
 
-const AUTH_SECRET = process.env.AUTH_SECRET || process.env.JWT_SECRET || 'CompFlow_Auth_Engine_Secret_2026';
+const AUTH_SECRET = (() => {
+    const secret = process.env.AUTH_SECRET || process.env.JWT_SECRET;
+    if (!secret) {
+        if (process.env.NODE_ENV === 'production') {
+            // Hard fail: production must not run with a known/hardcoded secret.
+            throw new Error(
+                'FATAL: AUTH_SECRET (or JWT_SECRET) env var is required in production.\n' +
+                'Generate one: node -e "console.log(require(\'crypto\').randomBytes(64).toString(\'hex\'))"\n' +
+                'Server cannot start without it.'
+            );
+        }
+        // Dev-only fallback — loudly warn so developers know
+        console.warn('\n⚠️  [AUTH] AUTH_SECRET not set — using insecure dev-only fallback.');
+        console.warn('   DO NOT deploy to production without setting AUTH_SECRET.\n');
+        return 'CompFlow_Auth_Engine_Secret_2026_DEV_ONLY';
+    }
+    return secret;
+})();
 
 // ─── Server-Side Session Revocation List ─────────────────────────────────────
 // In-memory revocation set. In production, use Redis for multi-instance support.
