@@ -40,10 +40,11 @@ export async function handler(event = {}) {
             const jobId = await createJob(client.id, 'scheduled');
             log.info(`➤ Dispatching scheduled governance sweep for tenant: ${client.name} (${client.id}) — Job: ${jobId}`);
 
-            // If queue service is available, dispatch to worker queue
+            // If queue service is available, dispatch to worker queue (without credentials)
             if (process.env.USE_QUEUE === 'true') {
+                const { credentials, apiToken, clientSecret, serviceAccountJson, ...safeClient } = client;
                 await enqueueJob({
-                    ...client,
+                    ...safeClient,
                     jobId,
                     frequency
                 });

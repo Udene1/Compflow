@@ -21,12 +21,22 @@ export default async function handler(req, res) {
 
         // 1. Create job record in PostgreSQL
         const jobId = await createJob(clientId, 'on_demand');
+        const orgId = req.user?.orgId || req.authContext?.orgId || 'org_default';
 
-        // 2. Enqueue job into BullMQ scan-queue
+        // 2. Store credentials in SecretStore if provided, pass only references to queue (Amendment 8)
+        let connectionId = req.body?.connectionId || null;
+        if (credentials && !connectionId) {
+            connectionId = 'scan_conn_' + jobId;
+            const { defaultSecretStore } = await import('../core/secret_store.js');
+            await defaultSecretStore.saveSecret(orgId, connectionId, credentials, req.user?.userId || 'api_user');
+        }
+
+        // 3. Enqueue job into BullMQ scan-queue with references only
         const payload = {
             jobId,
             provider,
-            credentials,
+            connectionId,
+            orgId,
             clientId,
             id: clientId,
             name: clientId,
@@ -37,7 +47,7 @@ export default async function handler(req, res) {
 
         await enqueueJob(payload);
 
-        // 3. Return jobId immediately
+        // 4. Return jobId immediately
         return res.status(202).json({ 
             success: true, 
             status: 'queued', 

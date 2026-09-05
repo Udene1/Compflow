@@ -92,20 +92,46 @@ describe('Auth Engine — Role-Based Access Control (RBAC)', () => {
     });
 });
 
-describe('Auth Engine — User Provisioning from OAuth Profile', () => {
+describe('Auth Engine — User Provisioning & Identity Model', () => {
     it('provisions user and organization from corporate email', async () => {
         const profile = {
+            id: 'google-sub-bob-123',
             email: 'bob@enterprise-fintech.io',
             name: 'Bob Jenkins',
             picture: 'https://lh3.googleusercontent.com/a/mock'
         };
 
-        const result = await upsertUserFromOAuth(profile, 'google');
+        const result = await upsertUserFromOAuth(profile, 'google', 'google-sub-bob-123');
 
         expect(result.user.email).toBe('bob@enterprise-fintech.io');
         expect(result.user.name).toBe('Bob Jenkins');
         expect(result.org.domain).toBe('enterprise-fintech.io');
         expect(result.role).toBe(ROLES.OWNER); // first user is OWNER
+    });
+
+    it('recognizes existing identity on subsequent login preserving user ID (Amendment 4)', async () => {
+        const profile = {
+            id: 'google-sub-bob-123',
+            email: 'bob@enterprise-fintech.io',
+            name: 'Bob Jenkins Updated',
+            picture: 'https://lh3.googleusercontent.com/a/mock'
+        };
+
+        const result = await upsertUserFromOAuth(profile, 'google', 'google-sub-bob-123');
+        expect(result.user.email).toBe('bob@enterprise-fintech.io');
+        expect(result.user.id).toBeDefined();
+    });
+
+    it('rejects email collision from a different provider without auto-merging (Amendment 5)', async () => {
+        const githubProfile = {
+            id: 'gh-45678',
+            email: 'bob@enterprise-fintech.io',
+            name: 'Bob GitHub'
+        };
+
+        await expect(upsertUserFromOAuth(githubProfile, 'github', 'gh-45678'))
+            .rejects
+            .toThrow('This email is already associated with a Compflow account');
     });
 });
 

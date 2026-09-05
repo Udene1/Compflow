@@ -16,14 +16,10 @@ window.AuthUI = (() => {
 
     // ─── Core: Authenticated fetch wrapper ───
     // EVERY API call from the SPA must go through this.
-    // Guarantees credentials: 'include' + Bearer token + 401 interception.
+    // Guarantees credentials: 'include' (HttpOnly session cookie) + 401 interception.
     async function authFetch(url, options = {}) {
-        const token = localStorage.getItem('cf_auth_token');
         const headers = options.headers ? { ...options.headers } : {};
 
-        if (token && !headers['Authorization']) {
-            headers['Authorization'] = `Bearer ${token}`;
-        }
         if (!headers['Content-Type'] && !(options.body instanceof FormData)) {
             headers['Content-Type'] = 'application/json';
         }
@@ -65,7 +61,20 @@ window.AuthUI = (() => {
         const authError = urlParams.get('auth_error');
 
         if (authError) {
-            if (window.showToast) window.showToast(`Authentication Error: ${authError}`);
+            let errorMsg = 'Authentication failed. Please try again.';
+            if (authError === 'account_exists') {
+                errorMsg = 'This email is already associated with a Compflow account. Please sign in using your existing authentication method. After signing in, you can connect additional login methods from Settings → Security → Connected accounts.';
+            } else if (authError === 'state_mismatch') {
+                errorMsg = 'Security validation failed: state mismatch. Please try signing in again.';
+            } else if (authError === 'domain_restricted') {
+                errorMsg = 'Access restricted: Your email domain or GitHub organization is not authorized for this platform.';
+            } else if (authError === 'oauth_failed') {
+                errorMsg = 'Sign-in could not be completed with the identity provider. Please try again.';
+            } else if (authError === 'missing_oauth_params') {
+                errorMsg = 'Invalid authorization response from identity provider.';
+            }
+
+            if (window.showToast) window.showToast(errorMsg);
             showAuthGate();
             window.history.replaceState({}, document.title, window.location.pathname);
             return;
@@ -80,19 +89,14 @@ window.AuthUI = (() => {
     // ─── Session check ───
     async function fetchCurrentUser() {
         try {
-            const token = localStorage.getItem('cf_auth_token');
-            const headers = { 'Content-Type': 'application/json' };
-            if (token) headers['Authorization'] = `Bearer ${token}`;
-
             const res = await fetch(`${API_BASE}/api/auth/me`, {
-                headers,
+                headers: { 'Content-Type': 'application/json' },
                 credentials: 'include'
             });
 
             if (res.ok) {
                 const data = await res.json();
                 currentUser = data.user;
-                if (data.token) localStorage.setItem('cf_auth_token', data.token);
                 hideAuthGate();
                 updateChecklistStep1();
                 await evaluateAppMode();
@@ -323,7 +327,6 @@ window.AuthUI = (() => {
                 return;
             }
 
-            if (data.sessionToken) localStorage.setItem('cf_auth_token', data.sessionToken);
             currentUser = data.user;
             renderHeaderWidget();
             hideAuthGate();
@@ -398,7 +401,6 @@ window.AuthUI = (() => {
 
             if (!res.ok) throw new Error('Dev login unavailable');
             const data = await res.json();
-            if (data.sessionToken) localStorage.setItem('cf_auth_token', data.sessionToken);
             currentUser = data.user;
             renderHeaderWidget();
             hideAuthGate();
@@ -417,7 +419,6 @@ window.AuthUI = (() => {
             await authFetch(`${API_BASE}/api/auth/logout`, { method: 'POST' });
         } catch (e) { /* best-effort */ }
 
-        localStorage.removeItem('cf_auth_token');
         currentUser = null;
         renderHeaderWidget();
         showAuthGate();

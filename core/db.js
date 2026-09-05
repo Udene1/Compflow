@@ -5,27 +5,35 @@ class MemoryFallbackPool {
         this.tenants = [];
         this.organizations = [];
         this.users = [];
+        this.identities = [];
         this.memberships = [];
         this.sessions = [];
+        this.audit_events = [];
+        this.organization_frameworks = [];
+        this.onboarding_state = [];
+        this.cloud_connections = [];
+        this.secrets = [];
         this.jobs = new Map();
     }
 
     async query(sql, params = []) {
-        // Simple mock query evaluator for fallback mode
-        if (sql.includes('SELECT * FROM tenants')) {
-            if (sql.includes('WHERE org_id = $1') && params.length > 0) {
+        const normalized = sql.replace(/\s+/g, ' ').trim();
+
+        // ── TENANTS ──
+        if (normalized.includes('SELECT * FROM tenants')) {
+            if (normalized.includes('WHERE org_id = $1') && params.length > 0) {
                 return { rows: this.tenants.filter(t => t.org_id === params[0]) };
             }
-            if (sql.includes('WHERE id = $1 AND org_id = $2') && params.length >= 2) {
+            if (normalized.includes('WHERE id = $1 AND org_id = $2') && params.length >= 2) {
                 const found = this.tenants.filter(t => t.id === params[0] && t.org_id === params[1]);
                 return { rows: found };
             }
-            if (sql.includes('WHERE id = $1') && params.length > 0) {
+            if (normalized.includes('WHERE id = $1') && params.length > 0) {
                 return { rows: this.tenants.filter(t => t.id === params[0]) };
             }
-            return { rows: this.tenants };
+            return { rows: [...this.tenants] };
         }
-        if (sql.includes('INSERT INTO tenants')) {
+        if (normalized.includes('INSERT INTO tenants')) {
             const [id, orgId, name, provider, roleArn, apiToken, email, autoRemediate, status] = params;
             const existingIdx = this.tenants.findIndex(t => t.id === id);
             const record = { id, org_id: orgId || 'org_default', name, provider, role_arn: roleArn, api_token: apiToken, email, auto_remediate: autoRemediate, status, created_at: new Date() };
@@ -34,44 +42,263 @@ class MemoryFallbackPool {
             } else {
                 this.tenants.push(record);
             }
-            return { rowCount: 1 };
+            return { rowCount: 1, rows: [record] };
         }
-        if (sql.includes('SELECT * FROM users WHERE email = $1')) {
-            const user = this.users.find(u => u.email === params[0]);
+
+        // ── USERS ──
+        if (normalized.includes('SELECT * FROM users WHERE email = $1')) {
+            const user = this.users.find(u => u.email?.toLowerCase() === params[0]?.toLowerCase());
             return { rows: user ? [user] : [] };
         }
-        if (sql.includes('INSERT INTO users')) {
+        if (normalized.includes('SELECT * FROM users WHERE id = $1')) {
+            const user = this.users.find(u => u.id === params[0]);
+            return { rows: user ? [user] : [] };
+        }
+        if (normalized.includes('INSERT INTO users')) {
             const [id, email, name, avatarUrl] = params;
-            const existingIdx = this.users.findIndex(u => u.id === id || u.email === email);
-            const user = { id, email, name, avatar_url: avatarUrl, created_at: new Date() };
+            const existingIdx = this.users.findIndex(u => u.id === id || u.email?.toLowerCase() === email?.toLowerCase());
+            const user = { id, email, name, avatar_url: avatarUrl, status: 'active', created_at: new Date(), updated_at: new Date() };
             if (existingIdx >= 0) {
                 this.users[existingIdx] = { ...this.users[existingIdx], ...user };
+                return { rows: [this.users[existingIdx]], rowCount: 1 };
             } else {
                 this.users.push(user);
+                return { rows: [user], rowCount: 1 };
             }
-            return { rows: [user], rowCount: 1 };
         }
-        if (sql.includes('SELECT * FROM organizations WHERE id = $1')) {
+
+        // ── IDENTITIES ──
+        if (normalized.includes('SELECT * FROM identities WHERE provider = $1 AND provider_subject = $2')) {
+            const row = this.identities.find(i => i.provider === params[0] && String(i.provider_subject) === String(params[1]));
+            return { rows: row ? [row] : [] };
+        }
+        if (normalized.includes('SELECT * FROM identities WHERE user_id = $1')) {
+            const rows = this.identities.filter(i => i.user_id === params[0]);
+            return { rows };
+        }
+        if (normalized.includes('INSERT INTO identities')) {
+            const [id, userId, provider, providerSubject, providerEmail] = params;
+            const existingIdx = this.identities.findIndex(i => i.provider === provider && String(i.provider_subject) === String(providerSubject));
+            const record = { id, user_id: userId, provider, provider_subject: String(providerSubject), provider_email: providerEmail, created_at: new Date(), updated_at: new Date(), last_login_at: new Date() };
+            if (existingIdx >= 0) {
+                this.identities[existingIdx] = { ...this.identities[existingIdx], ...record };
+            } else {
+                this.identities.push(record);
+            }
+            return { rowCount: 1, rows: [record] };
+        }
+        if (normalized.includes('UPDATE identities SET last_login_at')) {
+            const [id] = params;
+            const idx = this.identities.findIndex(i => i.id === id);
+            if (idx >= 0) {
+                this.identities[idx].last_login_at = new Date();
+                this.identities[idx].updated_at = new Date();
+            }
+            return { rowCount: 1 };
+        }
+
+        // ── ORGANIZATIONS ──
+        if (normalized.includes('SELECT * FROM organizations WHERE id = $1')) {
             const org = this.organizations.find(o => o.id === params[0]);
             return { rows: org ? [org] : [] };
         }
-        if (sql.includes('INSERT INTO organizations')) {
+        if (normalized.includes('INSERT INTO organizations')) {
             const [id, name, domain, ssoProvider] = params;
-            const org = { id, name, domain, sso_provider: ssoProvider, created_at: new Date() };
+            const existing = this.organizations.find(o => o.id === id);
+            if (existing) return { rows: [existing], rowCount: 0 };
+            const org = { id, name, domain, sso_provider: ssoProvider, onboarding_status: 'AUTHENTICATED', created_at: new Date() };
             this.organizations.push(org);
             return { rows: [org], rowCount: 1 };
         }
-        if (sql.includes('SELECT * FROM org_memberships')) {
+        if (normalized.includes('UPDATE organizations')) {
+            const org = this.organizations.find(o => o.id === params[params.length - 1]);
+            if (org) {
+                if (params.length === 5) {
+                    // name, website, industry, company_size, id
+                    org.name = params[0];
+                    org.website = params[1];
+                    org.industry = params[2];
+                    org.company_size = params[3];
+                }
+                org.updated_at = new Date();
+                return { rows: [org], rowCount: 1 };
+            }
+            return { rows: [], rowCount: 0 };
+        }
+
+        // ── ORG MEMBERSHIPS ──
+        if (normalized.includes('SELECT * FROM org_memberships WHERE org_id = $1')) {
+            const rows = this.memberships.filter(m => m.org_id === params[0]);
+            return { rows };
+        }
+        if (normalized.includes('SELECT * FROM org_memberships WHERE user_id = $1 AND org_id = $2')) {
             const [userId, orgId] = params;
             const m = this.memberships.find(x => x.user_id === userId && x.org_id === orgId);
             return { rows: m ? [m] : [] };
         }
-        if (sql.includes('INSERT INTO org_memberships')) {
+        if (normalized.includes('SELECT * FROM org_memberships WHERE user_id = $1')) {
+            const rows = this.memberships.filter(m => m.user_id === params[0]);
+            return { rows };
+        }
+        if (normalized.includes('INSERT INTO org_memberships')) {
             const [userId, orgId, role] = params;
-            const record = { user_id: userId, org_id: orgId, role: role || 'ENGINEER', joined_at: new Date() };
-            this.memberships.push(record);
+            const existing = this.memberships.find(m => m.user_id === userId && m.org_id === orgId);
+            if (!existing) {
+                const record = { user_id: userId, org_id: orgId, role: role || 'ENGINEER', joined_at: new Date() };
+                this.memberships.push(record);
+            }
             return { rowCount: 1 };
         }
+
+        // ── SESSIONS ──
+        if (normalized.includes('INSERT INTO sessions')) {
+            const [id, userId, orgId, tokenHash, role, expiresAt] = params;
+            const record = { id, user_id: userId, org_id: orgId, token_hash: tokenHash, role, expires_at: expiresAt, is_revoked: false, created_at: new Date() };
+            this.sessions.push(record);
+            return { rowCount: 1 };
+        }
+        if (normalized.includes('SELECT * FROM sessions WHERE token_hash = $1')) {
+            const s = this.sessions.find(x => x.token_hash === params[0]);
+            return { rows: s ? [s] : [] };
+        }
+        if (normalized.includes('UPDATE sessions SET is_revoked = true WHERE token_hash = $1')) {
+            const s = this.sessions.find(x => x.token_hash === params[0]);
+            if (s) s.is_revoked = true;
+            return { rowCount: s ? 1 : 0 };
+        }
+
+        // ── AUDIT EVENTS ──
+        if (normalized.includes('INSERT INTO audit_events')) {
+            const [id, orgId, actorUserId, eventType, resourceType, resourceId, metadata, ip, userAgent] = params;
+            const record = {
+                id, organization_id: orgId, actor_user_id: actorUserId,
+                event_type: eventType, resource_type: resourceType, resource_id: resourceId,
+                metadata: typeof metadata === 'string' ? JSON.parse(metadata) : (metadata || {}),
+                ip_address: ip, user_agent: userAgent, created_at: new Date()
+            };
+            this.audit_events.push(record);
+            return { rowCount: 1, rows: [record] };
+        }
+        if (normalized.includes('SELECT * FROM audit_events')) {
+            if (normalized.includes('WHERE organization_id = $1')) {
+                return { rows: this.audit_events.filter(a => a.organization_id === params[0]) };
+            }
+            return { rows: [...this.audit_events] };
+        }
+
+        // ── ONBOARDING STATE ──
+        if (normalized.includes('SELECT * FROM onboarding_state WHERE org_id = $1')) {
+            const state = this.onboarding_state.find(s => s.org_id === params[0]);
+            return { rows: state ? [state] : [] };
+        }
+        if (normalized.includes('INSERT INTO onboarding_state') || normalized.includes('UPDATE onboarding_state')) {
+            const orgId = params[0];
+            const status = params[1];
+            const existingIdx = this.onboarding_state.findIndex(s => s.org_id === orgId);
+            const record = { org_id: orgId, status, updated_at: new Date(), completed_at: status === 'ONBOARDING_COMPLETED' ? new Date() : null };
+            if (existingIdx >= 0) {
+                this.onboarding_state[existingIdx] = { ...this.onboarding_state[existingIdx], ...record };
+            } else {
+                this.onboarding_state.push(record);
+            }
+            return { rowCount: 1, rows: [record] };
+        }
+
+        // ── ORGANIZATION FRAMEWORKS ──
+        if (normalized.includes('SELECT * FROM organization_frameworks WHERE org_id = $1')) {
+            const rows = this.organization_frameworks.filter(f => f.org_id === params[0]);
+            return { rows };
+        }
+        if (normalized.includes('INSERT INTO organization_frameworks')) {
+            const [id, orgId, frameworkId, status, selectedBy] = params;
+            const existingIdx = this.organization_frameworks.findIndex(f => f.org_id === orgId && f.framework_id === frameworkId);
+            const record = { id, org_id: orgId, framework_id: frameworkId, status: status || 'selected', selected_by: selectedBy, selected_at: new Date() };
+            if (existingIdx >= 0) {
+                this.organization_frameworks[existingIdx] = record;
+            } else {
+                this.organization_frameworks.push(record);
+            }
+            return { rowCount: 1 };
+        }
+
+        // ── CLOUD CONNECTIONS ──
+        if (normalized.includes('SELECT * FROM cloud_connections WHERE organization_id = $1')) {
+            const rows = this.cloud_connections.filter(c => c.organization_id === params[0]);
+            return { rows };
+        }
+        if (normalized.includes('SELECT * FROM cloud_connections WHERE id = $1')) {
+            const conn = this.cloud_connections.find(c => c.id === params[0]);
+            return { rows: conn ? [conn] : [] };
+        }
+        if (normalized.includes('INSERT INTO cloud_connections')) {
+            const [id, orgId, provider, displayName, status, accountId, region, credRef, createdBy] = params;
+            const record = {
+                id, organization_id: orgId, provider, display_name: displayName,
+                status: status || 'PENDING', account_identifier: accountId, region,
+                credential_reference: credRef, created_by: createdBy,
+                created_at: new Date(), updated_at: new Date()
+            };
+            this.cloud_connections.push(record);
+            return { rowCount: 1, rows: [record] };
+        }
+        if (normalized.includes('UPDATE cloud_connections')) {
+            const conn = this.cloud_connections.find(c => c.id === params[params.length - 1]);
+            if (conn) {
+                if (normalized.includes('status = $1')) {
+                    conn.status = params[0];
+                    if (params[0] === 'VERIFIED') conn.last_verified_at = new Date();
+                    if (params[1]) conn.error_message = params[1];
+                }
+                conn.updated_at = new Date();
+                return { rowCount: 1, rows: [conn] };
+            }
+            return { rowCount: 0, rows: [] };
+        }
+
+        // ── SECRETS ──
+        if (normalized.includes('INSERT INTO secrets')) {
+            const [id, orgId, connectionId, encryptedData, iv, createdBy] = params;
+            const existingIdx = this.secrets.findIndex(s => s.org_id === orgId && s.connection_id === connectionId);
+            const record = {
+                id, org_id: orgId, connection_id: connectionId,
+                encrypted_data: encryptedData, iv, version: 1,
+                created_by: createdBy, created_at: new Date(), updated_at: new Date(),
+                last_accessed_at: null
+            };
+            if (existingIdx >= 0) {
+                this.secrets[existingIdx] = record;
+            } else {
+                this.secrets.push(record);
+            }
+            return { rowCount: 1, rows: [record] };
+        }
+        if (normalized.includes('FROM secrets WHERE org_id = $1 AND connection_id = $2')) {
+            const secret = this.secrets.find(s => s.org_id === params[0] && s.connection_id === params[1]);
+            return { rows: secret ? [secret] : [] };
+        }
+        if (normalized.includes('UPDATE secrets SET encrypted_data')) {
+            const [encryptedData, iv, orgId, connectionId] = params;
+            const secret = this.secrets.find(s => s.org_id === orgId && s.connection_id === connectionId);
+            if (secret) {
+                secret.encrypted_data = encryptedData;
+                secret.iv = iv;
+                secret.version = (secret.version || 1) + 1;
+                secret.updated_at = new Date();
+                return { rowCount: 1, rows: [{ id: secret.id, version: secret.version }] };
+            }
+            return { rowCount: 0, rows: [] };
+        }
+        if (normalized.includes('UPDATE secrets SET last_accessed_at')) {
+            const secret = this.secrets.find(s => s.id === params[0]);
+            if (secret) secret.last_accessed_at = new Date();
+            return { rowCount: 1 };
+        }
+        if (normalized.includes('DELETE FROM secrets WHERE org_id = $1 AND connection_id = $2')) {
+            const prevLen = this.secrets.length;
+            this.secrets = this.secrets.filter(s => !(s.org_id === params[0] && s.connection_id === params[1]));
+            return { rowCount: prevLen - this.secrets.length };
+        }
+
         return { rows: [], rowCount: 0 };
     }
 }
@@ -103,16 +330,22 @@ const resilientPool = {
                 return await realPool.query(sql, params);
             } catch (err) {
                 if (err.code === 'ECONNREFUSED' || err.message?.includes('connect') || err.message?.includes('timeout')) {
+                    if (process.env.NODE_ENV === 'production') {
+                        throw new Error(`[DB] Production database unavailable: ${err.message}`);
+                    }
                     return await fallbackPool.query(sql, params);
                 }
                 throw err;
             }
         }
+        if (process.env.NODE_ENV === 'production') {
+            throw new Error('[DB] Production database pool not initialized');
+        }
         return await fallbackPool.query(sql, params);
     }
 };
 
-// Auto-initialize jobs, tenants, and authentication tables on startup
+// Auto-initialize jobs, tenants, authentication, and onboarding tables on startup
 export async function initDb() {
     const query = `
         CREATE TABLE IF NOT EXISTS jobs (
@@ -181,6 +414,102 @@ export async function initDb() {
             expires_at TIMESTAMP WITH TIME ZONE NOT NULL,
             created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
         );
+
+        -- Identity Federation Table (Google, GitHub, etc.)
+        CREATE TABLE IF NOT EXISTS identities (
+            id VARCHAR(64) PRIMARY KEY,
+            user_id VARCHAR(64) REFERENCES users(id) ON DELETE CASCADE,
+            provider VARCHAR(32) NOT NULL,
+            provider_subject VARCHAR(255) NOT NULL,
+            provider_email VARCHAR(255),
+            created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
+            updated_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
+            last_login_at TIMESTAMPTZ,
+            UNIQUE (provider, provider_subject)
+        );
+        CREATE INDEX IF NOT EXISTS idx_identities_user ON identities(user_id);
+
+        -- Audit Events (PostgreSQL Lean Audit Log)
+        CREATE TABLE IF NOT EXISTS audit_events (
+            id VARCHAR(64) PRIMARY KEY,
+            organization_id VARCHAR(64),
+            actor_user_id VARCHAR(64),
+            event_type VARCHAR(64) NOT NULL,
+            resource_type VARCHAR(64),
+            resource_id VARCHAR(64),
+            metadata JSONB DEFAULT '{}'::jsonb,
+            ip_address VARCHAR(45),
+            user_agent TEXT,
+            created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
+        );
+        CREATE INDEX IF NOT EXISTS idx_audit_events_org ON audit_events(organization_id);
+        CREATE INDEX IF NOT EXISTS idx_audit_events_type ON audit_events(event_type);
+
+        -- Framework Selections
+        CREATE TABLE IF NOT EXISTS organization_frameworks (
+            id VARCHAR(64) PRIMARY KEY,
+            org_id VARCHAR(64) REFERENCES organizations(id) ON DELETE CASCADE,
+            framework_id VARCHAR(32) NOT NULL,
+            status VARCHAR(32) DEFAULT 'selected',
+            selected_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
+            selected_by VARCHAR(64),
+            UNIQUE (org_id, framework_id)
+        );
+
+        -- Onboarding State (Decoupled from connection and scan states)
+        CREATE TABLE IF NOT EXISTS onboarding_state (
+            org_id VARCHAR(64) PRIMARY KEY REFERENCES organizations(id) ON DELETE CASCADE,
+            status VARCHAR(32) DEFAULT 'AUTHENTICATED',
+            updated_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
+            completed_at TIMESTAMPTZ
+        );
+
+        -- Cloud Connections
+        CREATE TABLE IF NOT EXISTS cloud_connections (
+            id VARCHAR(64) PRIMARY KEY,
+            organization_id VARCHAR(64) REFERENCES organizations(id),
+            provider VARCHAR(32) NOT NULL,
+            display_name VARCHAR(255),
+            status VARCHAR(32) DEFAULT 'PENDING',
+            account_identifier VARCHAR(255),
+            region VARCHAR(32),
+            credential_reference VARCHAR(255),
+            created_by VARCHAR(64),
+            created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
+            updated_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
+            last_verified_at TIMESTAMPTZ,
+            last_scan_at TIMESTAMPTZ,
+            error_code VARCHAR(64),
+            error_message TEXT
+        );
+
+        -- Encrypted Secrets Storage
+        CREATE TABLE IF NOT EXISTS secrets (
+            id VARCHAR(64) PRIMARY KEY,
+            org_id VARCHAR(64),
+            connection_id VARCHAR(64),
+            encrypted_data BYTEA NOT NULL,
+            iv BYTEA NOT NULL,
+            version INT DEFAULT 1,
+            created_by VARCHAR(64),
+            last_accessed_at TIMESTAMPTZ,
+            expires_at TIMESTAMPTZ,
+            created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
+            updated_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
+        );
+
+        -- Additive column migrations for existing tables
+        ALTER TABLE users ADD COLUMN IF NOT EXISTS status VARCHAR(16) DEFAULT 'active';
+        ALTER TABLE users ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP;
+        ALTER TABLE organizations ADD COLUMN IF NOT EXISTS website VARCHAR(255);
+        ALTER TABLE organizations ADD COLUMN IF NOT EXISTS industry VARCHAR(64);
+        ALTER TABLE organizations ADD COLUMN IF NOT EXISTS company_size VARCHAR(32);
+        ALTER TABLE organizations ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP;
+        ALTER TABLE organizations ADD COLUMN IF NOT EXISTS onboarding_status VARCHAR(32) DEFAULT 'AUTHENTICATED';
+        ALTER TABLE org_memberships ADD COLUMN IF NOT EXISTS status VARCHAR(16) DEFAULT 'active';
+        ALTER TABLE org_memberships ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP;
+        ALTER TABLE sessions ADD COLUMN IF NOT EXISTS is_revoked BOOLEAN DEFAULT false;
+        ALTER TABLE sessions ADD COLUMN IF NOT EXISTS rotated_from VARCHAR(64);
     `;
 
     try {

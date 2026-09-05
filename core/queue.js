@@ -22,18 +22,37 @@ async function getQueue() {
     }
 }
 
+const SENSITIVE_PAYLOAD_KEYS = [
+    'credentials', 'clientSecret', 'accessKey', 'accessKeyId', 
+    'secretKey', 'secretAccessKey', 'privateKey', 'token', 
+    'apiToken', 'serviceAccountJson', 'password', 'client_secret'
+];
+
+export function sanitizeJobPayload(jobData) {
+    if (!jobData || typeof jobData !== 'object') return jobData;
+    const clean = {};
+    for (const [k, v] of Object.entries(jobData)) {
+        if (SENSITIVE_PAYLOAD_KEYS.includes(k)) {
+            continue; // Strictly omit raw credentials from queue payload
+        }
+        clean[k] = v;
+    }
+    return clean;
+}
+
 /**
  * Enqueue a job into BullMQ
- * @param {Object} jobData - Payload containing jobId, clientId, provider, credentials, email
+ * @param {Object} jobData - Payload containing jobId, clientId, provider, connectionId, email (NO credentials)
  */
 export async function enqueueJob(jobData) {
+    const cleanPayload = sanitizeJobPayload(jobData);
     const queue = await getQueue();
     if (!queue) {
-        console.log(`[QUEUE-FALLBACK] BullMQ queue unavailable. Processing in direct mode for job: ${jobData.jobId}`);
-        return { id: jobData.jobId || 'fallback-id' };
+        console.log(`[QUEUE-FALLBACK] BullMQ queue unavailable. Processing in direct mode for job: ${cleanPayload.jobId}`);
+        return { id: cleanPayload.jobId || 'fallback-id', data: cleanPayload };
     }
 
-    const job = await queue.add('scan', jobData, {
+    const job = await queue.add('scan', cleanPayload, {
         attempts: 3,
         backoff: {
             type: 'exponential',
@@ -43,7 +62,7 @@ export async function enqueueJob(jobData) {
         removeOnFail: false
     });
 
-    console.log(`[BULLMQ] Enqueued job ${job.id} (jobId: ${jobData.jobId})`);
+    console.log(`[BULLMQ] Enqueued job ${job.id} (jobId: ${cleanPayload.jobId}) without credentials`);
     return job;
 }
 

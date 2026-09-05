@@ -15,6 +15,7 @@ import jobStreamHandler from './api/job-stream.js';
 import auditorHandler from './api/auditor.js';
 import remediateHandler from './api/remediate.js';
 import authRouter from './api/auth.js';
+import onboardingRouter from './api/onboarding.js';
 import { handler as workerHandler } from './worker.js';
 import { listenWorkerQueue } from './core/queue.js';
 import { initDb } from './core/db.js';
@@ -144,6 +145,9 @@ app.get('/health', (req, res) => {
 
 // Authentication Routes (login/logout/callback/providers)
 app.use('/api/auth', authLimiter, authRouter);
+
+// ── Onboarding API (Decoupled state machines, cloud connection, compliance posture) ──
+app.use('/api/onboarding', requireAuth(), onboardingRouter);
 
 // ─────────────────────────────────────────────────────────────────────────────
 // PROTECTED ROUTES — Require valid session + RBAC enforcement

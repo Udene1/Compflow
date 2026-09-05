@@ -16,8 +16,9 @@ export default async function handler(req, res) {
 
         const jobId = await createJob(clientId, 'on_demand');
 
+        const { credentials, apiToken, clientSecret, serviceAccountJson, ...safeClient } = client;
         const job = await enqueueJob({
-            ...client,
+            ...safeClient,
             jobId
         });
 

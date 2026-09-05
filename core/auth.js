@@ -1,5 +1,6 @@
 import crypto from 'crypto';
 import pool from './db.js';
+import { recordAuditEvent } from './audit_events.js';
 import { log } from './logger.js';
 
 const AUTH_SECRET = (() => {
@@ -22,7 +23,7 @@ const AUTH_SECRET = (() => {
 })();
 
 // ─── Server-Side Session Revocation List ─────────────────────────────────────
-// In-memory revocation set. In production, use Redis for multi-instance support.
+// Fast in-memory cache for synchronous token validation; backed by PostgreSQL sessions table
 const _revokedSessions = new Map(); // token_hash -> expiry timestamp
 const REVOCATION_CLEANUP_INTERVAL = 60 * 60 * 1000; // Prune expired entries every hour
 
@@ -35,16 +36,20 @@ setInterval(() => {
 }, REVOCATION_CLEANUP_INTERVAL).unref();
 
 /**
- * Revokes a session token server-side (called on logout).
- * The token is hashed and stored in the revocation set until its natural expiry.
+ * Revokes a session token server-side (called on logout and token rotation).
+ * The token is hashed and stored in memory and marked revoked in the database.
  */
 export function revokeSession(tokenString) {
     if (!tokenString) return;
     const hash = crypto.createHash('sha256').update(tokenString).digest('hex');
-    // Store with generous TTL (7 days max session lifetime)
     const expiry = Date.now() + (7 * 24 * 60 * 60 * 1000);
     _revokedSessions.set(hash, expiry);
     log.info(`[AUTH] Session revoked (hash: ${hash.substring(0, 12)}...)`);
+
+    // Async DB update for multi-instance persistence
+    pool.query('UPDATE sessions SET is_revoked = true WHERE token_hash = $1', [hash]).catch(err => {
+        log.warn(`[AUTH] Failed to mark session revoked in DB: ${err.message}`);
+    });
 }
 
 /**
@@ -94,17 +99,19 @@ export function signAuthPayload(payload) {
 }
 
 /**
- * Generates a signed, URL-safe session token.
+ * Generates a signed, URL-safe session token and records it in the database.
+ * Default lifetime is 24 hours (1 day).
  */
-export function createSessionToken(user, org, role = ROLES.ENGINEER, expiryDays = 7) {
+export function createSessionToken(user, org, role = ROLES.ENGINEER, expiryDays = 1, rotatedFrom = null) {
     const issuedAt = new Date().toISOString();
-    const expiresAt = new Date(Date.now() + expiryDays * 24 * 60 * 60 * 1000).toISOString();
+    const durationMs = (expiryDays <= 0 ? 0 : expiryDays) * 24 * 60 * 60 * 1000;
+    const expiresAt = new Date(Date.now() + durationMs).toISOString();
 
     const payload = {
         sessionId: 'sess_' + crypto.randomUUID(),
         userId: user.id || user.userId,
         email: user.email,
-        name: user.name || user.email.split('@')[0],
+        name: user.name || user.email?.split('@')[0],
         avatarUrl: user.avatarUrl || user.avatar_url || '',
         orgId: org.id || org.orgId || 'org_default',
         orgName: org.name || org.orgName || 'Primary Workspace',
@@ -115,6 +122,19 @@ export function createSessionToken(user, org, role = ROLES.ENGINEER, expiryDays 
 
     const signature = signAuthPayload(payload);
     const token = Buffer.from(JSON.stringify({ payload, signature })).toString('base64url');
+    const tokenHash = crypto.createHash('sha256').update(token).digest('hex');
+
+    // Persist to PostgreSQL sessions table
+    pool.query(
+        `INSERT INTO sessions (id, user_id, org_id, token_hash, role, expires_at)
+         VALUES ($1, $2, $3, $4, $5, $6);`,
+        [payload.sessionId, payload.userId, payload.orgId, tokenHash, payload.role, expiresAt]
+    ).catch(err => {
+        if (process.env.NODE_ENV === 'production') {
+            log.error(`[AUTH] Production session write failure: ${err.message}`);
+            throw new Error(`Session database unavailable: ${err.message}`);
+        }
+    });
 
     return {
         token,
@@ -167,9 +187,38 @@ export function validateSessionToken(tokenString) {
 }
 
 /**
- * Provisions or updates a user from an OAuth provider profile (Google, GitHub).
+ * Rotates an active session token: invalidates the old one and generates a new 24h session.
  */
-export async function upsertUserFromOAuth(profile, provider = 'google') {
+export function rotateSession(oldTokenString) {
+    const check = validateSessionToken(oldTokenString);
+    if (!check.valid) {
+        throw new Error(`Cannot rotate invalid session: ${check.error}`);
+    }
+
+    // Revoke old token
+    revokeSession(oldTokenString);
+
+    // Create fresh session for same user/org
+    const newSession = createSessionToken(
+        { id: check.user.userId, email: check.user.email, name: check.user.name, avatarUrl: check.user.avatarUrl },
+        { id: check.user.orgId, name: check.user.orgName },
+        check.user.role,
+        1,
+        oldTokenString
+    );
+
+    log.info(`[AUTH] Session rotated for user ${check.user.email}`);
+    return newSession;
+}
+
+/**
+ * Provisions or updates a user from an OAuth provider profile (Google, GitHub).
+ * Strictly adheres to Amendment 4 & 5:
+ * - Looks up by (provider, provider_subject)
+ * - Never auto-merges based only on email (throws ACCOUNT_EXISTS error)
+ * - Preserves existing user IDs and relations
+ */
+export async function upsertUserFromOAuth(profile, provider = 'google', providerSubject = null) {
     const email = (profile.email || '').toLowerCase().trim();
     if (!email) {
         throw new Error('OAuth profile does not contain a valid email address.');
@@ -177,19 +226,67 @@ export async function upsertUserFromOAuth(profile, provider = 'google') {
 
     const name = profile.name || email.split('@')[0];
     const avatarUrl = profile.picture || profile.avatar_url || '';
-    const userId = 'usr_' + crypto.createHash('sha256').update(email).digest('hex').substring(0, 16);
+    const subject = String(providerSubject || profile.sub || profile.id || email);
 
-    // 1. Upsert User Record
-    const userQuery = `
-        INSERT INTO users (id, email, name, avatar_url)
-        VALUES ($1, $2, $3, $4)
-        ON CONFLICT (id) DO UPDATE SET
-            name = EXCLUDED.name,
-            avatar_url = EXCLUDED.avatar_url;
-    `;
-    await pool.query(userQuery, [userId, email, name, avatarUrl]);
+    // 1. Check for existing identity (provider + provider_subject)
+    const identityRes = await pool.query(
+        'SELECT * FROM identities WHERE provider = $1 AND provider_subject = $2;',
+        [provider, subject]
+    );
 
-    // 2. Resolve or Provision Organization (default to domain or individual org)
+    if (identityRes.rows && identityRes.rows.length > 0) {
+        const identity = identityRes.rows[0];
+        // Touch last_login_at
+        await pool.query('UPDATE identities SET last_login_at = CURRENT_TIMESTAMP WHERE id = $1;', [identity.id]);
+
+        // Retrieve existing user
+        const userRes = await pool.query('SELECT * FROM users WHERE id = $1;', [identity.user_id]);
+        const userRow = userRes.rows?.[0] || { id: identity.user_id, email, name, avatar_url: avatarUrl };
+
+        // Retrieve membership
+        const memRes = await pool.query('SELECT * FROM org_memberships WHERE user_id = $1;', [identity.user_id]);
+        const memRow = memRes.rows?.[0];
+        const orgId = memRow?.org_id || 'org_default';
+
+        const orgRes = await pool.query('SELECT * FROM organizations WHERE id = $1;', [orgId]);
+        const orgRow = orgRes.rows?.[0] || { id: orgId, name: 'Primary Workspace', domain: email.split('@')[1] };
+
+        const role = memRow?.role || ROLES.ENGINEER;
+
+        log.info(`[AUTH] Existing identity recognized: ${email} via ${provider}`);
+        return {
+            user: { id: userRow.id, email: userRow.email, name: userRow.name, avatarUrl: userRow.avatar_url },
+            org: { id: orgRow.id, name: orgRow.name, domain: orgRow.domain },
+            role
+        };
+    }
+
+    // 2. Identity not found — check if an account with this email already exists
+    const existingUserRes = await pool.query('SELECT * FROM users WHERE email = $1;', [email]);
+    if (existingUserRes.rows && existingUserRes.rows.length > 0) {
+        // Amendment 5: Never auto-merge users based only on email
+        const err = new Error(
+            'This email is already associated with a Compflow account. Please sign in using your existing authentication method. After signing in, you can connect additional login methods from Settings → Security → Connected accounts.'
+        );
+        err.code = 'ACCOUNT_EXISTS';
+        throw err;
+    }
+
+    // 3. Brand-new user: generate unique ID (crypto.randomUUID, not email hash)
+    const userId = 'usr_' + crypto.randomUUID().replace(/-/g, '').substring(0, 16);
+    await pool.query(
+        'INSERT INTO users (id, email, name, avatar_url) VALUES ($1, $2, $3, $4);',
+        [userId, email, name, avatarUrl]
+    );
+
+    // 4. Create identity record
+    const identityId = 'idn_' + crypto.randomUUID().replace(/-/g, '').substring(0, 16);
+    await pool.query(
+        'INSERT INTO identities (id, user_id, provider, provider_subject, provider_email) VALUES ($1, $2, $3, $4, $5);',
+        [identityId, userId, provider, subject, email]
+    );
+
+    // 5. Resolve or provision organization
     const domain = email.includes('@') ? email.split('@')[1] : 'personal';
     const isGenericDomain = ['gmail.com', 'yahoo.com', 'hotmail.com', 'outlook.com', 'icloud.com'].includes(domain);
     const orgId = isGenericDomain 
@@ -197,24 +294,29 @@ export async function upsertUserFromOAuth(profile, provider = 'google') {
         : `org_${domain.replace(/[^a-zA-Z0-9]/g, '_')}`;
     const orgName = isGenericDomain ? `${name}'s Workspace` : `${domain.toUpperCase()} Governance`;
 
-    const orgQuery = `
-        INSERT INTO organizations (id, name, domain, sso_provider)
-        VALUES ($1, $2, $3, $4)
-        ON CONFLICT (id) DO NOTHING;
-    `;
-    await pool.query(orgQuery, [orgId, orgName, domain, provider]);
+    await pool.query(
+        'INSERT INTO organizations (id, name, domain, sso_provider) VALUES ($1, $2, $3, $4) ON CONFLICT (id) DO NOTHING;',
+        [orgId, orgName, domain, provider]
+    );
 
-    // 3. Ensure Org Membership
-    const memberQuery = `
-        INSERT INTO org_memberships (user_id, org_id, role)
-        VALUES ($1, $2, $3)
-        ON CONFLICT (user_id, org_id) DO NOTHING;
-    `;
-    // First user in org becomes OWNER, others default to ENGINEER
-    const existingMembers = await pool.query('SELECT * FROM org_memberships WHERE org_id = $1', [orgId]);
+    // 6. Ensure Org Membership (first user in org is OWNER)
+    const existingMembers = await pool.query('SELECT * FROM org_memberships WHERE org_id = $1;', [orgId]);
     const assignedRole = (existingMembers.rows && existingMembers.rows.length === 0) ? ROLES.OWNER : ROLES.ENGINEER;
 
-    await pool.query(memberQuery, [userId, orgId, assignedRole]);
+    await pool.query(
+        'INSERT INTO org_memberships (user_id, org_id, role) VALUES ($1, $2, $3) ON CONFLICT (user_id, org_id) DO NOTHING;',
+        [userId, orgId, assignedRole]
+    );
+
+    // 7. Initialize onboarding state
+    await pool.query(
+        'INSERT INTO onboarding_state (org_id, status) VALUES ($1, $2) ON CONFLICT (org_id) DO NOTHING;',
+        [orgId, 'AUTHENTICATED']
+    );
+
+    // 8. Record audit events
+    await recordAuditEvent(orgId, userId, 'user_created', 'user', userId, { provider, emailDomain: domain }).catch(() => {});
+    await recordAuditEvent(orgId, userId, 'membership_created', 'organization', orgId, { role: assignedRole }).catch(() => {});
 
     log.info(`[AUTH] Successfully authenticated user ${email} (Role: ${assignedRole}, Org: ${orgName}).`);
 
@@ -224,3 +326,4 @@ export async function upsertUserFromOAuth(profile, provider = 'google') {
         role: assignedRole
     };
 }
+
