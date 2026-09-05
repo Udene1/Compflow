@@ -23,7 +23,7 @@ const AUTH_SECRET = (() => {
 })();
 
 // ─── Server-Side Session Revocation List ─────────────────────────────────────
-// Fast in-memory cache for synchronous token validation; backed by PostgreSQL sessions table
+// Fast in-memory cache for positive hits; backed authoritatively by PostgreSQL sessions table
 const _revokedSessions = new Map(); // token_hash -> expiry timestamp
 const REVOCATION_CLEANUP_INTERVAL = 60 * 60 * 1000; // Prune expired entries every hour
 
@@ -36,29 +36,65 @@ setInterval(() => {
 }, REVOCATION_CLEANUP_INTERVAL).unref();
 
 /**
- * Revokes a session token server-side (called on logout and token rotation).
- * The token is hashed and stored in memory and marked revoked in the database.
+ * Helper to clear local in-memory revocation cache (used in multi-instance simulation tests)
  */
-export function revokeSession(tokenString) {
+export function _clearRevocationCache() {
+    _revokedSessions.clear();
+}
+
+/**
+ * Revokes a session token server-side (called on logout and token rotation).
+ * The token is hashed, stored in memory cache, and authoritatively marked revoked in the database.
+ */
+export async function revokeSession(tokenString) {
     if (!tokenString) return;
     const hash = crypto.createHash('sha256').update(tokenString).digest('hex');
     const expiry = Date.now() + (7 * 24 * 60 * 60 * 1000);
     _revokedSessions.set(hash, expiry);
-    log.info(`[AUTH] Session revoked (hash: ${hash.substring(0, 12)}...)`);
+    log.info(`[AUTH] Session revoked in cache (hash: ${hash.substring(0, 12)}...)`);
 
-    // Async DB update for multi-instance persistence
-    pool.query('UPDATE sessions SET is_revoked = true WHERE token_hash = $1', [hash]).catch(err => {
+    // Authoritative DB update for multi-instance persistence
+    try {
+        await pool.query('UPDATE sessions SET is_revoked = true WHERE token_hash = $1;', [hash]);
+    } catch (err) {
         log.warn(`[AUTH] Failed to mark session revoked in DB: ${err.message}`);
-    });
+        if (process.env.NODE_ENV === 'production') throw err;
+    }
 }
 
 /**
- * Checks if a session token has been server-side revoked.
+ * Authoritative check if a session token has been server-side revoked.
+ * Checks memory cache for fast positive hit, falls back to PostgreSQL when absent.
  */
-export function isSessionRevoked(tokenString) {
+export async function isSessionRevoked(tokenString) {
     if (!tokenString) return false;
     const hash = crypto.createHash('sha256').update(tokenString).digest('hex');
-    return _revokedSessions.has(hash);
+
+    // 1. Fast in-memory cache check
+    if (_revokedSessions.has(hash)) {
+        return true;
+    }
+
+    // 2. Authoritative PostgreSQL lookup (e.g. cross-instance revocation)
+    try {
+        const res = await pool.query('SELECT is_revoked, expires_at FROM sessions WHERE token_hash = $1;', [hash]);
+        if (res.rows && res.rows.length > 0) {
+            const row = res.rows[0];
+            if (row.is_revoked) {
+                // Populate memory cache to accelerate subsequent lookups on this instance
+                _revokedSessions.set(hash, Date.now() + (7 * 24 * 60 * 60 * 1000));
+                return true;
+            }
+        }
+    } catch (err) {
+        log.warn(`[AUTH] Persistent revocation check failed: ${err.message}`);
+        if (process.env.NODE_ENV === 'production') {
+            // Fail closed in production if database is unavailable
+            return true;
+        }
+    }
+
+    return false;
 }
 
 export const ROLES = {
@@ -99,10 +135,11 @@ export function signAuthPayload(payload) {
 }
 
 /**
- * Generates a signed, URL-safe session token and records it in the database.
+ * Generates a signed, URL-safe session token and records it authoritatively in the database.
+ * The session is ONLY returned if PostgreSQL persistence succeeds.
  * Default lifetime is 24 hours (1 day).
  */
-export function createSessionToken(user, org, role = ROLES.ENGINEER, expiryDays = 1, rotatedFrom = null) {
+export async function createSessionToken(user, org, role = ROLES.ENGINEER, expiryDays = 1, rotatedFrom = null) {
     const issuedAt = new Date().toISOString();
     const durationMs = (expiryDays <= 0 ? 0 : expiryDays) * 24 * 60 * 60 * 1000;
     const expiresAt = new Date(Date.now() + durationMs).toISOString();
@@ -124,17 +161,17 @@ export function createSessionToken(user, org, role = ROLES.ENGINEER, expiryDays 
     const token = Buffer.from(JSON.stringify({ payload, signature })).toString('base64url');
     const tokenHash = crypto.createHash('sha256').update(token).digest('hex');
 
-    // Persist to PostgreSQL sessions table
-    pool.query(
-        `INSERT INTO sessions (id, user_id, org_id, token_hash, role, expires_at)
-         VALUES ($1, $2, $3, $4, $5, $6);`,
-        [payload.sessionId, payload.userId, payload.orgId, tokenHash, payload.role, expiresAt]
-    ).catch(err => {
-        if (process.env.NODE_ENV === 'production') {
-            log.error(`[AUTH] Production session write failure: ${err.message}`);
-            throw new Error(`Session database unavailable: ${err.message}`);
-        }
-    });
+    // Authoritatively persist to PostgreSQL sessions table BEFORE returning token
+    try {
+        await pool.query(
+            `INSERT INTO sessions (id, user_id, org_id, token_hash, role, expires_at)
+             VALUES ($1, $2, $3, $4, $5, $6);`,
+            [payload.sessionId, payload.userId, payload.orgId, tokenHash, payload.role, expiresAt]
+        );
+    } catch (err) {
+        log.error(`[AUTH] Session persistence failed: ${err.message}`);
+        throw new Error(`Session persistence failed: ${err.message}`);
+    }
 
     return {
         token,
@@ -144,16 +181,16 @@ export function createSessionToken(user, org, role = ROLES.ENGINEER, expiryDays 
 }
 
 /**
- * Validates a session token string, asserts signature and expiration.
+ * Validates a session token string, asserts signature, expiration, and checks revocation authoritatively.
  */
-export function validateSessionToken(tokenString) {
+export async function validateSessionToken(tokenString) {
     if (!tokenString || typeof tokenString !== 'string') {
         return { valid: false, error: 'Missing session token' };
     }
 
     try {
-        // Check server-side revocation list FIRST (fast rejection)
-        if (isSessionRevoked(tokenString)) {
+        // Authoritative server-side revocation check
+        if (await isSessionRevoked(tokenString)) {
             return { valid: false, error: 'Session has been revoked (logged out)' };
         }
 
@@ -189,17 +226,17 @@ export function validateSessionToken(tokenString) {
 /**
  * Rotates an active session token: invalidates the old one and generates a new 24h session.
  */
-export function rotateSession(oldTokenString) {
-    const check = validateSessionToken(oldTokenString);
+export async function rotateSession(oldTokenString) {
+    const check = await validateSessionToken(oldTokenString);
     if (!check.valid) {
         throw new Error(`Cannot rotate invalid session: ${check.error}`);
     }
 
-    // Revoke old token
-    revokeSession(oldTokenString);
+    // Authoritatively revoke old token
+    await revokeSession(oldTokenString);
 
     // Create fresh session for same user/org
-    const newSession = createSessionToken(
+    const newSession = await createSessionToken(
         { id: check.user.userId, email: check.user.email, name: check.user.name, avatarUrl: check.user.avatarUrl },
         { id: check.user.orgId, name: check.user.orgName },
         check.user.role,

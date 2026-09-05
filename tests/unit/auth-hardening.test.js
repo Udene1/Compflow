@@ -12,10 +12,10 @@ describe('Auth Hardening — Phase 0 Security Enforcement', () => {
 
     // ─── Session Token Lifecycle ─────────────────────────────────────────────
     describe('Session Token Creation & Validation', () => {
-        it('should create a valid signed session token', () => {
+        it('should create a valid signed session token', async () => {
             const user = { id: 'usr_test123', email: 'alice@acme.com', name: 'Alice' };
             const org = { id: 'org_acme', name: 'Acme Corp' };
-            const session = createSessionToken(user, org, ROLES.ADMIN, 7);
+            const session = await createSessionToken(user, org, ROLES.ADMIN, 7);
 
             expect(session.token).toBeDefined();
             expect(session.payload.email).toBe('alice@acme.com');
@@ -24,73 +24,73 @@ describe('Auth Hardening — Phase 0 Security Enforcement', () => {
             expect(session.payload.sessionId).toMatch(/^sess_/);
         });
 
-        it('should validate a correctly signed token', () => {
+        it('should validate a correctly signed token', async () => {
             const user = { id: 'usr_test456', email: 'bob@corp.io', name: 'Bob' };
             const org = { id: 'org_corp', name: 'Corp IO' };
-            const session = createSessionToken(user, org, ROLES.ENGINEER, 1);
+            const session = await createSessionToken(user, org, ROLES.ENGINEER, 1);
 
-            const result = validateSessionToken(session.token);
+            const result = await validateSessionToken(session.token);
             expect(result.valid).toBe(true);
             expect(result.user.email).toBe('bob@corp.io');
             expect(result.user.role).toBe('ENGINEER');
         });
 
-        it('should reject a forged/tampered token', () => {
-            const result = validateSessionToken('aGVsbG8gd29ybGQ'); // random base64url
+        it('should reject a forged/tampered token', async () => {
+            const result = await validateSessionToken('aGVsbG8gd29ybGQ'); // random base64url
             expect(result.valid).toBe(false);
         });
 
-        it('should reject an expired token', () => {
+        it('should reject an expired token', async () => {
             const user = { id: 'usr_expired', email: 'old@test.com', name: 'Old' };
             const org = { id: 'org_test', name: 'Test' };
             // Create token that expires in -1 days (already expired)
-            const session = createSessionToken(user, org, ROLES.VIEWER, -1);
+            const session = await createSessionToken(user, org, ROLES.VIEWER, -1);
 
-            const result = validateSessionToken(session.token);
+            const result = await validateSessionToken(session.token);
             expect(result.valid).toBe(false);
             expect(result.error).toContain('expired');
         });
 
-        it('should reject null/empty/undefined tokens', () => {
-            expect(validateSessionToken(null).valid).toBe(false);
-            expect(validateSessionToken('').valid).toBe(false);
-            expect(validateSessionToken(undefined).valid).toBe(false);
+        it('should reject null/empty/undefined tokens', async () => {
+            expect((await validateSessionToken(null)).valid).toBe(false);
+            expect((await validateSessionToken('')).valid).toBe(false);
+            expect((await validateSessionToken(undefined)).valid).toBe(false);
         });
     });
 
     // ─── Server-Side Session Revocation (Logout) ─────────────────────────────
     describe('Server-Side Session Revocation', () => {
-        it('should revoke a session and reject it on next validation', () => {
+        it('should revoke a session and reject it on next validation', async () => {
             const user = { id: 'usr_revoke', email: 'revoke@test.com', name: 'Revoke' };
             const org = { id: 'org_test', name: 'Test' };
-            const session = createSessionToken(user, org, ROLES.ADMIN, 7);
+            const session = await createSessionToken(user, org, ROLES.ADMIN, 7);
 
             // Token should be valid before revocation
-            expect(validateSessionToken(session.token).valid).toBe(true);
+            expect((await validateSessionToken(session.token)).valid).toBe(true);
 
             // Revoke the session
-            revokeSession(session.token);
+            await revokeSession(session.token);
 
             // Token should now be rejected
-            const result = validateSessionToken(session.token);
+            const result = await validateSessionToken(session.token);
             expect(result.valid).toBe(false);
             expect(result.error).toContain('revoked');
         });
 
-        it('should report revoked status via isSessionRevoked', () => {
+        it('should report revoked status via isSessionRevoked', async () => {
             const user = { id: 'usr_check', email: 'check@test.com', name: 'Check' };
             const org = { id: 'org_test', name: 'Test' };
-            const session = createSessionToken(user, org, ROLES.VIEWER, 1);
+            const session = await createSessionToken(user, org, ROLES.VIEWER, 1);
 
-            expect(isSessionRevoked(session.token)).toBe(false);
-            revokeSession(session.token);
-            expect(isSessionRevoked(session.token)).toBe(true);
+            expect(await isSessionRevoked(session.token)).toBe(false);
+            await revokeSession(session.token);
+            expect(await isSessionRevoked(session.token)).toBe(true);
         });
 
-        it('should handle revoking null/empty tokens gracefully', () => {
-            expect(() => revokeSession(null)).not.toThrow();
-            expect(() => revokeSession('')).not.toThrow();
-            expect(() => revokeSession(undefined)).not.toThrow();
+        it('should handle revoking null/empty tokens gracefully', async () => {
+            await expect(revokeSession(null)).resolves.not.toThrow();
+            await expect(revokeSession('')).resolves.not.toThrow();
+            await expect(revokeSession(undefined)).resolves.not.toThrow();
         });
     });
 

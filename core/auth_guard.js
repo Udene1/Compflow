@@ -24,7 +24,7 @@ function parseCookies(cookieHeader) {
  * @param {Array<string>} allowedRoles - Optional list of required roles (e.g., ['ADMIN', 'ENGINEER'])
  */
 export function requireAuth(allowedRoles = []) {
-    return (req, res, next) => {
+    return async (req, res, next) => {
         const cookies = req.cookies || parseCookies(req.headers.cookie);
         const token = cookies.cf_session || 
                       req.headers.authorization?.replace(/^Bearer\s+/i, '') ||
@@ -37,7 +37,7 @@ export function requireAuth(allowedRoles = []) {
             });
         }
 
-        const { valid, user, error } = validateSessionToken(token);
+        const { valid, user, error } = await validateSessionToken(token);
 
         if (!valid || !user) {
             return res.status(401).json({
@@ -64,16 +64,18 @@ export function requireAuth(allowedRoles = []) {
  * Optional authentication middleware: populates req.user if valid token present, but does not block.
  */
 export function optionalAuth(req, res, next) {
-    const cookies = req.cookies || parseCookies(req.headers.cookie);
-    const token = cookies.cf_session || 
-                  req.headers.authorization?.replace(/^Bearer\s+/i, '') ||
-                  req.query?.auth_token;
+    return (async () => {
+        const cookies = req.cookies || parseCookies(req.headers.cookie);
+        const token = cookies.cf_session || 
+                      req.headers.authorization?.replace(/^Bearer\s+/i, '') ||
+                      req.query?.auth_token;
 
-    if (token) {
-        const { valid, user } = validateSessionToken(token);
-        if (valid && user) {
-            req.user = user;
+        if (token) {
+            const { valid, user } = await validateSessionToken(token);
+            if (valid && user) {
+                req.user = user;
+            }
         }
-    }
-    next();
+        next();
+    })().catch(next);
 }

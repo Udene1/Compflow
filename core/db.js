@@ -13,6 +13,8 @@ class MemoryFallbackPool {
         this.onboarding_state = [];
         this.cloud_connections = [];
         this.secrets = [];
+        this.scans = [];
+        this.findings = [];
         this.jobs = new Map();
     }
 
@@ -98,7 +100,7 @@ class MemoryFallbackPool {
         }
 
         // ── ORGANIZATIONS ──
-        if (normalized.includes('SELECT * FROM organizations WHERE id = $1')) {
+        if (normalized.includes('FROM organizations WHERE id = $1')) {
             const org = this.organizations.find(o => o.id === params[0]);
             return { rows: org ? [org] : [] };
         }
@@ -111,19 +113,24 @@ class MemoryFallbackPool {
             return { rows: [org], rowCount: 1 };
         }
         if (normalized.includes('UPDATE organizations')) {
-            const org = this.organizations.find(o => o.id === params[params.length - 1]);
-            if (org) {
-                if (params.length === 5) {
-                    // name, website, industry, company_size, id
-                    org.name = params[0];
-                    org.website = params[1];
-                    org.industry = params[2];
-                    org.company_size = params[3];
-                }
-                org.updated_at = new Date();
-                return { rows: [org], rowCount: 1 };
+            const orgId = params[params.length - 1];
+            let org = this.organizations.find(o => o.id === orgId);
+            if (!org) {
+                org = { id: orgId, name: params[0] || 'Organization', onboarding_status: 'AUTHENTICATED', created_at: new Date() };
+                this.organizations.push(org);
             }
-            return { rows: [], rowCount: 0 };
+            if (params.length === 5) {
+                // name, website, industry, company_size, id
+                org.name = params[0];
+                org.website = params[1];
+                org.industry = params[2];
+                org.company_size = params[3];
+            }
+            if (normalized.includes("onboarding_status = 'ONBOARDING_COMPLETED'")) {
+                org.onboarding_status = 'ONBOARDING_COMPLETED';
+            }
+            org.updated_at = new Date();
+            return { rows: [org], rowCount: 1 };
         }
 
         // ── ORG MEMBERSHIPS ──
@@ -157,11 +164,11 @@ class MemoryFallbackPool {
             this.sessions.push(record);
             return { rowCount: 1 };
         }
-        if (normalized.includes('SELECT * FROM sessions WHERE token_hash = $1')) {
+        if (normalized.includes('FROM sessions WHERE token_hash = $1')) {
             const s = this.sessions.find(x => x.token_hash === params[0]);
             return { rows: s ? [s] : [] };
         }
-        if (normalized.includes('UPDATE sessions SET is_revoked = true WHERE token_hash = $1')) {
+        if (normalized.includes('UPDATE sessions SET is_revoked = true')) {
             const s = this.sessions.find(x => x.token_hash === params[0]);
             if (s) s.is_revoked = true;
             return { rowCount: s ? 1 : 0 };
@@ -205,7 +212,7 @@ class MemoryFallbackPool {
         }
 
         // ── ORGANIZATION FRAMEWORKS ──
-        if (normalized.includes('SELECT * FROM organization_frameworks WHERE org_id = $1')) {
+        if (normalized.includes('FROM organization_frameworks WHERE org_id = $1')) {
             const rows = this.organization_frameworks.filter(f => f.org_id === params[0]);
             return { rows };
         }
@@ -222,11 +229,14 @@ class MemoryFallbackPool {
         }
 
         // ── CLOUD CONNECTIONS ──
-        if (normalized.includes('SELECT * FROM cloud_connections WHERE organization_id = $1')) {
-            const rows = this.cloud_connections.filter(c => c.organization_id === params[0]);
+        if (normalized.includes('FROM cloud_connections WHERE organization_id = $1')) {
+            let rows = this.cloud_connections.filter(c => c.organization_id === params[0]);
+            if (normalized.includes("status = 'VERIFIED'") || (params.length > 1 && params[1] === 'VERIFIED')) {
+                rows = rows.filter(c => c.status === 'VERIFIED');
+            }
             return { rows };
         }
-        if (normalized.includes('SELECT * FROM cloud_connections WHERE id = $1')) {
+        if (normalized.includes('FROM cloud_connections WHERE id = $1')) {
             const conn = this.cloud_connections.find(c => c.id === params[0]);
             return { rows: conn ? [conn] : [] };
         }
@@ -244,7 +254,33 @@ class MemoryFallbackPool {
         if (normalized.includes('UPDATE cloud_connections')) {
             const conn = this.cloud_connections.find(c => c.id === params[params.length - 1]);
             if (conn) {
-                if (normalized.includes('status = $1')) {
+                if (normalized.includes("status = 'VERIFIED'")) {
+                    conn.status = 'VERIFIED';
+                    conn.account_identifier = params[0];
+                    conn.principal = params[1];
+                    conn.verification_method = params[2];
+                    conn.last_verified_at = new Date();
+                    conn.error_code = null;
+                    conn.error_message = null;
+                } else if (normalized.includes("status = 'FAILED'")) {
+                    conn.status = 'FAILED';
+                    conn.error_code = params[0];
+                    conn.error_message = params[1];
+                } else if (normalized.includes('account_identifier = $2')) {
+                    // SET status = $1, account_identifier = $2, principal = $3, verification_method = $4, ... WHERE id = $5
+                    conn.status = params[0];
+                    conn.account_identifier = params[1];
+                    conn.principal = params[2];
+                    conn.verification_method = params[3];
+                    conn.last_verified_at = new Date();
+                    conn.error_code = null;
+                    conn.error_message = null;
+                } else if (normalized.includes('error_code = $2')) {
+                    // SET status = $1, error_code = $2, error_message = $3 WHERE id = $4
+                    conn.status = params[0];
+                    conn.error_code = params[1];
+                    conn.error_message = params[2];
+                } else if (normalized.includes('status = $1')) {
                     conn.status = params[0];
                     if (params[0] === 'VERIFIED') conn.last_verified_at = new Date();
                     if (params[1]) conn.error_message = params[1];
@@ -297,6 +333,113 @@ class MemoryFallbackPool {
             const prevLen = this.secrets.length;
             this.secrets = this.secrets.filter(s => !(s.org_id === params[0] && s.connection_id === params[1]));
             return { rowCount: prevLen - this.secrets.length };
+        }
+
+        // ── SCANS ──
+        if (normalized.includes('INSERT INTO scans')) {
+            let id = params[0];
+            let orgId = params[1];
+            let connId = params[2];
+            let scanType = params[3] || 'initial_onboarding_scan';
+            let status = params[4] || 'QUEUED';
+
+            if (normalized.includes("'COMPLETED'")) status = 'COMPLETED';
+            else if (normalized.includes("'RUNNING'")) status = 'RUNNING';
+            else if (normalized.includes("'PARTIAL'")) status = 'PARTIAL';
+            else if (normalized.includes("'FAILED'")) status = 'FAILED';
+
+            const record = {
+                id, organization_id: orgId, connection_id: connId,
+                job_id: id, scan_type: scanType,
+                status,
+                started_at: status === 'RUNNING' ? new Date() : null,
+                completed_at: status === 'COMPLETED' ? new Date() : null,
+                error_code: null, error_message: null,
+                resources_discovered: 0, findings_count: 0, evidence_count: 0,
+                created_at: new Date(), updated_at: new Date()
+            };
+            this.scans.push(record);
+            return { rowCount: 1, rows: [record] };
+        }
+        if (normalized.includes('FROM scans WHERE organization_id = $1')) {
+            const matched = this.scans.filter(s => s.organization_id === params[0]);
+            // Sort by created_at DESC
+            matched.sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
+            return { rows: matched };
+        }
+        if (normalized.includes('FROM scans WHERE connection_id = $1')) {
+            const matched = this.scans.filter(s => s.connection_id === params[0]);
+            matched.sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
+            return { rows: matched };
+        }
+        if (normalized.includes('FROM scans WHERE id = $1')) {
+            const scan = this.scans.find(s => s.id === params[0]);
+            return { rows: scan ? [scan] : [] };
+        }
+        if (normalized.includes('UPDATE scans')) {
+            const scan = this.scans.find(s => s.id === params[params.length - 1]);
+            if (scan) {
+                if (normalized.includes('resources_discovered = $1') || normalized.includes('resources_discovered =')) {
+                    scan.resources_discovered = params[0] || 0;
+                    scan.findings_count = params[1] || 0;
+                    scan.evidence_count = params[2] || 0;
+                }
+                if (normalized.includes('status = $1')) {
+                    scan.status = params[0];
+                    if (params[0] === 'RUNNING') scan.started_at = new Date();
+                    if (params[0] === 'COMPLETED' || params[0] === 'PARTIAL' || params[0] === 'FAILED') scan.completed_at = new Date();
+                }
+                scan.updated_at = new Date();
+                return { rowCount: 1, rows: [scan] };
+            }
+            return { rowCount: 0, rows: [] };
+        }
+
+        // ── FINDINGS ──
+        if (normalized.includes('INSERT INTO findings')) {
+            let id = params[0];
+            let orgId = params[1];
+            let scanId = params[2];
+            let resourceId = params[3] || 'resource_1';
+            let controlId = params[4] || 'control_1';
+            let severity = params[5] || 'MEDIUM';
+            let status = params[6] || 'FAIL';
+            let code = params[7] || 'CODE_1';
+
+            if (normalized.includes("'CRITICAL'")) severity = 'CRITICAL';
+            else if (normalized.includes("'HIGH'")) severity = 'HIGH';
+            else if (normalized.includes("'MEDIUM'")) severity = 'MEDIUM';
+            else if (normalized.includes("'LOW'")) severity = 'LOW';
+
+            if (normalized.includes("'PASS'")) status = 'PASS';
+            else if (normalized.includes("'FAIL'")) status = 'FAIL';
+
+            const record = {
+                id, organization_id: orgId, scan_id: scanId, resource_id: resourceId,
+                control_id: controlId, severity, status,
+                code, created_at: new Date()
+            };
+            this.findings.push(record);
+            return { rowCount: 1, rows: [record] };
+        }
+        if (normalized.includes('FROM findings WHERE scan_id = $1')) {
+            const rows = this.findings.filter(f => f.scan_id === params[0]);
+            if (normalized.includes('COUNT(*)')) {
+                // Group by severity simulation
+                const counts = {};
+                for (const f of rows) {
+                    const sev = f.severity?.toUpperCase() || 'MEDIUM';
+                    counts[sev] = (counts[sev] || 0) + 1;
+                }
+                return {
+                    rows: Object.entries(counts).map(([severity, count]) => ({ severity, count }))
+                };
+            }
+            return { rows };
+        }
+        if (normalized.includes('FROM findings WHERE organization_id = $1')) {
+            const rows = this.findings.filter(f => f.organization_id === params[0]);
+            return { rows };
         }
 
         return { rows: [], rowCount: 0 };
@@ -498,6 +641,42 @@ export async function initDb() {
             updated_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
         );
 
+        -- Authoritative Scans Lifecycle Table (Amendment 2)
+        CREATE TABLE IF NOT EXISTS scans (
+            id VARCHAR(64) PRIMARY KEY,
+            organization_id VARCHAR(64) REFERENCES organizations(id),
+            connection_id VARCHAR(64) REFERENCES cloud_connections(id),
+            job_id VARCHAR(64),
+            scan_type VARCHAR(64) DEFAULT 'initial_onboarding_scan',
+            status VARCHAR(32) DEFAULT 'QUEUED',
+            started_at TIMESTAMPTZ,
+            completed_at TIMESTAMPTZ,
+            error_code VARCHAR(64),
+            error_message TEXT,
+            resources_discovered INT DEFAULT 0,
+            findings_count INT DEFAULT 0,
+            evidence_count INT DEFAULT 0,
+            created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
+            updated_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
+        );
+        CREATE INDEX IF NOT EXISTS idx_scans_org ON scans(organization_id);
+        CREATE INDEX IF NOT EXISTS idx_scans_conn ON scans(connection_id);
+
+        -- Persisted Compliance Findings Table (Amendment 6)
+        CREATE TABLE IF NOT EXISTS findings (
+            id VARCHAR(64) PRIMARY KEY,
+            organization_id VARCHAR(64) REFERENCES organizations(id),
+            scan_id VARCHAR(64) REFERENCES scans(id) ON DELETE CASCADE,
+            resource_id VARCHAR(255),
+            control_id VARCHAR(64),
+            severity VARCHAR(32) NOT NULL,
+            status VARCHAR(32) DEFAULT 'FAIL',
+            code VARCHAR(64),
+            created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
+        );
+        CREATE INDEX IF NOT EXISTS idx_findings_scan ON findings(scan_id);
+        CREATE INDEX IF NOT EXISTS idx_findings_org ON findings(organization_id);
+
         -- Additive column migrations for existing tables
         ALTER TABLE users ADD COLUMN IF NOT EXISTS status VARCHAR(16) DEFAULT 'active';
         ALTER TABLE users ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP;
@@ -510,6 +689,8 @@ export async function initDb() {
         ALTER TABLE org_memberships ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP;
         ALTER TABLE sessions ADD COLUMN IF NOT EXISTS is_revoked BOOLEAN DEFAULT false;
         ALTER TABLE sessions ADD COLUMN IF NOT EXISTS rotated_from VARCHAR(64);
+        ALTER TABLE cloud_connections ADD COLUMN IF NOT EXISTS principal VARCHAR(255);
+        ALTER TABLE cloud_connections ADD COLUMN IF NOT EXISTS verification_method VARCHAR(64);
     `;
 
     try {

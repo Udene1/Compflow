@@ -44,10 +44,16 @@ function invokeOnboarding({ method = 'GET', url = '/', body = {}, sessionToken =
 
         const chain = [requireAuth(), onboardingRouter];
         let idx = 0;
-        function dispatch() {
+        async function dispatch() {
             if (idx >= chain.length) return resolve(res);
             const fn = chain[idx++];
-            fn(req, res, dispatch);
+            try {
+                await fn(req, res, dispatch);
+            } catch (err) {
+                res.statusCode = 500;
+                res.body = { error: err.message };
+                resolve(res);
+            }
         }
         dispatch();
     });
@@ -58,8 +64,8 @@ describe('Authoritative Onboarding State Engine', () => {
     const testOrgId = 'org_onboarding_test_99';
     const testUserId = 'usr_onboarding_test_99';
 
-    beforeEach(() => {
-        session = createSessionToken(
+    beforeEach(async () => {
+        session = await createSessionToken(
             { id: testUserId, email: 'founder@cyberco.io', name: 'CyberCo Founder' },
             { id: testOrgId, name: 'CyberCo' },
             ROLES.ADMIN,
@@ -144,6 +150,18 @@ describe('Authoritative Onboarding State Engine', () => {
     });
 
     it('verifies connection, transitions to CLOUD_CONNECTED, and returns async scan reference', async () => {
+        // Register mock verifier for testing successful provider verification
+        const { cloudVerifier } = await import('../../core/cloud_verifier.js');
+        cloudVerifier.registerVerifier('aws', {
+            verify: async () => ({
+                verified: true,
+                provider: 'aws',
+                accountIdentifier: '123456789012',
+                principal: 'arn:aws:iam::123456789012:role/CompflowAuditRole',
+                verificationMethod: 'sts:GetCallerIdentity'
+            })
+        });
+
         // 1. Create connection
         const connRes = await invokeOnboarding({
             method: 'POST',
@@ -170,9 +188,12 @@ describe('Authoritative Onboarding State Engine', () => {
         expect(verifyRes.statusCode).toBe(200);
         expect(verifyRes.body.verified).toBe(true);
         expect(verifyRes.body.status).toBe('VERIFIED');
+        expect(verifyRes.body.scanStatus).toBe('QUEUED');
         expect(verifyRes.body.onboardingStatus).toBe('CLOUD_CONNECTED');
         expect(verifyRes.body.scanId).toBeDefined();
-        expect(verifyRes.body.message).toContain('You can wait here or go to your dashboard');
+        expect(verifyRes.body.provenance).toBeDefined();
+        expect(verifyRes.body.provenance.accountIdentifier).toBe('123456789012');
+        expect(verifyRes.body.message).toContain('Compflow has queued your initial compliance scan');
     });
 
     it('handles connection failure safely with retry flag and does not trap user', async () => {

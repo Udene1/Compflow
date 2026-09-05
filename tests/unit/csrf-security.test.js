@@ -57,8 +57,8 @@ function invokeWithMiddleware(middlewareChain, { method = 'GET', url = '/', head
 describe('CSRF & Cookie Security Protection (Amendment 19)', () => {
     let validSession;
 
-    beforeEach(() => {
-        validSession = createSessionToken(
+    beforeEach(async () => {
+        validSession = await createSessionToken(
             { id: 'usr_csrf_test', email: 'csrf@acme.com', name: 'CSRF Tester' },
             { id: 'org_csrf', name: 'CSRF Org' },
             ROLES.ADMIN,

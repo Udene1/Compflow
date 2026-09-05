@@ -161,40 +161,40 @@ describe('OAuth & Session Security Enforcement', () => {
         const mockUser = { id: 'usr_sec_1', email: 'sec@acme.com', name: 'Security Officer' };
         const mockOrg = { id: 'org_sec', name: 'Security Org' };
 
-        it('rejects revoked session tokens on validation', () => {
-            const session = createSessionToken(mockUser, mockOrg, ROLES.ADMIN, 1);
-            expect(validateSessionToken(session.token).valid).toBe(true);
+        it('rejects revoked session tokens on validation', async () => {
+            const session = await createSessionToken(mockUser, mockOrg, ROLES.ADMIN, 1);
+            expect((await validateSessionToken(session.token)).valid).toBe(true);
 
-            revokeSession(session.token);
+            await revokeSession(session.token);
 
-            expect(isSessionRevoked(session.token)).toBe(true);
-            const check = validateSessionToken(session.token);
+            expect(await isSessionRevoked(session.token)).toBe(true);
+            const check = await validateSessionToken(session.token);
             expect(check.valid).toBe(false);
             expect(check.error).toContain('revoked');
         });
 
-        it('rotates a session: invalidates old token and returns valid new token', () => {
-            const originalSession = createSessionToken(mockUser, mockOrg, ROLES.ENGINEER, 1);
-            expect(validateSessionToken(originalSession.token).valid).toBe(true);
+        it('rotates a session: invalidates old token and returns valid new token', async () => {
+            const originalSession = await createSessionToken(mockUser, mockOrg, ROLES.ENGINEER, 1);
+            expect((await validateSessionToken(originalSession.token)).valid).toBe(true);
 
-            const newSession = rotateSession(originalSession.token);
+            const newSession = await rotateSession(originalSession.token);
             expect(newSession).toBeDefined();
             expect(newSession.token).not.toBe(originalSession.token);
 
             // Old token MUST now be revoked and invalid
-            const oldCheck = validateSessionToken(originalSession.token);
+            const oldCheck = await validateSessionToken(originalSession.token);
             expect(oldCheck.valid).toBe(false);
             expect(oldCheck.error).toContain('revoked');
 
             // New token MUST be valid
-            const newCheck = validateSessionToken(newSession.token);
+            const newCheck = await validateSessionToken(newSession.token);
             expect(newCheck.valid).toBe(true);
             expect(newCheck.user.email).toBe(mockUser.email);
         });
 
-        it('fails rotation if the provided session token is already expired or invalid', () => {
-            const expiredSession = createSessionToken(mockUser, mockOrg, ROLES.ENGINEER, -1);
-            expect(() => rotateSession(expiredSession.token)).toThrow('Cannot rotate invalid session');
+        it('fails rotation if the provided session token is already expired or invalid', async () => {
+            const expiredSession = await createSessionToken(mockUser, mockOrg, ROLES.ENGINEER, -1);
+            await expect(rotateSession(expiredSession.token)).rejects.toThrow('Cannot rotate invalid session');
         });
     });
 });

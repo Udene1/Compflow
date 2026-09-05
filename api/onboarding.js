@@ -3,6 +3,10 @@ import crypto from 'crypto';
 import pool from '../core/db.js';
 import { defaultSecretStore as SecretStore } from '../core/secret_store.js';
 import { recordAuditEvent } from '../core/audit_events.js';
+import { cloudVerifier } from '../core/cloud_verifier.js';
+import { enqueueJob } from '../core/queue.js';
+import { formatAssessmentSummary, getFrameworkDisplayName, getFrameworkTotalControls } from '../core/compliance_truth.js';
+import { ControlMatrix } from '../core/controls.js';
 import { log } from '../core/logger.js';
 
 const router = Router();
@@ -269,44 +273,58 @@ router.post('/cloud-connection/:id/verify', async (req, res) => {
 
         const conn = connRes.rows[0];
 
-        // Connection state transition: PENDING → VERIFYING (Amendment 10)
+        // Connection state transition: PENDING → VERIFYING (Amendment 5)
         await pool.query('UPDATE cloud_connections SET status = $1 WHERE id = $2;', ['VERIFYING', connId]);
 
-        // Attempt verification
-        // Retrieve secret via SecretStore to check validity
+        // Retrieve secret via SecretStore to perform real provider verification
         const secret = await SecretStore.getSecret(orgId, connId, 'connection_verification', req.user.userId, req);
-        
-        let verified = false;
-        let errorMessage = null;
 
-        if (secret) {
-            // Basic validation check based on provider
-            if (conn.provider === 'aws') {
-                verified = Boolean(secret.roleArn || (secret.accessKeyId && secret.secretAccessKey));
-                if (!verified) errorMessage = 'AWS credentials missing roleArn or accessKeyId/secretAccessKey.';
-            } else if (conn.provider === 'azure') {
-                verified = Boolean(secret.subscriptionId && secret.tenantId && secret.clientId);
-                if (!verified) errorMessage = 'Azure credentials missing subscriptionId, tenantId, or clientId.';
-            } else if (conn.provider === 'gcp') {
-                verified = Boolean(secret.projectId || secret.client_email);
-                if (!verified) errorMessage = 'GCP credentials missing projectId or client_email.';
-            } else {
-                verified = true;
-            }
-        } else {
-            // If mock verification in dev mode without secret, allow mock pass
-            if (process.env.NODE_ENV !== 'production') {
-                verified = true;
-            } else {
-                verified = false;
-                errorMessage = 'No stored credentials found for connection.';
-            }
+        if (!secret) {
+            await pool.query(
+                'UPDATE cloud_connections SET status = $1, error_code = $2, error_message = $3 WHERE id = $4;',
+                ['FAILED', 'CLOUD_AUTHENTICATION_FAILED', 'No stored credentials found for connection.', connId]
+            );
+
+            await recordAuditEvent(
+                orgId,
+                req.user.userId,
+                'cloud_connection_failed',
+                'cloud_connection',
+                connId,
+                { provider: conn.provider, result: 'failed', errorCode: 'CLOUD_AUTHENTICATION_FAILED' },
+                req
+            ).catch(() => {});
+
+            return res.status(400).json({
+                verified: false,
+                status: 'FAILED',
+                errorCode: 'CLOUD_AUTHENTICATION_FAILED',
+                message: 'No stored credentials found for connection. You can retry or update credentials.',
+                retryable: true
+            });
         }
 
-        if (verified) {
+        // Real Provider Verification with provenance capture (Amendment 2, 3, 4)
+        const verifyResult = await cloudVerifier.verify(conn.provider, secret);
+
+        if (verifyResult.verified) {
+            // Save provenance in connection record: principal, accountIdentifier, verificationMethod
             await pool.query(
-                'UPDATE cloud_connections SET status = $1, last_verified_at = CURRENT_TIMESTAMP, error_message = NULL WHERE id = $2;',
-                ['VERIFIED', connId]
+                `UPDATE cloud_connections 
+                 SET status = 'VERIFIED',
+                     account_identifier = $1,
+                     principal = $2,
+                     verification_method = $3,
+                     last_verified_at = CURRENT_TIMESTAMP,
+                     error_code = NULL,
+                     error_message = NULL 
+                 WHERE id = $4;`,
+                [
+                    verifyResult.accountIdentifier || null,
+                    verifyResult.principal || null,
+                    verifyResult.verificationMethod || `${conn.provider}:api_verification`,
+                    connId
+                ]
             );
 
             // Advance onboarding state to CLOUD_CONNECTED
@@ -326,15 +344,28 @@ router.post('/cloud-connection/:id/verify', async (req, res) => {
                 'cloud_connection_verified',
                 'cloud_connection',
                 connId,
-                { provider: conn.provider, result: 'success' },
+                {
+                    provider: conn.provider,
+                    accountIdentifier: verifyResult.accountIdentifier,
+                    principal: verifyResult.principal,
+                    verificationMethod: verifyResult.verificationMethod,
+                    result: 'success'
+                },
                 req
             ).catch(() => {});
 
-            // Auto-enqueue initial scan asynchronously with REFERENCES ONLY (Amendment 8 & 12)
+            // Create authoritative Scan Entity in `scans` table (Amendment 2)
             const scanId = 'scan_' + crypto.randomUUID().replace(/-/g, '').substring(0, 16);
-            
-            // Queue payload strictly contains references, never credentials
+
+            await pool.query(
+                `INSERT INTO scans (id, organization_id, connection_id, scan_type, status)
+                 VALUES ($1, $2, $3, 'initial_onboarding_scan', 'QUEUED');`,
+                [scanId, orgId, connId]
+            );
+
+            // Actually enqueue BullMQ job via enqueueJob() with references ONLY (Amendment 1)
             const scanJobPayload = {
+                jobId: scanId,
                 scanId,
                 organizationId: orgId,
                 connectionId: connId,
@@ -343,27 +374,31 @@ router.post('/cloud-connection/:id/verify', async (req, res) => {
                 enqueuedAt: new Date().toISOString()
             };
 
-            // Register initial scan job record in jobs table
-            await pool.query(
-                `INSERT INTO jobs (job_id, client_id, scan_type, status, progress, created_at)
-                 VALUES ($1, $2, 'initial_onboarding_scan', 'queued', 0, CURRENT_TIMESTAMP);`,
-                [scanId, connId]
-            ).catch(() => {});
+            await enqueueJob(scanJobPayload);
 
-            log.info(`[ONBOARDING] Initial scan job ${scanId} queued for org ${orgId}`);
+            log.info(`[ONBOARDING] Cloud verified. Scan ${scanId} queued for org ${orgId}`);
 
             return res.json({
                 verified: true,
                 status: 'VERIFIED',
                 scanId,
+                scanStatus: 'QUEUED',
                 onboardingStatus: next,
-                message: 'Your environment is connected. Compflow is assessing your infrastructure now. You can wait here or go to your dashboard.'
+                provenance: {
+                    accountIdentifier: verifyResult.accountIdentifier,
+                    principal: verifyResult.principal,
+                    verificationMethod: verifyResult.verificationMethod
+                },
+                message: 'Your environment is connected and verified. Compflow has queued your initial compliance scan.'
             });
         } else {
-            // Connection failed — allows retry, change credentials, or choose another provider (Amendment 10)
+            // Authentication failed — sanitized error code (Amendment 5)
+            const errorCode = verifyResult.errorCode || 'CLOUD_AUTHENTICATION_FAILED';
+            const errorMessage = verifyResult.errorMessage || 'Cloud connection verification failed.';
+
             await pool.query(
-                'UPDATE cloud_connections SET status = $1, error_message = $2 WHERE id = $3;',
-                ['FAILED', errorMessage || 'Verification failed', connId]
+                'UPDATE cloud_connections SET status = $1, error_code = $2, error_message = $3 WHERE id = $4;',
+                ['FAILED', errorCode, errorMessage, connId]
             );
 
             await recordAuditEvent(
@@ -372,15 +407,15 @@ router.post('/cloud-connection/:id/verify', async (req, res) => {
                 'cloud_connection_failed',
                 'cloud_connection',
                 connId,
-                { provider: conn.provider, result: 'failed', reason: errorMessage },
+                { provider: conn.provider, errorCode, result: 'failed' },
                 req
             ).catch(() => {});
 
             return res.status(400).json({
                 verified: false,
                 status: 'FAILED',
-                error: 'Connection Verification Failed',
-                message: errorMessage || 'Could not verify connection credentials. You can retry or update credentials.',
+                errorCode,
+                message: errorMessage,
                 retryable: true
             });
         }
@@ -397,6 +432,44 @@ router.post('/complete', async (req, res) => {
     const orgId = req.user.orgId;
 
     try {
+        // Prerequisite validation: Organization exists
+        const orgRes = await pool.query('SELECT id, name FROM organizations WHERE id = $1;', [orgId]);
+        if (!orgRes.rows || orgRes.rows.length === 0) {
+            return res.status(400).json({
+                error: 'Prerequisite Failed',
+                message: 'Organization profile must be set before completing onboarding.'
+            });
+        }
+
+        // Prerequisite validation: Objectives selected
+        const fwRes = await pool.query('SELECT framework_id FROM organization_frameworks WHERE org_id = $1;', [orgId]);
+        if (!fwRes.rows || fwRes.rows.length === 0) {
+            return res.status(400).json({
+                error: 'Prerequisite Failed',
+                message: 'At least one compliance framework objective must be selected before completing onboarding.'
+            });
+        }
+
+        // Prerequisite validation: Cloud Connection exists and is VERIFIED
+        const connRes = await pool.query('SELECT id, status FROM cloud_connections WHERE organization_id = $1;', [orgId]);
+        const verifiedConn = (connRes.rows || []).find(c => c.status === 'VERIFIED');
+        if (!verifiedConn) {
+            return res.status(400).json({
+                error: 'Prerequisite Failed',
+                message: 'At least one verified cloud connection is required before completing onboarding.'
+            });
+        }
+
+        // Prerequisite validation: Initial scan is QUEUED, RUNNING, or COMPLETED
+        const scanRes = await pool.query('SELECT id, status FROM scans WHERE organization_id = $1;', [orgId]);
+        const activeScan = (scanRes.rows || []).find(s => ['QUEUED', 'RUNNING', 'COMPLETED', 'PARTIAL'].includes(s.status));
+        if (!activeScan) {
+            return res.status(400).json({
+                error: 'Prerequisite Failed',
+                message: 'An initial compliance scan must be queued or completed before completing onboarding.'
+            });
+        }
+
         await pool.query(
             `INSERT INTO onboarding_state (org_id, status, completed_at, updated_at)
              VALUES ($1, 'ONBOARDING_COMPLETED', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
@@ -436,7 +509,7 @@ router.post('/complete', async (req, res) => {
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
-// 7. GET /api/onboarding/summary (Phase 9)
+// 7. GET /api/onboarding/summary
 // ─────────────────────────────────────────────────────────────────────────────
 router.get('/summary', async (req, res) => {
     const orgId = req.user.orgId;
@@ -454,46 +527,96 @@ router.get('/summary', async (req, res) => {
         );
         const selectedFws = (fwRes.rows || []).map(r => r.framework_id);
 
-        // Map framework control assessments (truthful wording per Amendment 14)
+        // Fetch latest authoritative scan for this organization
+        const scanRes = await pool.query(
+            'SELECT * FROM scans WHERE organization_id = $1 ORDER BY created_at DESC LIMIT 1;',
+            [orgId]
+        );
+        const latestScan = scanRes.rows?.[0] || null;
+
+        // Authoritative scan status: QUEUED, RUNNING, COMPLETED, PARTIAL, FAILED, or PENDING (Amendment 4 & 5)
+        const scanStatus = latestScan ? latestScan.status : 'PENDING';
+
+        // If scan is NOT completed, do not invent numbers! (Amendment 3)
+        if (!latestScan || scanStatus !== 'COMPLETED') {
+            const frameworkStats = selectedFws.map(fw => ({
+                id: fw.toLowerCase(),
+                name: getFrameworkDisplayName(fw),
+                controlsAssessed: 0,
+                controlsPassing: 0,
+                controlsNeedingAttention: 0,
+                assessmentLabel: formatAssessmentSummary({ assessed: 0, framework: fw })
+            }));
+
+            return res.json({
+                cloud: {
+                    provider: activeConn.provider.toUpperCase(),
+                    status: activeConn.status
+                },
+                scan: {
+                    status: scanStatus,
+                    resourcesDiscovered: 0
+                },
+                compliance: {
+                    frameworks: frameworkStats,
+                    findings: {
+                        critical: 0,
+                        high: 0,
+                        medium: 0,
+                        low: 0
+                    },
+                    evidenceCollected: 0,
+                    disclaimer: 'Compflow uses these objective assessments to prioritize relevant controls and evidence. Technical checks currently reflect evaluated cloud configurations.'
+                }
+            });
+        }
+
+        // If scan IS completed, derive strictly from persisted findings (Amendment 6)
+        const findingsRes = await pool.query(
+            'SELECT severity, COUNT(*) FROM findings WHERE scan_id = $1 GROUP BY severity;',
+            [latestScan.id]
+        );
+
+        const findingsCount = { critical: 0, high: 0, medium: 0, low: 0 };
+        for (const row of findingsRes.rows || []) {
+            const sev = (row.severity || '').toLowerCase();
+            const count = parseInt(row.count, 10) || 0;
+            if (findingsCount[sev] !== undefined) {
+                findingsCount[sev] = count;
+            }
+        }
+
+        // Framework stats derived from persisted findings and control matrix
+        const allFindingsRes = await pool.query(
+            'SELECT control_id, status FROM findings WHERE scan_id = $1;',
+            [latestScan.id]
+        );
+        const scanFindings = allFindingsRes.rows || [];
+
         const frameworkStats = selectedFws.map(fw => {
-            const id = fw.toLowerCase();
-            if (id.includes('soc2')) {
-                return {
-                    id: 'soc2',
-                    name: 'SOC 2 Type II',
-                    controlsAssessed: 87,
-                    controlsPassing: 68,
-                    controlsNeedingAttention: 19,
-                    assessmentLabel: '87 of 106 selected SOC 2 controls assessed'
-                };
-            }
-            if (id.includes('iso')) {
-                return {
-                    id: 'iso27001',
-                    name: 'ISO/IEC 27001:2022',
-                    controlsAssessed: 72,
-                    controlsPassing: 54,
-                    controlsNeedingAttention: 18,
-                    assessmentLabel: '72 of 93 selected ISO 27001 controls assessed'
-                };
-            }
-            if (id.includes('hipaa')) {
-                return {
-                    id: 'hipaa',
-                    name: 'HIPAA Security Rule',
-                    controlsAssessed: 45,
-                    controlsPassing: 38,
-                    controlsNeedingAttention: 7,
-                    assessmentLabel: '45 of 54 selected HIPAA controls assessed'
-                };
-            }
+            const fwKey = fw.toLowerCase();
+            const name = getFrameworkDisplayName(fw);
+            const total = getFrameworkTotalControls(fw);
+
+            // Filter findings that map to this framework
+            const matchingFindings = scanFindings.filter(f => {
+                if (!f.control_id) return false;
+                const matrixEntry = ControlMatrix[f.control_id];
+                if (!matrixEntry) return true;
+                return Boolean(matrixEntry[fwKey]);
+            });
+
+            const controlsNeedingAttention = matchingFindings.filter(f => f.status === 'FAIL').length;
+            const controlsPassing = matchingFindings.filter(f => f.status === 'PASS').length;
+            const controlsAssessed = controlsPassing + controlsNeedingAttention;
+
             return {
-                id,
-                name: fw.toUpperCase(),
-                controlsAssessed: 30,
-                controlsPassing: 25,
-                controlsNeedingAttention: 5,
-                assessmentLabel: `30 selected ${fw.toUpperCase()} controls assessed`
+                id: fwKey,
+                name,
+                controlsAssessed,
+                controlsPassing,
+                controlsNeedingAttention,
+                assessmentLabel: formatAssessmentSummary({ assessed: controlsAssessed, total, framework: fw })
             };
         });
 
@@ -503,18 +626,13 @@ router.get('/summary', async (req, res) => {
                 status: activeConn.status
             },
             scan: {
-                status: activeConn.status === 'VERIFIED' ? 'COMPLETED' : 'PENDING',
-                resourcesDiscovered: activeConn.status === 'VERIFIED' ? 142 : 0
+                status: 'COMPLETED',
+                resourcesDiscovered: latestScan.resources_discovered || 0
             },
             compliance: {
                 frameworks: frameworkStats,
-                findings: {
-                    critical: 3,
-                    high: 12,
-                    medium: 21,
-                    low: 8
-                },
-                evidenceCollected: activeConn.status === 'VERIFIED' ? 184 : 0,
+                findings: findingsCount,
+                evidenceCollected: latestScan.evidence_count || 0,
                 disclaimer: 'Compflow uses these objective assessments to prioritize relevant controls and evidence. Technical checks currently reflect evaluated cloud configurations.'
             }
         });

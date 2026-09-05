@@ -234,7 +234,7 @@ router.get('/google/callback', async (req, res) => {
         }
 
         const { user, org, role } = await upsertUserFromOAuth(profile, 'google', profile.id);
-        const session = createSessionToken(user, org, role, 1);
+        const session = await createSessionToken(user, org, role, 1);
 
         res.setHeader('Set-Cookie', buildSessionCookies(session.token));
         await recordAuditEvent(org.id, user.id, 'user_authenticated', 'session', session.payload.sessionId, { provider: 'google', result: 'success' }, req).catch(() => {});
@@ -367,7 +367,7 @@ router.get('/github/callback', async (req, res) => {
         }
 
         const { user, org, role } = await upsertUserFromOAuth(profile, 'github', profile.id);
-        const session = createSessionToken(user, org, role, 1);
+        const session = await createSessionToken(user, org, role, 1);
 
         res.setHeader('Set-Cookie', buildSessionCookies(session.token));
         await recordAuditEvent(org.id, user.id, 'user_authenticated', 'session', session.payload.sessionId, { provider: 'github', result: 'success' }, req).catch(() => {});
@@ -426,7 +426,7 @@ router.post('/pilot-login', async (req, res) => {
 
     try {
         const { user, org } = await upsertUserFromOAuth({ email, name: name || email.split('@')[0] }, 'pilot_code');
-        const session = createSessionToken(user, org, ROLES.ADMIN, 1);
+        const session = await createSessionToken(user, org, ROLES.ADMIN, 1);
 
         // Sole browser session mechanism: HttpOnly cookie. No token in JSON response!
         res.setHeader('Set-Cookie', buildSessionCookies(session.token));
@@ -472,7 +472,7 @@ router.post('/dev-login', async (req, res) => {
 
     try {
         const { user, org } = await upsertUserFromOAuth({ email, name }, 'dev_portal');
-        const session = createSessionToken(user, org, role, 1);
+        const session = await createSessionToken(user, org, role, 1);
 
         // Sole browser session mechanism: HttpOnly cookie. No token in JSON response!
         res.setHeader('Set-Cookie', buildSessionCookies(session.token));
@@ -504,7 +504,7 @@ router.post('/rotate', requireAuth(), async (req, res) => {
     }
 
     try {
-        const newSession = rotateSession(token);
+        const newSession = await rotateSession(token);
         res.setHeader('Set-Cookie', buildSessionCookies(newSession.token));
         await recordAuditEvent(newSession.payload.orgId, newSession.payload.userId, 'session_rotated', 'session', newSession.payload.sessionId, { result: 'success' }, req).catch(() => {});
 
@@ -525,11 +525,11 @@ router.post('/logout', async (req, res) => {
     const token = getCookie(req, 'cf_session');
 
     if (token) {
-        const check = validateSessionToken(token);
+        const check = await validateSessionToken(token);
         if (check.valid && check.user) {
             await recordAuditEvent(check.user.orgId, check.user.userId, 'session_revoked', 'session', check.user.sessionId, { result: 'success' }, req).catch(() => {});
         }
-        revokeSession(token);
+        await revokeSession(token);
     }
 
     res.setHeader('Set-Cookie', buildClearCookies());

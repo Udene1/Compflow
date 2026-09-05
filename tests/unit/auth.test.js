@@ -23,8 +23,8 @@ describe('Auth Engine — Session & Token Management', () => {
         domain: 'acme-corp.com'
     };
 
-    it('generates a valid, cryptographically signed session token', () => {
-        const session = createSessionToken(mockUser, mockOrg, ROLES.ADMIN, 7);
+    it('generates a valid, cryptographically signed session token', async () => {
+        const session = await createSessionToken(mockUser, mockOrg, ROLES.ADMIN, 7);
 
         expect(session).toBeDefined();
         expect(typeof session.token).toBe('string');
@@ -33,29 +33,29 @@ describe('Auth Engine — Session & Token Management', () => {
         expect(session.payload.orgId).toBe('org_acme');
 
         // Validation test
-        const result = validateSessionToken(session.token);
+        const result = await validateSessionToken(session.token);
         expect(result.valid).toBe(true);
         expect(result.user.email).toBe('alice@acme-corp.com');
         expect(result.user.role).toBe(ROLES.ADMIN);
     });
 
-    it('rejects tampered or forged session tokens', () => {
-        const session = createSessionToken(mockUser, mockOrg, ROLES.ENGINEER, 7);
+    it('rejects tampered or forged session tokens', async () => {
+        const session = await createSessionToken(mockUser, mockOrg, ROLES.ENGINEER, 7);
         
         // Tamper with payload by changing role to OWNER without updating signature
         const decoded = JSON.parse(Buffer.from(session.token, 'base64url').toString('utf8'));
         decoded.payload.role = ROLES.OWNER;
         const tamperedToken = Buffer.from(JSON.stringify(decoded)).toString('base64url');
 
-        const result = validateSessionToken(tamperedToken);
+        const result = await validateSessionToken(tamperedToken);
         expect(result.valid).toBe(false);
         expect(result.error).toContain('Invalid or forged session token signature');
     });
 
-    it('rejects expired session tokens', () => {
+    it('rejects expired session tokens', async () => {
         // Create an expired session (0 days)
-        const session = createSessionToken(mockUser, mockOrg, ROLES.ENGINEER, -1);
-        const result = validateSessionToken(session.token);
+        const session = await createSessionToken(mockUser, mockOrg, ROLES.ENGINEER, -1);
+        const result = await validateSessionToken(session.token);
 
         expect(result.valid).toBe(false);
         expect(result.error).toContain('expired');
@@ -139,8 +139,8 @@ describe('Auth Guard Middleware', () => {
     const mockUser = { id: 'usr_1', email: 'secops@org.com', name: 'SecOps' };
     const mockOrg = { id: 'org_1', name: 'Org 1' };
 
-    it('allows requests with valid session cookie and sufficient role', () => {
-        const session = createSessionToken(mockUser, mockOrg, ROLES.ADMIN, 7);
+    it('allows requests with valid session cookie and sufficient role', async () => {
+        const session = await createSessionToken(mockUser, mockOrg, ROLES.ADMIN, 7);
         const middleware = requireAuth([ROLES.ENGINEER]); // ADMIN >= ENGINEER
 
         const req = {
@@ -152,13 +152,13 @@ describe('Auth Guard Middleware', () => {
         };
         const next = () => { nextCalled = true; };
 
-        middleware(req, res, next);
+        await middleware(req, res, next);
         expect(nextCalled).toBe(true);
         expect(req.user).toBeDefined();
         expect(req.user.email).toBe('secops@org.com');
     });
 
-    it('blocks unauthenticated requests with 401', () => {
+    it('blocks unauthenticated requests with 401', async () => {
         const middleware = requireAuth([ROLES.ENGINEER]);
         const req = { headers: {} };
         let statusCode = 0;
@@ -171,13 +171,13 @@ describe('Auth Guard Middleware', () => {
             }
         };
 
-        middleware(req, res, () => {});
+        await middleware(req, res, () => {});
         expect(statusCode).toBe(401);
         expect(responseJson.error).toBe('Unauthorized');
     });
 
-    it('blocks insufficient roles with 403 Forbidden', () => {
-        const session = createSessionToken(mockUser, mockOrg, ROLES.VIEWER, 7);
+    it('blocks insufficient roles with 403 Forbidden', async () => {
+        const session = await createSessionToken(mockUser, mockOrg, ROLES.VIEWER, 7);
         const middleware = requireAuth([ROLES.ADMIN]); // VIEWER < ADMIN
 
         const req = {
@@ -193,7 +193,7 @@ describe('Auth Guard Middleware', () => {
             }
         };
 
-        middleware(req, res, () => {});
+        await middleware(req, res, () => {});
         expect(statusCode).toBe(403);
         expect(responseJson.error).toBe('Forbidden');
     });
