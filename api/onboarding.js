@@ -72,7 +72,7 @@ router.get('/status', async (req, res) => {
         });
     } catch (err) {
         log.error(`[ONBOARDING] Error fetching status for org ${orgId}:`, err.message);
-        res.status(500).json({ error: 'Failed to retrieve onboarding status', message: err.message });
+        res.status(500).json({ error: 'Failed to retrieve onboarding status' });
     }
 });
 
@@ -123,7 +123,7 @@ router.post('/organization', async (req, res) => {
         });
     } catch (err) {
         log.error(`[ONBOARDING] Failed to update organization:`, err.message);
-        res.status(500).json({ error: 'Failed to update organization', message: err.message });
+        res.status(500).json({ error: 'Failed to update organization' });
     }
 });
 
@@ -180,7 +180,7 @@ router.post('/objectives', async (req, res) => {
         });
     } catch (err) {
         log.error(`[ONBOARDING] Failed to save frameworks:`, err.message);
-        res.status(500).json({ error: 'Failed to record objectives', message: err.message });
+        res.status(500).json({ error: 'Failed to record objectives' });
     }
 });
 
@@ -250,7 +250,7 @@ router.post('/cloud-connection', async (req, res) => {
         });
     } catch (err) {
         log.error(`[ONBOARDING] Cloud connection creation failed:`, err.message);
-        res.status(500).json({ error: 'Failed to create cloud connection', message: err.message });
+        res.status(500).json({ error: 'Failed to create cloud connection' });
     }
 });
 
@@ -374,22 +374,31 @@ router.post('/cloud-connection/:id/verify', async (req, res) => {
                 enqueuedAt: new Date().toISOString()
             };
 
-            await enqueueJob(scanJobPayload);
-
-            log.info(`[ONBOARDING] Cloud verified. Scan ${scanId} queued for org ${orgId}`);
+            let finalScanStatus = 'QUEUED';
+            try {
+                await enqueueJob(scanJobPayload);
+                log.info(`[ONBOARDING] Cloud verified. Scan ${scanId} queued for org ${orgId}`);
+            } catch (queueErr) {
+                // Queue failure: scan stays in DB but is marked FAILED (fail-closed)
+                finalScanStatus = 'FAILED';
+                await pool.query('UPDATE scans SET status = $1 WHERE id = $2;', ['FAILED', scanId]);
+                log.error(`[ONBOARDING] Scan ${scanId} enqueue failed: ${queueErr.message}`);
+            }
 
             return res.json({
                 verified: true,
                 status: 'VERIFIED',
                 scanId,
-                scanStatus: 'QUEUED',
+                scanStatus: finalScanStatus,
                 onboardingStatus: next,
                 provenance: {
                     accountIdentifier: verifyResult.accountIdentifier,
                     principal: verifyResult.principal,
                     verificationMethod: verifyResult.verificationMethod
                 },
-                message: 'Your environment is connected and verified. Compflow has queued your initial compliance scan.'
+                message: finalScanStatus === 'QUEUED'
+                    ? 'Your environment is connected and verified. Compflow has queued your initial compliance scan.'
+                    : 'Your environment is connected and verified, but the initial scan could not be queued. Please retry or contact support.'
             });
         } else {
             // Authentication failed — sanitized error code (Amendment 5)
@@ -421,7 +430,7 @@ router.post('/cloud-connection/:id/verify', async (req, res) => {
         }
     } catch (err) {
         log.error(`[ONBOARDING] Connection verification error:`, err.message);
-        res.status(500).json({ error: 'Verification failed', message: err.message });
+        res.status(500).json({ error: 'Verification failed' });
     }
 });
 
@@ -504,7 +513,7 @@ router.post('/complete', async (req, res) => {
         });
     } catch (err) {
         log.error(`[ONBOARDING] Failed to complete onboarding:`, err.message);
-        res.status(500).json({ error: 'Failed to complete onboarding', message: err.message });
+        res.status(500).json({ error: 'Failed to complete onboarding' });
     }
 });
 
@@ -638,7 +647,7 @@ router.get('/summary', async (req, res) => {
         });
     } catch (err) {
         log.error(`[ONBOARDING] Summary retrieval error:`, err.message);
-        res.status(500).json({ error: 'Failed to retrieve compliance summary', message: err.message });
+        res.status(500).json({ error: 'Failed to retrieve compliance summary' });
     }
 });
 

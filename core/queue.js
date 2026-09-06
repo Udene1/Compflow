@@ -46,35 +46,24 @@ export function sanitizeJobPayload(jobData) {
  */
 export async function enqueueJob(jobData) {
     const cleanPayload = sanitizeJobPayload(jobData);
-    try {
-        const queue = await getQueue();
-        if (!queue) {
-            console.log(`[QUEUE-FALLBACK] BullMQ queue unavailable. Processing in direct mode for job: ${cleanPayload.jobId}`);
-            return { id: cleanPayload.jobId || 'fallback-id', data: cleanPayload };
-        }
 
-        const addPromise = queue.add('scan', cleanPayload, {
-            attempts: 3,
-            backoff: {
-                type: 'exponential',
-                delay: 1000
-            },
-            removeOnComplete: true,
-            removeOnFail: false
-        });
-
-        // Timeout race so execution never hangs if Redis daemon is unreachable
-        const timeoutPromise = new Promise((_, reject) =>
-            setTimeout(() => reject(new Error('Redis connection timeout')), 500)
-        );
-
-        const job = await Promise.race([addPromise, timeoutPromise]);
-        console.log(`[BULLMQ] Enqueued job ${job.id} (jobId: ${cleanPayload.jobId}) without credentials`);
-        return job;
-    } catch (err) {
-        console.log(`[QUEUE-FALLBACK] BullMQ direct fallback (${err.message}) for job: ${cleanPayload.jobId}`);
-        return { id: cleanPayload.jobId || 'fallback-id', data: cleanPayload };
+    const queue = await getQueue();
+    if (!queue) {
+        throw new Error('QUEUE_UNAVAILABLE: BullMQ queue could not be initialized');
     }
+
+    const job = await queue.add('scan', cleanPayload, {
+        attempts: 3,
+        backoff: {
+            type: 'exponential',
+            delay: 1000
+        },
+        removeOnComplete: true,
+        removeOnFail: false
+    });
+
+    console.log(`[BULLMQ] Enqueued job ${job.id} (jobId: ${cleanPayload.jobId}) without credentials`);
+    return job;
 }
 
 /**

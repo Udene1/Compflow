@@ -50,16 +50,18 @@ export async function revokeSession(tokenString) {
     if (!tokenString) return;
     const hash = crypto.createHash('sha256').update(tokenString).digest('hex');
     const expiry = Date.now() + (7 * 24 * 60 * 60 * 1000);
-    _revokedSessions.set(hash, expiry);
-    log.info(`[AUTH] Session revoked in cache (hash: ${hash.substring(0, 12)}...)`);
 
-    // Authoritative DB update for multi-instance persistence
+    // Authoritative DB update for multi-instance persistence — BEFORE cache
     try {
         await pool.query('UPDATE sessions SET is_revoked = true WHERE token_hash = $1;', [hash]);
     } catch (err) {
         log.warn(`[AUTH] Failed to mark session revoked in DB: ${err.message}`);
         if (process.env.NODE_ENV === 'production') throw err;
     }
+
+    // Only populate cache after successful DB persistence
+    _revokedSessions.set(hash, expiry);
+    log.info(`[AUTH] Session revoked (hash: ${hash.substring(0, 12)}...)`);
 }
 
 /**

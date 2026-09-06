@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach } from 'vitest';
+import { describe, it, expect, beforeEach, vi } from 'vitest';
 import onboardingRouter from '../../api/onboarding.js';
 import { requireAuth } from '../../core/auth_guard.js';
 import { createSessionToken, ROLES } from '../../core/auth.js';
@@ -60,6 +60,7 @@ function invokeOnboarding({ method = 'GET', url = '/', body = {}, sessionToken =
 }
 
 describe('Authoritative Onboarding State Engine', () => {
+    vi.setConfig({ testTimeout: 30000 });
     let session;
     const testOrgId = 'org_onboarding_test_99';
     const testUserId = 'usr_onboarding_test_99';
