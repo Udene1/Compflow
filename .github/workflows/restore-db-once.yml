@@ -17,11 +17,9 @@ jobs:
           fetch-depth: 0
 
       - name: Restore core/db.js from known-good commit and add transactional access
-        env:
-          GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
-          git checkout c70569dacdc4a308c83dc34296446f8a8b9ff48e -- core/db.js
+          git checkout c3bb9e21fd3336cef7d7fa2363957308855dfc87 -- core/db.js
           python3 - <<'PY'
           from pathlib import Path
           p = Path('core/db.js')
