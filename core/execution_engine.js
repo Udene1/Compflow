@@ -117,23 +117,37 @@ export async function addDependencyEdge({ organizationId, executionId, fromNodeI
 
 export async function startNodeAttempt({ organizationId, executionId, nodeId, metadata = {} }) {
   await ensureSchema();
-  const latest = await pool.query(
-    'SELECT COALESCE(MAX(attempt_number), 0) AS attempt_number FROM execution_attempts WHERE node_id = $1',
-    [nodeId]
-  );
-  const attemptNumber = Number(latest.rows[0].attempt_number) + 1;
-  const id = `attempt_${crypto.randomUUID()}`;
-  const result = await pool.query(`
-    INSERT INTO execution_attempts
-      (id, organization_id, execution_id, node_id, attempt_number, status, metadata)
-    VALUES ($1,$2,$3,$4,$5,'RUNNING',$6::jsonb)
-    RETURNING *
-  `, [id, organizationId, executionId, nodeId, attemptNumber, JSON.stringify(metadata)]);
-  await pool.query(
-    `UPDATE execution_graph_nodes SET status='RUNNING', updated_at=NOW() WHERE id=$1 AND organization_id=$2 AND execution_id=$3`,
-    [nodeId, organizationId, executionId]
-  );
-  return result.rows[0];
+  if (!organizationId || !executionId || !nodeId) throw new Error('ATTEMPT_INPUT_INVALID');
+
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    // Serialize attempt-number allocation per node. A plain MAX()+1 races under concurrent workers.
+    await client.query('SELECT pg_advisory_xact_lock(hashtext($1))', [nodeId]);
+    const latest = await client.query(
+      'SELECT COALESCE(MAX(attempt_number), 0) AS attempt_number FROM execution_attempts WHERE node_id = $1',
+      [nodeId]
+    );
+    const attemptNumber = Number(latest.rows[0].attempt_number) + 1;
+    const id = `attempt_${crypto.randomUUID()}`;
+    const result = await client.query(`
+      INSERT INTO execution_attempts
+        (id, organization_id, execution_id, node_id, attempt_number, status, metadata)
+      VALUES ($1,$2,$3,$4,$5,'RUNNING',$6::jsonb)
+      RETURNING *
+    `, [id, organizationId, executionId, nodeId, attemptNumber, JSON.stringify(metadata)]);
+    await client.query(
+      `UPDATE execution_graph_nodes SET status='RUNNING', updated_at=NOW() WHERE id=$1 AND organization_id=$2 AND execution_id=$3`,
+      [nodeId, organizationId, executionId]
+    );
+    await client.query('COMMIT');
+    return result.rows[0];
+  } catch (error) {
+    await client.query('ROLLBACK').catch(() => {});
+    throw error;
+  } finally {
+    client.release();
+  }
 }
 
 export async function finishNodeAttempt({ attemptId, status, errorCode = null, errorMessage = null, metadata = {} }) {
@@ -183,7 +197,9 @@ export async function getExecutionGraph(organizationId, executionId) {
 export async function getResumableNodes(organizationId, executionId) {
   const graph = await getExecutionGraph(organizationId, executionId);
   const terminal = new Set(['SUCCEEDED', 'SKIPPED']);
-  const unfinished = graph.nodes.filter(node => !terminal.has(node.status));
+  // Only retryable work is resumable. RUNNING nodes are owned by an active attempt.
+  const retryable = new Set(['PENDING', 'FAILED', 'CANCELLED']);
+  const unfinished = graph.nodes.filter(node => retryable.has(node.status));
   return unfinished.filter(node => {
     const dependencies = graph.edges.filter(edge => edge.to_node_id === node.id && edge.edge_type === 'DEPENDS_ON');
     return dependencies.every(edge => {
