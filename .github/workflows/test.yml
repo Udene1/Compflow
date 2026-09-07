@@ -89,7 +89,11 @@ jobs:
             ['usr_sec_1','sec1@example.test'],
             ['usr_test_123','test123b@example.test'],
             ['usr_1','user1@example.test'],
-            ['usr_csrf_test','csrf@example.test']
+            ['usr_csrf_test','csrf@example.test'],
+            ['usr_empty','empty@example.test'],
+            ['usr_summary_lead','summarylead@example.test'],
+            ['usr_cross_instance','crossinstance@example.test'],
+            ['usr_rotate','rotate@example.test']
           ];
           const orgs = [
             ['org_acme','Acme Security'],
