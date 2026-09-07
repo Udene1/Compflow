@@ -78,5 +78,5 @@ jobs:
         run: |
           set -euo pipefail
           ssh "$AZURE_VM_USER@$AZURE_VM_HOST" "set -euo pipefail
-            curl --fail --silent --show-error --max-time 15 http://127.0.0.1:3000/ >/dev/null
+            curl --fail --silent --show-error --max-time 15 http://127.0.0.1:3000/health >/dev/null
           "
