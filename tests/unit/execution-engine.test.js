@@ -6,6 +6,7 @@ import {
   upsertGraphNode,
   addDependencyEdge,
   startNodeAttempt,
+  heartbeatNodeAttempt,
   finishNodeAttempt,
   getExecutionGraph,
   getResumableNodes,
@@ -96,6 +97,20 @@ describe('Durable execution graph engine', () => {
     await startNodeAttempt({ organizationId, executionId: runningExecution, nodeId: node.id });
 
     expect((await getResumableNodes(organizationId, runningExecution)).map(n => n.id)).not.toContain(node.id);
+  });
+
+  it('refreshes a running attempt heartbeat and rejects terminal regressions', async () => {
+    const heartbeatExecution = 'exec_engine_heartbeat_test';
+    const node = await upsertGraphNode({ ...nodeArgs('CONTROL', 'soc2:HEARTBEAT'), executionId: heartbeatExecution });
+    const attempt = await startNodeAttempt({ organizationId, executionId: heartbeatExecution, nodeId: node.id });
+    const heartbeat = await heartbeatNodeAttempt({ attemptId: attempt.id });
+    expect(heartbeat.id).toBe(attempt.id);
+    expect(heartbeat.heartbeat_at).toBeTruthy();
+
+    await finishNodeAttempt({ attemptId: attempt.id, status: 'SUCCEEDED' });
+    const terminal = await upsertGraphNode({ ...nodeArgs('CONTROL', 'soc2:HEARTBEAT', 'FAILED'), executionId: heartbeatExecution });
+    expect(terminal.status).toBe('SUCCEEDED');
+    await expect(heartbeatNodeAttempt({ attemptId: attempt.id })).rejects.toThrow('ATTEMPT_NOT_RUNNING');
   });
 
   it('models failed controls as risk with approval-gated remediation', async () => {
