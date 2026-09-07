@@ -1,9 +1,9 @@
 import { getJob } from '../core/jobs.js';
-import { getExecutionGraph, getResumableNodes } from '../core/execution_engine.js';
 
 /**
- * Job Status API — polling endpoint with durable execution state.
+ * Job Status API — Lightweight polling endpoint
  * GET /api/job-status?jobId=xxx
+ * Returns current job state for frontend terminal streaming.
  */
 export default async function handler(req, res) {
     if (req.method === 'OPTIONS') return res.status(200).end();
@@ -16,19 +16,6 @@ export default async function handler(req, res) {
         const job = await getJob(jobId);
         if (!job) return res.status(404).json({ error: 'Job not found' });
 
-        let execution = null;
-        try {
-            const graph = await getExecutionGraph(job.clientId || 'org_default', jobId);
-            const resumable = await getResumableNodes(job.clientId || 'org_default', jobId);
-            execution = {
-                ...graph,
-                resumableNodeIds: resumable.map(node => node.id)
-            };
-        } catch (graphError) {
-            // Older jobs may predate the execution graph. Do not make status unavailable.
-            console.warn('[JOB-STATUS] Execution graph unavailable:', graphError.message);
-        }
-
         return res.status(200).json({
             jobId: job.jobId,
             status: job.status,
@@ -38,8 +25,7 @@ export default async function handler(req, res) {
             errorMessage: job.errorMessage || null,
             createdAt: job.createdAt,
             updatedAt: job.updatedAt,
-            completedAt: job.completedAt || null,
-            execution
+            completedAt: job.completedAt || null
         });
     } catch (e) {
         console.error('[JOB-STATUS] Error:', e.message);
