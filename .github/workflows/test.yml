@@ -106,7 +106,6 @@ jobs:
             ['org_sec','Security Test Organization'],
             ['org_csrf','CSRF Test Organization'],
             ['org_empty_prereq_99','Empty Prerequisite Test Organization'],
-            ['org_summary_test_exclusive','Summary Exclusive Test Organization'],
             ['org_cross','Cross Instance Test Organization'],
             ['org_rotate','Rotate Test Organization']
           ];
