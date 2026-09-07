@@ -62,7 +62,19 @@ describe('Durable execution graph engine', () => {
     expect(graph.timeline.some(item => item.errorCode === 'CONTROL_TIMEOUT')).toBe(true);
   });
 
-  it('returns only dependency-ready unfinished nodes for resume', async () => {
+  it('allocates unique attempt numbers when two workers start the same node concurrently', async () => {
+    const concurrentExecution = 'exec_engine_concurrency_test';
+    const node = await upsertGraphNode({ ...nodeArgs('CONTROL', 'soc2:CONCURRENT'), executionId: concurrentExecution });
+    const attempts = await Promise.all([
+      startNodeAttempt({ organizationId, executionId: concurrentExecution, nodeId: node.id, metadata: { worker: 'a' } }),
+      startNodeAttempt({ organizationId, executionId: concurrentExecution, nodeId: node.id, metadata: { worker: 'b' } })
+    ]);
+
+    expect(attempts.map(a => a.attempt_number).sort((a, b) => a - b)).toEqual([1, 2]);
+    await Promise.all(attempts.map(attempt => finishNodeAttempt({ attemptId: attempt.id, status: 'SUCCEEDED' })));
+  });
+
+  it('returns only dependency-ready retryable nodes for resume', async () => {
     const graph = await getExecutionGraph(organizationId, executionId);
     const resumable = await getResumableNodes(organizationId, executionId);
 
@@ -76,6 +88,14 @@ describe('Durable execution graph engine', () => {
 
     const resumed = await resumeExecution(organizationId, executionId);
     expect(resumed.resumableNodeIds).toContain(evidence.id);
+  });
+
+  it('does not expose a RUNNING node as resumable', async () => {
+    const runningExecution = 'exec_engine_running_test';
+    const node = await upsertGraphNode({ ...nodeArgs('CONTROL', 'soc2:RUNNING'), executionId: runningExecution });
+    await startNodeAttempt({ organizationId, executionId: runningExecution, nodeId: node.id });
+
+    expect((await getResumableNodes(organizationId, runningExecution)).map(n => n.id)).not.toContain(node.id);
   });
 
   it('models failed controls as risk with approval-gated remediation', async () => {
