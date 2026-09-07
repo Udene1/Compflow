@@ -1,5 +1,6 @@
 import {
   ensureExecutionGraph,
+  stableUsageId,
   upsertGraphNode,
   addDependencyEdge,
   startNodeAttempt,
@@ -42,6 +43,8 @@ export async function beginExecution({ organizationId, executionId, provider, cl
 }
 
 export async function persistScanGraph({ organizationId, executionId, provider, resources = [] }) {
+  const executionNodeId = stableUsageId(organizationId, executionId, 'EXECUTION', executionId);
+
   for (const resource of resources) {
     const severity = safeSeverity(resource);
     const observationFailed = severity === 'error' || severity === 'failed';
@@ -57,7 +60,7 @@ export async function persistScanGraph({ organizationId, executionId, provider, 
         issue: resource.issue || null
       }
     });
-    await addDependencyEdge({ organizationId, executionId, fromNodeId: executionIdNodeId(organizationId, executionId), toNodeId: observation.id, edgeType: 'DEPENDS_ON' });
+    await addDependencyEdge({ organizationId, executionId, fromNodeId: executionNodeId, toNodeId: observation.id, edgeType: 'DEPENDS_ON' });
     await recordAttempt({
       organizationId,
       executionId,
@@ -111,15 +114,6 @@ export async function persistScanGraph({ organizationId, executionId, provider, 
       }
     }
   }
-}
-
-function executionIdNodeId(organizationId, executionId) {
-  return `node_${cryptoHash([organizationId, executionId, 'EXECUTION', executionId])}`;
-}
-
-function cryptoHash(parts) {
-  // Must match execution_engine.stableUsageId without importing crypto-only internals.
-  return globalThis.__compflowStableNodeHash?.(parts) || '';
 }
 
 export async function finishExecution(attemptId, status, errorCode = null, errorMessage = null) {
