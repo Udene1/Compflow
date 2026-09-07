@@ -1,0 +1,58 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>ComplianceFlow AI | Execution Graph</title>
+  <link rel="stylesheet" href="dashboard.css">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;600;800&family=JetBrains+Mono:wght@300;500&display=swap" rel="stylesheet">
+</head>
+<body>
+  <div class="cyber-mesh"></div>
+  <main class="main-content" style="margin-left:0; min-height:100vh;">
+    <div class="topbar">
+      <div class="header-main">
+        <h2>Execution Graph</h2>
+        <div id="execution-state" class="fw-status-badge">Loading</div>
+      </div>
+      <div class="topbar-actions">
+        <label class="btn btn-secondary btn-sm" style="display:flex;align-items:center;gap:.5rem;">
+          Execution <input id="execution-id" placeholder="execution ID" style="background:transparent;border:0;color:inherit;outline:none;width:240px;">
+        </label>
+        <button class="btn btn-secondary btn-sm" id="refresh-graph">↻ Refresh</button>
+        <button class="btn btn-primary btn-sm" id="resume-execution">▶ Resume</button>
+        <a href="app.html" class="btn btn-secondary btn-sm">← Dashboard</a>
+      </div>
+    </div>
+
+    <div class="page-content">
+      <div id="graph-message" class="card" style="display:none;margin-bottom:1rem;padding:1rem;"></div>
+      <section class="card" style="padding:1rem;margin-bottom:1rem;overflow:auto;">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:1rem;gap:1rem;flex-wrap:wrap;">
+          <div>
+            <h3 style="margin:0;">Dependency Graph</h3>
+            <small id="graph-meta" style="color:var(--text-muted);">No execution loaded</small>
+          </div>
+          <div style="display:flex;gap:.75rem;flex-wrap:wrap;font-size:.75rem;color:var(--text-muted);">
+            <span>● RUNNING</span><span>● SUCCEEDED</span><span>● FAILED</span><span>● PENDING</span>
+          </div>
+        </div>
+        <div id="graph-canvas" style="min-width:900px;min-height:430px;position:relative;"></div>
+      </section>
+
+      <section class="card" style="padding:1rem;">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:1rem;">
+          <h3 style="margin:0;">Execution Timeline</h3>
+          <span id="live-indicator" style="font-size:.75rem;color:var(--text-muted);">Live refresh off</span>
+        </div>
+        <div id="timeline" style="display:grid;gap:.6rem;"></div>
+      </section>
+    </div>
+  </main>
+  <script>window.COMPLIANCE_API_URL="https://api.compflow.icu";</script>
+  <script src="auth-ui.js"></script>
+  <script src="execution-graph-ui.js"></script>
+</body>
+</html>
