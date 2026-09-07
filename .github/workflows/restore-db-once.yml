@@ -1,0 +1,40 @@
+name: Restore DB module once
+
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: write
+
+jobs:
+  restore:
+    if: github.actor == 'Udene1'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Restore core/db.js from known-good commit and add transactional access
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          git checkout c70569dacdc4a308c83dc34296446f8a8b9ff48e -- core/db.js
+          python3 - <<'PY'
+          from pathlib import Path
+          p = Path('core/db.js')
+          s = p.read_text()
+          needle = "    },\n};\n\n// Auto-initialize jobs"
+          replacement = "    },\n    async connect() {\n        if (realPool) {\n            try { return await realPool.connect(); }\n            catch (err) {\n                if (process.env.NODE_ENV === 'production') throw new Error(`[DB] Production database unavailable: ${err.message}`);\n                throw new Error(`[DB] Transactional PostgreSQL connection unavailable: ${err.message}`);\n            }\n        }\n        if (process.env.NODE_ENV === 'production') throw new Error('[DB] Production database pool not initialized');\n        throw new Error('[DB] Transactional PostgreSQL connection unavailable: real database required');\n    }\n};\n\n// Auto-initialize jobs"
+          if needle not in s:
+              raise SystemExit('Could not locate resilientPool boundary')
+          p.write_text(s.replace(needle, replacement, 1))
+          PY
+          rm -f .github/workflows/restore-db-once.yml
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add core/db.js .github/workflows/restore-db-once.yml
+          git commit -m 'fix(db): restore full database adapter with transactional access'
+          git push origin HEAD:main
