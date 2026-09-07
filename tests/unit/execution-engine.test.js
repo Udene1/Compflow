@@ -1,4 +1,5 @@
 import { describe, it, expect } from 'vitest';
+import pool from '../../core/db.js';
 import {
   ensureExecutionGraph,
   stableUsageId,
@@ -114,7 +115,9 @@ describe('Durable execution graph engine', () => {
     const staleExecution = 'exec_engine_stale_test';
     const node = await upsertGraphNode({ ...nodeArgs('CONTROL', 'soc2:STALE'), executionId: staleExecution });
     const attempt = await startNodeAttempt({ organizationId, executionId: staleExecution, nodeId: node.id });
-    await recoverStaleNodeAttempts({ organizationId, executionId: staleExecution, staleAfterSeconds: 30 });
+    await pool.query(`UPDATE execution_attempts SET heartbeat_at=NOW() - INTERVAL '60 seconds' WHERE id=$1`, [attempt.id]);
+    const recoveredAttempts = await recoverStaleNodeAttempts({ organizationId, executionId: staleExecution, staleAfterSeconds: 30 });
+    expect(recoveredAttempts.map(a => a.id)).toContain(attempt.id);
     const graph = await getExecutionGraph(organizationId, staleExecution);
     const recovered = graph.attempts.find(a => a.id === attempt.id);
     expect(recovered.status).toBe('FAILED');
