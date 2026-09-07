@@ -1,6 +1,5 @@
 import { getExecutionGraph, getResumableNodes } from '../core/execution_engine.js';
 import { enqueueJob } from '../core/queue.js';
-import pool from '../core/db.js';
 
 function organizationIdFromRequest(req) {
   return req.user?.orgId || req.authContext?.orgId || null;
@@ -18,7 +17,6 @@ export default async function handler(req, res) {
   try {
     const graph = await getExecutionGraph(organizationId, executionId);
     if (!graph.nodes.length) return res.status(404).json({ error: 'Execution not found' });
-
     if (req.method === 'GET') return res.status(200).json(graph);
 
     const resumable = await getResumableNodes(organizationId, executionId);
@@ -29,29 +27,11 @@ export default async function handler(req, res) {
     const connectionId = metadata.connectionId;
     const scanId = metadata.scanId;
     const provider = metadata.provider;
-    if (!connectionId || !scanId || !provider) {
-      return res.status(409).json({ error: 'Execution is missing resumable cloud connection metadata' });
-    }
+    if (!connectionId || !scanId || !provider) return res.status(409).json({ error: 'Execution is missing resumable cloud connection metadata' });
 
     const jobId = `resume-${executionId}-${Date.now()}`;
-    await enqueueJob({
-      jobId,
-      scanId,
-      executionId,
-      organizationId,
-      connectionId,
-      provider,
-      scanType: 'resume',
-      enqueuedAt: new Date().toISOString()
-    });
-
-    return res.status(202).json({
-      success: true,
-      status: 'queued',
-      executionId,
-      jobId,
-      resumableNodeIds: resumable.map(node => node.id)
-    });
+    await enqueueJob({ jobId, scanId, executionId, organizationId, connectionId, provider, scanType: 'resume', enqueuedAt: new Date().toISOString() });
+    return res.status(202).json({ success: true, status: 'queued', executionId, jobId, resumableNodeIds: resumable.map(node => node.id) });
   } catch (error) {
     console.error('[EXECUTION-GRAPH] Request failed:', error?.message || error);
     const code = error?.code === 'QUEUE_UNAVAILABLE' ? 'QUEUE_UNAVAILABLE' : 'EXECUTION_GRAPH_FAILED';
