@@ -19,6 +19,7 @@ jobs:
       - name: Restore core/db.js from known-good commit and add transactional access
         run: |
           set -euo pipefail
+          git fetch origin c3bb9e21fd3336cef7d7fa2363957308855dfc87 --no-tags
           git checkout c3bb9e21fd3336cef7d7fa2363957308855dfc87 -- core/db.js
           python3 - <<'PY'
           from pathlib import Path
