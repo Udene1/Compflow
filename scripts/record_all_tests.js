@@ -67,13 +67,11 @@ executeTestStep('Multi-Cloud E2E Engine', 'node test_e2e_all_clouds.js');
 
 // ── Save Timestamped Result Files ──
 
-// 1. Specific Auditor Portal Log File (appended with timestamp)
 const auditorRun = runLog.runs.find(r => r.stepName === 'SOC2 Auditor Evidence Portal Engine');
 const auditorLogPath = path.join(RESULTS_DIR, 'auditor_portal_runs.log');
 const auditorEntry = `\n================================================================================\nTIMESTAMP: ${isoTimestamp} | STATUS: ${auditorRun?.status || 'UNKNOWN'} (${auditorRun?.durationMs || 0}ms)\n================================================================================\n${auditorRun?.output || ''}\n`;
 fs.appendFileSync(auditorLogPath, auditorEntry, 'utf8');
 
-// 2. Test Run History JSON (persistent array)
 const historyJsonPath = path.join(RESULTS_DIR, 'test_execution_history.json');
 let history = [];
 if (fs.existsSync(historyJsonPath)) {
@@ -90,7 +88,6 @@ history.unshift({
 });
 fs.writeFileSync(historyJsonPath, JSON.stringify(history.slice(0, 50), null, 2), 'utf8');
 
-// 3. Latest Test Run Markdown Summary
 const markdownPath = path.join(RESULTS_DIR, 'latest_test_run.md');
 const specificRunPath = path.join(RESULTS_DIR, `test_run_${safeTimestamp}.md`);
 
@@ -130,3 +127,9 @@ console.log(`   - tests/results/test_run_${safeTimestamp}.md`);
 console.log("   - tests/results/test_execution_history.json");
 console.log("   - tests/results/auditor_portal_runs.log");
 console.log("================================================================================\n");
+
+// The recorder must itself fail when any authoritative suite fails. Persisting a
+// report must never turn a failed test run into a successful CI result.
+if (runLog.summary.failedSuites > 0) {
+    process.exitCode = 1;
+}
