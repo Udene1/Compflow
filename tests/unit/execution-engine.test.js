@@ -80,7 +80,7 @@ describe('Durable execution graph engine', () => {
 
   it('models failed controls as risk with approval-gated remediation', async () => {
     const riskExecution = 'exec_engine_risk_test';
-    const observation = await upsertGraphNode({ ...nodeArgs('OBSERVATION', 'obs:overexposed-api'), executionId: riskExecution, status: 'FAILED' });
+    const observation = await upsertGraphNode({ ...nodeArgs('OBSERVATION', 'obs:overexposed-api'), executionId: riskExecution, status: 'SUCCEEDED' });
     const control = await upsertGraphNode({ ...nodeArgs('CONTROL', 'soc2:CC6.1'), executionId: riskExecution, status: 'FAILED' });
     const risk = await upsertGraphNode({
       ...nodeArgs('RISK', 'soc2:CC6.1:obs:overexposed-api'),
@@ -98,6 +98,11 @@ describe('Durable execution graph engine', () => {
     await addDependencyEdge({ organizationId, executionId: riskExecution, fromNodeId: observation.id, toNodeId: control.id });
     await addDependencyEdge({ organizationId, executionId: riskExecution, fromNodeId: control.id, toNodeId: risk.id });
     await addDependencyEdge({ organizationId, executionId: riskExecution, fromNodeId: risk.id, toNodeId: remediation.id });
+
+    expect((await getResumableNodes(organizationId, riskExecution)).map(n => n.id)).not.toContain(risk.id);
+
+    const retry = await startNodeAttempt({ organizationId, executionId: riskExecution, nodeId: control.id });
+    await finishNodeAttempt({ attemptId: retry.id, status: 'SUCCEEDED' });
 
     const graph = await getExecutionGraph(organizationId, riskExecution);
     expect(graph.nodes.map(n => n.node_type)).toEqual(expect.arrayContaining(['OBSERVATION', 'CONTROL', 'RISK', 'REMEDIATION']));
