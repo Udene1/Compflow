@@ -26,7 +26,7 @@ async function getQueue() {
 }
 
 const ALLOWED_PAYLOAD_KEYS = new Set([
-    'jobId', 'scanId', 'organizationId', 'connectionId', 'provider', 'scanType', 'enqueuedAt'
+    'jobId', 'scanId', 'executionId', 'organizationId', 'connectionId', 'provider', 'scanType', 'enqueuedAt'
 ]);
 
 export function sanitizeJobPayload(jobData) {
