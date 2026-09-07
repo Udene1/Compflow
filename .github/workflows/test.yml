@@ -94,7 +94,13 @@ jobs:
           const orgs = [
             ['org_acme','Acme Security'],
             ['org_1','Org 1'],
-            ['org_default','Default Test Organization']
+            ['org_default','Default Test Organization'],
+            ['org_corp','Corporate Test Organization'],
+            ['org_test','Test Organization'],
+            ['org_onboarding_test_99','Onboarding Test Organization 99'],
+            ['org_hardened_test_01','Hardened Test Organization 01'],
+            ['org_sec','Security Test Organization'],
+            ['org_csrf','CSRF Test Organization']
           ];
           for (const [id,email] of users) {
             await client.query(
