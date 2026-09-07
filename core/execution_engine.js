@@ -26,6 +26,7 @@ CREATE TABLE IF NOT EXISTS execution_attempts (
 ALTER TABLE execution_attempts ADD COLUMN IF NOT EXISTS heartbeat_at TIMESTAMPTZ NOT NULL DEFAULT NOW();
 CREATE INDEX IF NOT EXISTS execution_attempts_execution_idx ON execution_attempts (organization_id, execution_id, started_at);
 CREATE INDEX IF NOT EXISTS execution_attempts_running_heartbeat_idx ON execution_attempts (organization_id, status, heartbeat_at) WHERE status = 'RUNNING';
+CREATE UNIQUE INDEX IF NOT EXISTS execution_attempts_one_running_node_idx ON execution_attempts (node_id) WHERE status = 'RUNNING';
 `;
 let schemaPromise;
 
@@ -101,6 +102,23 @@ export async function addDependencyEdge({ organizationId, executionId, fromNodeI
   return result.rows[0];
 }
 
+async function createRunningAttempt(client, { organizationId, executionId, nodeId, metadata = {}, resume = false }) {
+  const latest = await client.query('SELECT COALESCE(MAX(attempt_number),0) AS attempt_number FROM execution_attempts WHERE node_id=$1', [nodeId]);
+  const attemptNumber = Number(latest.rows[0].attempt_number) + 1;
+  const id = `attempt_${crypto.randomUUID()}`;
+  try {
+    const result = await client.query(
+      `INSERT INTO execution_attempts (id,organization_id,execution_id,node_id,attempt_number,status,heartbeat_at,metadata)
+       VALUES ($1,$2,$3,$4,$5,'RUNNING',NOW(),$6::jsonb) RETURNING *`,
+      [id, organizationId, executionId, nodeId, attemptNumber, JSON.stringify(resume ? { ...metadata, resume: true } : metadata)]
+    );
+    return result.rows[0];
+  } catch (error) {
+    if (error.code === '23505' && error.constraint === 'execution_attempts_one_running_node_idx') throw new Error('NODE_ALREADY_RUNNING');
+    throw error;
+  }
+}
+
 export async function startNodeAttempt({ organizationId, executionId, nodeId, metadata = {} }) {
   await ensureSchema();
   if (!organizationId || !executionId || !nodeId) throw new Error('ATTEMPT_INPUT_INVALID');
@@ -111,18 +129,12 @@ export async function startNodeAttempt({ organizationId, executionId, nodeId, me
     const node = await client.query('SELECT status FROM execution_graph_nodes WHERE id=$1 AND organization_id=$2 AND execution_id=$3 FOR UPDATE', [nodeId, organizationId, executionId]);
     if (!node.rows[0]) throw new Error('GRAPH_NODE_NOT_FOUND');
     if (node.rows[0].status === 'SUCCEEDED' || node.rows[0].status === 'SKIPPED') throw new Error('NODE_ALREADY_TERMINAL');
+    if (node.rows[0].status === 'RUNNING') throw new Error('NODE_ALREADY_RUNNING');
     assertNodeTransition(node.rows[0].status, 'RUNNING');
-    const latest = await client.query('SELECT COALESCE(MAX(attempt_number),0) AS attempt_number FROM execution_attempts WHERE node_id=$1', [nodeId]);
-    const attemptNumber = Number(latest.rows[0].attempt_number) + 1;
-    const id = `attempt_${crypto.randomUUID()}`;
-    const result = await client.query(
-      `INSERT INTO execution_attempts (id,organization_id,execution_id,node_id,attempt_number,status,heartbeat_at,metadata)
-       VALUES ($1,$2,$3,$4,$5,'RUNNING',NOW(),$6::jsonb) RETURNING *`,
-      [id, organizationId, executionId, nodeId, attemptNumber, JSON.stringify(metadata)]
-    );
+    const attempt = await createRunningAttempt(client, { organizationId, executionId, nodeId, metadata });
     await client.query(`UPDATE execution_graph_nodes SET status='RUNNING',updated_at=NOW() WHERE id=$1 AND organization_id=$2 AND execution_id=$3`, [nodeId, organizationId, executionId]);
     await client.query('COMMIT');
-    return result.rows[0];
+    return attempt;
   } catch (error) {
     await client.query('ROLLBACK').catch(() => {});
     throw error;
@@ -139,6 +151,7 @@ export async function heartbeatNodeAttempt({ attemptId }) {
 
 export async function recoverStaleNodeAttempts({ organizationId, executionId = null, staleAfterSeconds = 300 } = {}) {
   await ensureSchema();
+  if (!organizationId) throw new Error('ORGANIZATION_ID_REQUIRED');
   const seconds = Math.max(30, Math.min(Number(staleAfterSeconds) || 300, 86400));
   const params = [organizationId, seconds];
   const executionFilter = executionId ? 'AND execution_id=$3' : '';
@@ -209,17 +222,10 @@ export async function claimResumableNode({ organizationId, executionId, nodeId, 
     const current = await client.query('SELECT status FROM execution_graph_nodes WHERE id=$1 AND organization_id=$2 AND execution_id=$3 FOR UPDATE', [nodeId, organizationId, executionId]);
     if (!current.rows[0]) throw new Error('GRAPH_NODE_NOT_FOUND');
     if (!['PENDING', 'FAILED', 'CANCELLED'].includes(current.rows[0].status)) throw new Error('NODE_NOT_RESUMABLE');
-    const latest = await client.query('SELECT COALESCE(MAX(attempt_number),0) AS attempt_number FROM execution_attempts WHERE node_id=$1', [nodeId]);
-    const attemptNumber = Number(latest.rows[0].attempt_number) + 1;
-    const id = `attempt_${crypto.randomUUID()}`;
-    const result = await client.query(
-      `INSERT INTO execution_attempts (id,organization_id,execution_id,node_id,attempt_number,status,heartbeat_at,metadata)
-       VALUES ($1,$2,$3,$4,$5,'RUNNING',NOW(),$6::jsonb) RETURNING *`,
-      [id, organizationId, executionId, nodeId, attemptNumber, JSON.stringify({ ...metadata, resume: true })]
-    );
+    const attempt = await createRunningAttempt(client, { organizationId, executionId, nodeId, metadata, resume: true });
     await client.query(`UPDATE execution_graph_nodes SET status='RUNNING',updated_at=NOW() WHERE id=$1 AND organization_id=$2 AND execution_id=$3`, [nodeId, organizationId, executionId]);
     await client.query('COMMIT');
-    return result.rows[0];
+    return attempt;
   } catch (error) {
     await client.query('ROLLBACK').catch(() => {});
     throw error;
