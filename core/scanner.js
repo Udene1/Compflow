@@ -1,6 +1,8 @@
 import { ControlMatrix } from './controls.js';
 import { log } from './logger.js';
 import { evaluateCustomPolicies } from './policy_engine.js';
+import { getExecutionContext } from './execution_context.js';
+import { persistScanGraph } from './execution_worker_hooks.js';
 
 export async function runScan(provider, credentials, customPolicies = null) {
     log.info(`Initiating ${provider.toUpperCase()} scan...`);
@@ -37,22 +39,29 @@ export async function runScan(provider, credentials, customPolicies = null) {
             throw new Error(`Unsupported cloud provider: ${provider}`);
     }
 
-    // Enrich with Multi-Framework Controls
     if (result && result.resources) {
         result.resources.forEach(r => {
             if (r.technicalId && ControlMatrix[r.technicalId]) {
                 r.controls = ControlMatrix[r.technicalId];
-                // For backward compatibility, also set a primary 'control' string
                 r.control = ControlMatrix[r.technicalId].soc2 ? ControlMatrix[r.technicalId].soc2[0] : 'N/A';
             }
         });
 
-        // Evaluate Custom Organization Governance Policies if defined
         if (customPolicies && typeof customPolicies === 'object') {
             const policyViolations = evaluateCustomPolicies(result.resources, customPolicies);
-            if (policyViolations.length > 0) {
-                result.resources.push(...policyViolations);
-            }
+            if (policyViolations.length > 0) result.resources.push(...policyViolations);
+        }
+
+        // When running inside the durable queue worker, persist the exact observation
+        // -> control -> evidence relationships while the scan result is still in scope.
+        const context = getExecutionContext();
+        if (context) {
+            await persistScanGraph({
+                organizationId: context.organizationId,
+                executionId: context.executionId,
+                provider,
+                resources: result.resources
+            });
         }
     }
 
