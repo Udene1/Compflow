@@ -78,6 +78,9 @@ jobs:
             git fetch origin main
             git checkout main
             git reset --hard origin/main
+            echo 'Deployed commit:'
+            git rev-parse HEAD
+            sudo docker compose config >/dev/null
             sudo docker compose up --build -d
           "
 
@@ -92,7 +95,20 @@ jobs:
             test \"\$(sudo docker inspect -f '{{.State.Running}}' compflow-postgres)\" = true
           "
 
-      - name: Verify application health
+      - name: Verify application health with retry
         run: |
           set -euo pipefail
-          ssh "$AZURE_VM_USER@$AZURE_VM_HOST" 'set -euo pipefail; curl --fail --silent --show-error --max-time 15 http://127.0.0.1:3000/health >/dev/null'
+          ssh "$AZURE_VM_USER@$AZURE_VM_HOST" 'set -euo pipefail
+            for attempt in 1 2 3 4 5 6; do
+              if curl --fail --silent --show-error --max-time 15 http://127.0.0.1:3000/health; then
+                echo
+                echo "Compflow health check passed on attempt $attempt"
+                exit 0
+              fi
+              echo "Health check attempt $attempt failed; waiting 5s..."
+              sleep 5
+            done
+            echo "Compflow health check failed after 6 attempts"
+            sudo docker compose logs --tail=100 compflow-app
+            exit 1
+          '
