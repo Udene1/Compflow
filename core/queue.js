@@ -26,14 +26,21 @@ async function getQueue() {
 }
 
 const ALLOWED_PAYLOAD_KEYS = new Set([
-    'jobId', 'scanId', 'executionId', 'organizationId', 'connectionId', 'provider', 'scanType', 'enqueuedAt'
+    'jobId', 'scanId', 'executionId', 'organizationId', 'connectionId', 'provider', 'scanType', 'enqueuedAt', 'resumeNodeIds'
 ]);
 
 export function sanitizeJobPayload(jobData) {
     if (!jobData || typeof jobData !== 'object' || Array.isArray(jobData)) return {};
     const clean = {};
     for (const [k, v] of Object.entries(jobData)) {
-        if (ALLOWED_PAYLOAD_KEYS.has(k)) clean[k] = v;
+        if (!ALLOWED_PAYLOAD_KEYS.has(k)) continue;
+        if (k === 'resumeNodeIds') {
+            if (Array.isArray(v) && v.length <= 100 && v.every(id => typeof id === 'string' && id.length <= 128)) {
+                clean[k] = [...new Set(v)];
+            }
+            continue;
+        }
+        clean[k] = v;
     }
     return clean;
 }
