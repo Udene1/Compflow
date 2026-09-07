@@ -71,6 +71,47 @@ jobs:
       - name: Initialize PostgreSQL schema
         run: node --input-type=module -e "const { initDb } = await import('./core/db.js'); await initDb(); console.log('PostgreSQL schema initialized')"
 
+      - name: Seed deterministic test principals
+        run: |
+          node --input-type=module <<'NODE'
+          import pg from 'pg';
+          const { Client } = pg;
+          const client = new Client({ connectionString: process.env.DATABASE_URL });
+          await client.connect();
+          const users = [
+            ['usr_test123','test123@example.test'],
+            ['usr_test456','test456@example.test'],
+            ['usr_expired','expired@example.test'],
+            ['usr_revoke','revoke@example.test'],
+            ['usr_check','check@example.test'],
+            ['usr_onboarding_test_99','onboarding99@example.test'],
+            ['usr_hardened_test_01','hardened01@example.test'],
+            ['usr_sec_1','sec1@example.test'],
+            ['usr_test_123','test123b@example.test'],
+            ['usr_1','user1@example.test'],
+            ['usr_csrf_test','csrf@example.test']
+          ];
+          const orgs = [
+            ['org_acme','Acme Security'],
+            ['org_1','Org 1'],
+            ['org_default','Default Test Organization']
+          ];
+          for (const [id,email] of users) {
+            await client.query(
+              'INSERT INTO users (id,email,name) VALUES ($1,$2,$1) ON CONFLICT (id) DO NOTHING',
+              [id,email]
+            );
+          }
+          for (const [id,name] of orgs) {
+            await client.query(
+              'INSERT INTO organizations (id,name) VALUES ($1,$2) ON CONFLICT (id) DO NOTHING',
+              [id,name]
+            );
+          }
+          await client.end();
+          console.log('Deterministic PostgreSQL test principals seeded');
+          NODE
+
       - name: Run complete recorded test suite
         run: npm run test:record
 
