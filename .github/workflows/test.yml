@@ -104,7 +104,11 @@ jobs:
             ['org_onboarding_test_99','Onboarding Test Organization 99'],
             ['org_hardened_test_01','Hardened Test Organization 01'],
             ['org_sec','Security Test Organization'],
-            ['org_csrf','CSRF Test Organization']
+            ['org_csrf','CSRF Test Organization'],
+            ['org_empty_prereq_99','Empty Prerequisite Test Organization'],
+            ['org_summary_test_exclusive','Summary Exclusive Test Organization'],
+            ['org_cross','Cross Instance Test Organization'],
+            ['org_rotate','Rotate Test Organization']
           ];
           for (const [id,email] of users) {
             await client.query(
