@@ -8,6 +8,7 @@ import { saveAuditLog } from './core/audit.js';
 import { updateJobProgress, completeJob } from './core/jobs.js';
 import { defaultSecretStore as SecretStore } from './core/secret_store.js';
 import { recordAuditEvent } from './core/audit_events.js';
+import { persistScanGraph } from './core/execution_worker_hooks.js';
 
 /**
  * Worker Handler
@@ -18,8 +19,8 @@ export const handler = async (payload) => {
     // Standardize job payload format
     let jobData = payload;
     if (payload?.Records?.[0]?.body) {
-        jobData = typeof payload.Records[0].body === 'string' 
-            ? JSON.parse(payload.Records[0].body) 
+        jobData = typeof payload.Records[0].body === 'string'
+            ? JSON.parse(payload.Records[0].body)
             : payload.Records[0].body;
     }
 
@@ -31,7 +32,7 @@ export const handler = async (payload) => {
     const connectionId = client.connectionId || client.id || clientId;
 
     const executionId = jobId || `exec-${Date.now()}`;
-    
+
     // Initialize context-aware logger
     const log = new Logger({ clientId, executionId });
 
@@ -80,11 +81,11 @@ export const handler = async (payload) => {
                 await trackProgress('in_progress', 15, 'AGENT', 'GCP credentials loaded.');
             } else if (provider === 'azure' && client.tenantId) {
                 log.info(`[CREDENTIALS] Loading Azure Service Principal...`);
-                credentials = { 
-                    tenantId: client.tenantId, 
-                    clientId: client.clientId, 
-                    clientSecret: client.clientSecret, 
-                    subscriptionId: client.subscriptionId 
+                credentials = {
+                    tenantId: client.tenantId,
+                    clientId: client.clientId,
+                    clientSecret: client.clientSecret,
+                    subscriptionId: client.subscriptionId
                 };
                 await trackProgress('in_progress', 15, 'AGENT', 'Azure credentials loaded.');
             } else if (client.apiToken) {
@@ -104,7 +105,22 @@ export const handler = async (payload) => {
 
         const { resources } = await runScan(provider, credentials);
         const anomalies = (resources || []).filter(r => r.severity !== 'pass');
-        
+
+        // Persist the actual scan result as durable execution graph state.
+        // This is intentionally fail-closed in production: a scan without durable
+        // execution evidence must not be reported as successfully completed.
+        try {
+            await persistScanGraph({
+                organizationId: orgId,
+                executionId,
+                provider,
+                resources: resources || []
+            });
+        } catch (graphError) {
+            log.error(`[EXECUTION] Durable graph persistence failed: ${graphError.message}`);
+            if (process.env.NODE_ENV === 'production') throw graphError;
+        }
+
         // Support partial success (Amendment 11): if any resource encountered an error, mark as PARTIAL
         const hasErrors = (resources || []).some(r => r.severity === 'error' || r.status === 'ERROR');
         const scanStatus = hasErrors ? 'partial' : 'completed';
@@ -114,7 +130,7 @@ export const handler = async (payload) => {
 
         // Log critical findings
         for (const r of anomalies.slice(0, 10)) {
-            await trackProgress('in_progress', 52, 'INSIGHT', 
+            await trackProgress('in_progress', 52, 'INSIGHT',
                 `${r.severity?.toUpperCase()}: ${r.type} "${r.name}" — ${r.issue}`
             );
         }
@@ -137,7 +153,7 @@ export const handler = async (payload) => {
             if (llmDecision.action === 'AUTO_FIX' && client.autoRemediate) {
                 log.info(`[AGENT] ⚡ EXECUTING AUTO-FIX: ${anomaly.name}`);
                 await trackProgress('in_progress', progress, 'ACTION', `⚡ Auto-fixing: ${anomaly.name}`);
-                
+
                 try {
                     const result = await runRemediation(provider, credentials, anomaly.type, anomaly.name, anomaly.issue);
                     if (result.advisory) {
@@ -170,8 +186,8 @@ export const handler = async (payload) => {
         await trackProgress('in_progress', 85, 'SYSTEM', 'Persisting results to audit trail...');
 
         try {
-            await saveAuditLog(clientId, 'SCAN_COMPLETE', `Scan completed for ${clientName}`, { 
-                resources, 
+            await saveAuditLog(clientId, 'SCAN_COMPLETE', `Scan completed for ${clientName}`, {
+                resources,
                 executionId,
                 jobId,
                 scanStatus,
@@ -216,8 +232,8 @@ export const handler = async (payload) => {
         if (jobId) await completeJob(jobId, 'failed', [], e.message);
 
         // Non-retryable errors (e.g. Auth failures, invalid credentials, missing configuration)
-        const isNonRetryable = e.message.includes('Authentication Failed') || 
-                               e.message.includes('Verification Failed') || 
+        const isNonRetryable = e.message.includes('Authentication Failed') ||
+                               e.message.includes('Verification Failed') ||
                                e.message.includes('Missing cloud credentials') ||
                                e.message.includes('invalid') ||
                                e.message.includes('Unauthorized') ||
