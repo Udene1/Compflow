@@ -25,19 +25,30 @@ import { ROLES } from './core/auth.js';
 const app = express();
 app.set('trust proxy', 1);
 
-const ALLOWED_ORIGINS = [
+const ALLOWED_ORIGINS = new Set([
     'https://compflow.icu', 'https://www.compflow.icu', 'https://api.compflow.icu',
     'http://localhost:3000', 'http://127.0.0.1:3000', 'http://localhost:5173', 'http://127.0.0.1:5173'
-];
+]);
 app.use(cors({
     origin: (origin, callback) => {
-        if (!origin || ALLOWED_ORIGINS.includes(origin) || origin.endsWith('.compflow.icu')) return callback(null, true);
+        if (!origin || ALLOWED_ORIGINS.has(origin)) return callback(null, true);
         return callback(new Error('CORS origin blocked'));
     },
     credentials: true,
     methods: ['GET', 'POST', 'PATCH', 'PUT', 'DELETE', 'OPTIONS'],
     allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With']
 }));
+
+// Security headers without adding a runtime dependency. Do not loosen these per-route.
+app.use((req, res, next) => {
+    res.setHeader('X-Content-Type-Options', 'nosniff');
+    res.setHeader('X-Frame-Options', 'DENY');
+    res.setHeader('Referrer-Policy', 'no-referrer');
+    res.setHeader('Permissions-Policy', 'camera=(), microphone=(), geolocation=()');
+    res.setHeader('Content-Security-Policy', "default-src 'self'; frame-ancestors 'none'; base-uri 'self'; object-src 'none'");
+    if (req.secure) res.setHeader('Strict-Transport-Security', 'max-age=31536000; includeSubDomains');
+    next();
+});
 app.use(express.json({ limit: '10mb' }));
 
 const generalLimiter = rateLimit({
@@ -71,16 +82,25 @@ function lambdaAdapter(handler) {
                 try { res.json(JSON.parse(result.body)); } catch { res.send(result.body); }
             } else if (result.body) res.json(result.body); else res.end();
         } catch (err) {
-            console.error('Adapter crash:', err);
+            console.error('Adapter crash:', err?.message || 'unknown error');
             res.status(500).json({ error: 'Internal Server Error' });
         }
     };
 }
 
 app.get('/health', (req, res) => res.json({ status: 'OK', timestamp: new Date().toISOString() }));
+app.get('/health/ready', async (req, res) => {
+    try {
+        const { default: pool } = await import('./core/db.js');
+        await pool.query('SELECT 1');
+        return res.status(200).json({ status: 'READY', timestamp: new Date().toISOString() });
+    } catch (error) {
+        console.error('[READINESS] check failed:', error?.message || 'unknown error');
+        return res.status(503).json({ status: 'NOT_READY' });
+    }
+});
 app.use('/api/auth', authLimiter, authRouter);
 app.use('/api/onboarding', requireAuth(), onboardingRouter);
-
 app.post('/api/scan', heavyActionLimiter, requireAuth([ROLES.ENGINEER]), scanHandler);
 app.post('/api/trigger', heavyActionLimiter, requireAuth([ROLES.ADMIN]), lambdaAdapter(schedulerHandler));
 app.get('/api/tenants', requireAuth([ROLES.VIEWER]), tenantsHandler);
@@ -88,20 +108,15 @@ app.post('/api/tenants', requireAuth([ROLES.ADMIN]), tenantsHandler);
 app.patch('/api/tenants', requireAuth([ROLES.ADMIN]), tenantsHandler);
 app.all('/api/tenants/toggle', requireAuth([ROLES.ADMIN]), tenantsHandler);
 app.post('/api/validate', requireAuth([ROLES.ENGINEER]), validateHandler);
-
 app.get('/api/job-status', requireAuth([ROLES.VIEWER]), jobStatusHandler);
 app.get('/api/job-stream', requireAuth([ROLES.VIEWER]), jobStreamHandler);
-
-// Durable execution graph: read for viewers, resume requires an authenticated engineer.
 app.get('/api/execution-graph', requireAuth([ROLES.VIEWER]), executionGraphHandler);
 app.post('/api/execution-graph', requireAuth([ROLES.ENGINEER]), executionGraphHandler);
-
 app.post('/api/monitoring', requireAuth([ROLES.ADMIN]), lambdaAdapter(monitoringHandler));
 app.post('/api/jobs', requireAuth([ROLES.ADMIN]), lambdaAdapter(jobsHandler));
 app.post('/api/chat', heavyActionLimiter, requireAuth([ROLES.ENGINEER]), lambdaAdapter(chatHandler));
 app.all(['/api/remediate', '/api/remediation'], heavyActionLimiter, requireAuth([ROLES.ENGINEER]), remediateHandler);
 app.all('/api/auditor*', requireAuth([ROLES.AUDITOR]), auditorHandler);
-
 app.all('/api/*', (req, res) => res.status(404).json({ error: 'Not Found', message: `API endpoint ${req.method} ${req.path} does not exist.` }));
 
 async function startApp() {
@@ -116,6 +131,6 @@ async function startApp() {
 }
 
 startApp().catch(err => {
-    console.error('Failed to initialize server:', err);
+    console.error('Failed to initialize server:', err?.message || err);
     process.exit(1);
 });
