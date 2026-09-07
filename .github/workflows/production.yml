@@ -1,9 +1,6 @@
 name: Production Deployment
 
 on:
-  push:
-    branches:
-      - main
   workflow_dispatch:
 
 concurrency:
@@ -121,7 +118,6 @@ jobs:
               echo "Health check attempt $attempt failed; waiting 5s..."
               sleep 5
             done
-            echo "Compflow health check failed after 6 attempts"
-            sudo docker compose logs --tail=100 compflow-app
+            echo "Compflow health check failed after retries"
             exit 1
           '
