@@ -13,7 +13,6 @@ concurrency:
 env:
   AZURE_VM_HOST: 20.245.136.231
   AZURE_VM_USER: azureuser
-  AZURE_APP_DIR: /home/azureuser/Compflow
 
 jobs:
   deploy:
@@ -52,11 +51,21 @@ jobs:
           set -euo pipefail
           ssh -o BatchMode=yes "$AZURE_VM_USER@$AZURE_VM_HOST" 'set -e; echo "Azure VM SSH access OK"; docker --version; docker compose version'
 
+      - name: Resolve application directory
+        id: resolve_app_dir
+        run: |
+          set -euo pipefail
+          APP_DIR="$(ssh "$AZURE_VM_USER@$AZURE_VM_HOST" 'for d in /home/azureuser/Compflow /home/azureuser/backend; do if [ -f "$d/docker-compose.yml" ]; then printf "%s" "$d"; exit 0; fi; done; exit 1')"
+          echo "APP_DIR=$APP_DIR" >> "$GITHUB_OUTPUT"
+          echo "Resolved application directory: $APP_DIR"
+
       - name: Pull latest code and rebuild production stack
+        env:
+          APP_DIR: ${{ steps.resolve_app_dir.outputs.APP_DIR }}
         run: |
           set -euo pipefail
           ssh "$AZURE_VM_USER@$AZURE_VM_HOST" "set -euo pipefail
-            cd '$AZURE_APP_DIR'
+            cd '$APP_DIR'
             git fetch origin main
             git checkout main
             git reset --hard origin/main
@@ -64,10 +73,12 @@ jobs:
           "
 
       - name: Verify production containers
+        env:
+          APP_DIR: ${{ steps.resolve_app_dir.outputs.APP_DIR }}
         run: |
           set -euo pipefail
           ssh "$AZURE_VM_USER@$AZURE_VM_HOST" "set -euo pipefail
-            cd '$AZURE_APP_DIR'
+            cd '$APP_DIR'
             sudo docker compose ps
             test \"\$(sudo docker inspect -f '{{.State.Running}}' compflow-app)\" = true
             test \"\$(sudo docker inspect -f '{{.State.Running}}' compflow-redis)\" = true
@@ -77,6 +88,4 @@ jobs:
       - name: Verify application health
         run: |
           set -euo pipefail
-          ssh "$AZURE_VM_USER@$AZURE_VM_HOST" "set -euo pipefail
-            curl --fail --silent --show-error --max-time 15 http://127.0.0.1:3000/health >/dev/null
-          "
+          ssh "$AZURE_VM_USER@$AZURE_VM_HOST" 'set -euo pipefail; curl --fail --silent --show-error --max-time 15 http://127.0.0.1:3000/health >/dev/null'
