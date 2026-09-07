@@ -28,6 +28,12 @@ async function getQueue() {
 const ALLOWED_PAYLOAD_KEYS = new Set([
     'jobId', 'scanId', 'executionId', 'organizationId', 'connectionId', 'provider', 'scanType', 'enqueuedAt', 'resumeNodeIds'
 ]);
+const PROVIDERS = new Set(['aws', 'azure', 'gcp', 'digitalocean', 'hetzner']);
+const SCAN_TYPES = new Set(['initial', 'manual', 'scheduled', 'resume', 'adhoc']);
+
+function boundedString(value, max = 128) {
+    return typeof value === 'string' && value.length > 0 && value.length <= max ? value : null;
+}
 
 export function sanitizeJobPayload(jobData) {
     if (!jobData || typeof jobData !== 'object' || Array.isArray(jobData)) return {};
@@ -35,7 +41,7 @@ export function sanitizeJobPayload(jobData) {
     for (const [k, v] of Object.entries(jobData)) {
         if (!ALLOWED_PAYLOAD_KEYS.has(k)) continue;
         if (k === 'resumeNodeIds') {
-            if (Array.isArray(v) && v.length <= 100 && v.every(id => typeof id === 'string' && id.length <= 128)) {
+            if (Array.isArray(v) && v.length <= 100 && v.every(id => boundedString(id, 128))) {
                 clean[k] = [...new Set(v)];
             }
             continue;
@@ -47,7 +53,13 @@ export function sanitizeJobPayload(jobData) {
 
 export async function enqueueJob(jobData) {
     const cleanPayload = sanitizeJobPayload(jobData);
-    if (!cleanPayload.jobId || !cleanPayload.scanId || !cleanPayload.organizationId || !cleanPayload.connectionId) {
+    if (!boundedString(cleanPayload.jobId) || !boundedString(cleanPayload.scanId) || !boundedString(cleanPayload.organizationId) || !boundedString(cleanPayload.connectionId)) {
+        throw Object.assign(new Error('INVALID_QUEUE_PAYLOAD'), { code: 'INVALID_QUEUE_PAYLOAD' });
+    }
+    if (!boundedString(cleanPayload.executionId) || !PROVIDERS.has(cleanPayload.provider) || !SCAN_TYPES.has(cleanPayload.scanType)) {
+        throw Object.assign(new Error('INVALID_QUEUE_PAYLOAD'), { code: 'INVALID_QUEUE_PAYLOAD' });
+    }
+    if (!cleanPayload.enqueuedAt || Number.isNaN(Date.parse(cleanPayload.enqueuedAt))) {
         throw Object.assign(new Error('INVALID_QUEUE_PAYLOAD'), { code: 'INVALID_QUEUE_PAYLOAD' });
     }
     const queue = await getQueue();
