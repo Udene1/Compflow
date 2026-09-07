@@ -13,6 +13,7 @@ export async function durableWorkerHandler(payload) {
   const organizationId = data?.organizationId || data?.orgId || 'org_default';
   const provider = data?.provider || 'aws';
   const clientId = data?.clientId || data?.id || 'adhoc_user';
+  const resumeNodeIds = Array.isArray(data?.resumeNodeIds) ? [...new Set(data.resumeNodeIds)].slice(0, 100) : [];
 
   const execution = await beginExecution({
     organizationId,
@@ -28,6 +29,7 @@ export async function durableWorkerHandler(payload) {
     organizationId,
     executionId,
     provider,
+    resumeNodeIds,
     executionNodeId: execution.node.id,
     executionAttemptId: execution.attempt.id
   }, async () => {
