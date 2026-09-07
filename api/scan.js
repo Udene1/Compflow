@@ -1,9 +1,10 @@
-import { createJob } from '../core/jobs.js';
+import { createJob, completeJob } from '../core/jobs.js';
 import { enqueueJob } from '../core/queue.js';
 
 /**
  * Scan Endpoint
- * Creates a job record, enqueues to BullMQ Redis Queue, returns jobId immediately.
+ * Creates a durable job, stores credential references, and enqueues only
+ * non-secret identifiers into BullMQ.
  */
 export default async function handler(req, res) {
     try {
@@ -13,52 +14,59 @@ export default async function handler(req, res) {
         const clientId = req.body?.clientId || 'adhoc_user';
         const provider = req.body?.provider;
         const credentials = req.body?.credentials;
-        const email = req.body?.email;
+        const email = req.body?.email || null;
+        const orgId = req.user?.orgId || req.authContext?.orgId;
 
-        if (!provider || !credentials) {
-            return res.status(400).json({ error: "Missing provider or credentials." });
+        if (!orgId) return res.status(403).json({ error: 'Organization context required' });
+        if (!provider) return res.status(400).json({ error: 'Missing provider.' });
+        if (!credentials && !req.body?.connectionId) {
+            return res.status(400).json({ error: 'Missing cloud connection credentials.' });
         }
 
-        // 1. Create job record in PostgreSQL
         const jobId = await createJob(clientId, 'on_demand');
-        const orgId = req.user?.orgId || req.authContext?.orgId || 'org_default';
-
-        // 2. Store credentials in SecretStore if provided, pass only references to queue (Amendment 8)
         let connectionId = req.body?.connectionId || null;
+
         if (credentials && !connectionId) {
             connectionId = 'scan_conn_' + jobId;
             const { defaultSecretStore } = await import('../core/secret_store.js');
             await defaultSecretStore.saveSecret(orgId, connectionId, credentials, req.user?.userId || 'api_user');
         }
 
-        // 3. Enqueue job into BullMQ scan-queue with references only
+        if (!connectionId) {
+            await completeJob(jobId, 'failed', [], 'Cloud connection is unavailable.');
+            return res.status(400).json({ error: 'Cloud connection is unavailable.' });
+        }
+
         const payload = {
             jobId,
             provider,
+            organizationId: orgId,
             connectionId,
-            orgId,
             clientId,
-            id: clientId,
-            name: clientId,
-            email
+            scanType: 'on_demand',
+            enqueuedAt: new Date().toISOString()
         };
 
-        console.log(`[SCAN-API] Job ${jobId} created for client '${clientId}' (${provider.toUpperCase()}) → Enqueuing to BullMQ`);
+        console.log(`[SCAN-API] Job ${jobId} created for organization ${orgId} (${provider.toUpperCase()}) → enqueuing`);
 
-        await enqueueJob(payload);
+        try {
+            await enqueueJob(payload);
+        } catch (queueError) {
+            await completeJob(jobId, 'failed', [], 'Scan could not be queued.');
+            const status = queueError?.code === 'QUEUE_UNAVAILABLE' ? 503 : 500;
+            return res.status(status).json({
+                error: status === 503 ? 'Scan queue unavailable.' : 'Scan could not be queued.'
+            });
+        }
 
-        // 4. Return jobId immediately
-        return res.status(202).json({ 
-            success: true, 
-            status: 'queued', 
+        return res.status(202).json({
+            success: true,
+            status: 'queued',
             jobId,
             clientId
         });
-
     } catch (err) {
-        console.error('[SCAN-API] Fatal Error:', err);
-        return res.status(500).json({ 
-            error: "Internal server error triggering scan: " + err.message 
-        });
+        console.error('[SCAN-API] Fatal Error:', err?.message || err);
+        return res.status(500).json({ error: 'Internal server error triggering scan.' });
     }
 }
