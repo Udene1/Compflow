@@ -52,22 +52,35 @@ jobs:
           set -euo pipefail
           ssh -o BatchMode=yes "$AZURE_VM_USER@$AZURE_VM_HOST" 'set -e; echo "Azure VM SSH access OK"; docker --version; docker compose version'
 
-      - name: Validate authoritative application directory
+      - name: Bootstrap and validate authoritative application directory
         run: |
           set -euo pipefail
           ssh "$AZURE_VM_USER@$AZURE_VM_HOST" "set -euo pipefail
             APP_DIR='$AZURE_APP_DIR'
-            test -d \"\$APP_DIR\" || { echo \"Missing application directory: \$APP_DIR\"; exit 1; }
+            if [ ! -d \"\$APP_DIR/.git\" ]; then
+              echo 'Authoritative application checkout missing; bootstrapping it from origin.'
+              sudo mkdir -p \"\$(dirname \"\$APP_DIR\")\"
+              sudo chown \"\$(id -u):\$(id -g)\" \"\$(dirname \"\$APP_DIR\")\"
+              if [ -e \"\$APP_DIR\" ]; then
+                test -z \"\$(find \"\$APP_DIR\" -mindepth 1 -maxdepth 1 -print -quit)\" || {
+                  echo \"Refusing to overwrite non-empty non-git directory: \$APP_DIR\"
+                  ls -la \"\$APP_DIR\"
+                  exit 1
+                }
+                rmdir \"\$APP_DIR\"
+              fi
+              git clone https://github.com/Udene1/Compflow.git \"\$APP_DIR\"
+            fi
+            git -C \"\$APP_DIR\" fetch origin main
+            git -C \"\$APP_DIR\" checkout main
+            git -C \"\$APP_DIR\" reset --hard origin/main
             test -f \"\$APP_DIR/docker-compose.yml\" || {
               echo \"Missing docker-compose.yml in \$APP_DIR\"
-              echo 'Directory contents:'
               ls -la \"\$APP_DIR\"
-              echo 'Compose candidates:'
-              find \"\$APP_DIR\" -maxdepth 1 -type f -iname '*compose*.y*ml' -print
               exit 1
             }
-            git -C \"\$APP_DIR\" rev-parse --is-inside-work-tree
             echo \"Authoritative application directory: \$APP_DIR\"
+            echo \"Target commit: \$(git -C \"\$APP_DIR\" rev-parse HEAD)\"
           "
 
       - name: Pull latest code and rebuild production stack
