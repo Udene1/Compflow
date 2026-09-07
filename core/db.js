@@ -485,6 +485,17 @@ const resilientPool = {
             throw new Error('[DB] Production database pool not initialized');
         }
         return await fallbackPool.query(sql, params);
+    },
+    async connect() {
+        if (realPool) {
+            try { return await realPool.connect(); }
+            catch (err) {
+                if (process.env.NODE_ENV === 'production') throw new Error(`[DB] Production database unavailable: ${err.message}`);
+                throw new Error(`[DB] Transactional PostgreSQL connection unavailable: ${err.message}`);
+            }
+        }
+        if (process.env.NODE_ENV === 'production') throw new Error('[DB] Production database pool not initialized');
+        throw new Error('[DB] Transactional PostgreSQL connection unavailable: real database required');
     }
 };
 
