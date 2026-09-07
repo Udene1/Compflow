@@ -29,9 +29,20 @@ export default async function handler(req, res) {
     const provider = metadata.provider;
     if (!connectionId || !scanId || !provider) return res.status(409).json({ error: 'Execution is missing resumable cloud connection metadata' });
 
+    const resumableNodeIds = resumable.map(node => node.id);
     const jobId = `resume-${executionId}-${Date.now()}`;
-    await enqueueJob({ jobId, scanId, executionId, organizationId, connectionId, provider, scanType: 'resume', enqueuedAt: new Date().toISOString() });
-    return res.status(202).json({ success: true, status: 'queued', executionId, jobId, resumableNodeIds: resumable.map(node => node.id) });
+    await enqueueJob({
+      jobId,
+      scanId,
+      executionId,
+      organizationId,
+      connectionId,
+      provider,
+      scanType: 'resume',
+      resumeNodeIds: resumableNodeIds,
+      enqueuedAt: new Date().toISOString()
+    });
+    return res.status(202).json({ success: true, status: 'queued', executionId, jobId, resumableNodeIds });
   } catch (error) {
     console.error('[EXECUTION-GRAPH] Request failed:', error?.message || error);
     const code = error?.code === 'QUEUE_UNAVAILABLE' ? 'QUEUE_UNAVAILABLE' : 'EXECUTION_GRAPH_FAILED';
