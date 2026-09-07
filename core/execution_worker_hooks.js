@@ -76,7 +76,7 @@ export async function persistScanGraph({ organizationId, executionId, provider, 
       for (const controlId of controlIds) {
         const controlFailed = severity !== 'pass';
         const control = await upsertGraphNode({
-          organizationId, executionId, nodeType: 'CONTROL', logicalKey: `${frameworkId}:${controlId}`,
+          organizationId, executionId, nodeType: 'CONTROL', logicalKey: `${frameworkId}:${controlId}:${observation.id}`,
           status: 'PENDING', label: `${String(frameworkId).toUpperCase()} ${controlId}`,
           metadata: { frameworkId, controlId, observationId: observation.id, assessment: controlFailed ? 'FAIL' : 'PASS' }
         });
@@ -92,10 +92,20 @@ export async function persistScanGraph({ organizationId, executionId, provider, 
 
         const evidence = await upsertGraphNode({
           organizationId, executionId, nodeType: 'EVIDENCE', logicalKey: `${frameworkId}:${controlId}:${observation.id}`,
-          status: controlFailed ? 'PENDING' : 'SUCCEEDED', label: `Evidence — ${String(frameworkId).toUpperCase()} ${controlId}`,
-          metadata: { frameworkId, controlId, observationId: observation.id, source: 'cloud_scan', collectionStatus: controlFailed ? 'BLOCKED_BY_CONTROL' : 'COLLECTED' }
+          status: 'PENDING', label: `Evidence — ${String(frameworkId).toUpperCase()} ${controlId}`,
+          metadata: { frameworkId, controlId, observationId: observation.id, source: 'cloud_scan', collectionStatus: controlFailed ? 'BLOCKED_BY_CONTROL' : 'PENDING' }
         });
         await addDependencyEdge({ organizationId, executionId, fromNodeId: control.id, toNodeId: evidence.id, edgeType: 'DEPENDS_ON' });
+        if (!controlFailed) {
+          await recordAttempt({
+            organizationId,
+            executionId,
+            node: evidence,
+            metadata: { frameworkId, controlId, observationId: observation.id, source: 'cloud_scan' },
+            failed: false,
+            errorCode: null
+          });
+        }
 
         if (controlFailed) {
           const risk = await upsertGraphNode({
