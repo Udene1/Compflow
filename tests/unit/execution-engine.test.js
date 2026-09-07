@@ -7,9 +7,11 @@ import {
   addDependencyEdge,
   startNodeAttempt,
   heartbeatNodeAttempt,
+  recoverStaleNodeAttempts,
   finishNodeAttempt,
   getExecutionGraph,
   getResumableNodes,
+  claimResumableNode,
   resumeExecution
 } from '../../core/execution_engine.js';
 
@@ -63,16 +65,12 @@ describe('Durable execution graph engine', () => {
     expect(graph.timeline.some(item => item.errorCode === 'CONTROL_TIMEOUT')).toBe(true);
   });
 
-  it('allocates unique attempt numbers when two workers start the same node concurrently', async () => {
+  it('allows only one live worker lease for a node', async () => {
     const concurrentExecution = 'exec_engine_concurrency_test';
     const node = await upsertGraphNode({ ...nodeArgs('CONTROL', 'soc2:CONCURRENT'), executionId: concurrentExecution });
-    const attempts = await Promise.all([
-      startNodeAttempt({ organizationId, executionId: concurrentExecution, nodeId: node.id, metadata: { worker: 'a' } }),
-      startNodeAttempt({ organizationId, executionId: concurrentExecution, nodeId: node.id, metadata: { worker: 'b' } })
-    ]);
-
-    expect(attempts.map(a => a.attempt_number).sort((a, b) => a - b)).toEqual([1, 2]);
-    await Promise.all(attempts.map(attempt => finishNodeAttempt({ attemptId: attempt.id, status: 'SUCCEEDED' })));
+    const first = await startNodeAttempt({ organizationId, executionId: concurrentExecution, nodeId: node.id, metadata: { worker: 'a' } });
+    await expect(startNodeAttempt({ organizationId, executionId: concurrentExecution, nodeId: node.id, metadata: { worker: 'b' } })).rejects.toThrow('NODE_ALREADY_RUNNING');
+    await finishNodeAttempt({ attemptId: first.id, status: 'SUCCEEDED' });
   });
 
   it('returns only dependency-ready retryable nodes for resume', async () => {
@@ -91,12 +89,38 @@ describe('Durable execution graph engine', () => {
     expect(resumed.resumableNodeIds).toContain(evidence.id);
   });
 
+  it('claims a dependency-ready node exactly once for resume', async () => {
+    const resumeExecutionId = 'exec_engine_claim_test';
+    const dependency = await upsertGraphNode({ ...nodeArgs('OBSERVATION', 'obs:resume-dependency', 'SUCCEEDED'), executionId: resumeExecutionId });
+    const node = await upsertGraphNode({ ...nodeArgs('CONTROL', 'soc2:RESUME', 'FAILED'), executionId: resumeExecutionId });
+    await addDependencyEdge({ organizationId, executionId: resumeExecutionId, fromNodeId: dependency.id, toNodeId: node.id });
+
+    const attempt = await claimResumableNode({ organizationId, executionId: resumeExecutionId, nodeId: node.id, metadata: { worker: 'resume-worker' } });
+    expect(attempt.status).toBe('RUNNING');
+    expect(attempt.metadata.resume).toBe(true);
+    await expect(claimResumableNode({ organizationId, executionId: resumeExecutionId, nodeId: node.id })).rejects.toThrow('NODE_NOT_RESUMABLE');
+    await finishNodeAttempt({ attemptId: attempt.id, status: 'SUCCEEDED' });
+  });
+
   it('does not expose a RUNNING node as resumable', async () => {
     const runningExecution = 'exec_engine_running_test';
     const node = await upsertGraphNode({ ...nodeArgs('CONTROL', 'soc2:RUNNING'), executionId: runningExecution });
     await startNodeAttempt({ organizationId, executionId: runningExecution, nodeId: node.id });
 
     expect((await getResumableNodes(organizationId, runningExecution)).map(n => n.id)).not.toContain(node.id);
+  });
+
+  it('recovers stale attempts into failed nodes that can be resumed', async () => {
+    const staleExecution = 'exec_engine_stale_test';
+    const node = await upsertGraphNode({ ...nodeArgs('CONTROL', 'soc2:STALE'), executionId: staleExecution });
+    const attempt = await startNodeAttempt({ organizationId, executionId: staleExecution, nodeId: node.id });
+    await recoverStaleNodeAttempts({ organizationId, executionId: staleExecution, staleAfterSeconds: 30 });
+    const graph = await getExecutionGraph(organizationId, staleExecution);
+    const recovered = graph.attempts.find(a => a.id === attempt.id);
+    expect(recovered.status).toBe('FAILED');
+    expect(recovered.errorCode).toBe('STALE_ATTEMPT');
+    expect(graph.nodes.find(n => n.id === node.id).status).toBe('FAILED');
+    expect((await getResumableNodes(organizationId, staleExecution)).map(n => n.id)).toContain(node.id);
   });
 
   it('refreshes a running attempt heartbeat and rejects terminal regressions', async () => {
