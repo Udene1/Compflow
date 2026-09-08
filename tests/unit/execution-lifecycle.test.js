@@ -1,0 +1,95 @@
+import { describe, expect, it, beforeAll } from 'vitest';
+import pool from '../../core/db.js';
+import {
+  ensureExecutionLifecycleSchema,
+  createExecutionRun,
+  getExecutionRun,
+  acquireExecutionLease,
+  heartbeatExecutionLease,
+  finishExecutionRun,
+  recoverExpiredExecutionLeases
+} from '../../core/execution_lifecycle.js';
+
+describe('Durable execution lifecycle and leases', () => {
+  const organizationId = 'org_engine_lifecycle_test';
+  const executionId = 'exec_engine_lifecycle_test';
+
+  beforeAll(async () => {
+    await ensureExecutionLifecycleSchema();
+    await pool.query('DELETE FROM execution_runs WHERE organization_id=$1', [organizationId]);
+  });
+
+  it('creates a durable pending execution', async () => {
+    const run = await createExecutionRun({ organizationId, executionId, metadata: { source: 'test' } });
+    expect(run.status).toBe('PENDING');
+    expect(run.organization_id).toBe(organizationId);
+    expect(run.metadata).toMatchObject({ source: 'test' });
+  });
+
+  it('grants exactly one live execution lease', async () => {
+    const first = await acquireExecutionLease({ organizationId, executionId, workerId: 'worker-a', leaseSeconds: 60 });
+    expect(first.status).toBe('RUNNING');
+    expect(first.lease_owner).toBe('worker-a');
+    expect(first.lease_token).toBeTruthy();
+
+    await expect(acquireExecutionLease({ organizationId, executionId, workerId: 'worker-b', leaseSeconds: 60 }))
+      .rejects.toThrow('EXECUTION_ALREADY_LEASED');
+  });
+
+  it('heartbeats only with the current fencing credentials', async () => {
+    const run = await getExecutionRun(organizationId, executionId);
+    const heartbeat = await heartbeatExecutionLease({
+      organizationId,
+      executionId,
+      workerId: 'worker-a',
+      leaseToken: run.lease_token,
+      leaseSeconds: 60
+    });
+    expect(heartbeat.id).toBe(executionId);
+
+    await expect(heartbeatExecutionLease({
+      organizationId,
+      executionId,
+      workerId: 'worker-b',
+      leaseToken: run.lease_token,
+      leaseSeconds: 60
+    })).rejects.toThrow('EXECUTION_LEASE_LOST');
+  });
+
+  it('finishes only through the active lease and prevents terminal regression', async () => {
+    const run = await getExecutionRun(organizationId, executionId);
+    const finished = await finishExecutionRun({
+      organizationId,
+      executionId,
+      workerId: 'worker-a',
+      leaseToken: run.lease_token,
+      status: 'SUCCEEDED'
+    });
+    expect(finished.status).toBe('SUCCEEDED');
+    expect(finished.lease_token).toBeNull();
+    expect(finished.finished_at).toBeTruthy();
+
+    await expect(acquireExecutionLease({ organizationId, executionId, workerId: 'worker-b' }))
+      .rejects.toThrow('EXECUTION_ALREADY_TERMINAL');
+  });
+
+  it('recovers an expired running execution lease atomically', async () => {
+    const staleId = 'exec_engine_lifecycle_stale';
+    await createExecutionRun({ organizationId, executionId: staleId });
+    const run = await acquireExecutionLease({ organizationId, executionId: staleId, workerId: 'dead-worker', leaseSeconds: 15 });
+    await pool.query(`UPDATE execution_runs SET lease_expires_at=NOW()-INTERVAL '1 second' WHERE id=$1`, [staleId]);
+
+    const recovered = await recoverExpiredExecutionLeases({ organizationId, executionId: staleId });
+    expect(recovered).toHaveLength(1);
+    expect(recovered[0].status).toBe('FAILED');
+    expect(recovered[0].error_code).toBe('STALE_EXECUTION_LEASE');
+
+    const after = await getExecutionRun(organizationId, staleId);
+    expect(after.lease_owner).toBeNull();
+    expect(after.lease_token).toBeNull();
+    expect(after.status).toBe('FAILED');
+
+    await expect(heartbeatExecutionLease({ organizationId, executionId: staleId, workerId: 'dead-worker', leaseToken: run.lease_token }))
+      .rejects.toThrow('EXECUTION_LEASE_LOST');
+  });
+});
