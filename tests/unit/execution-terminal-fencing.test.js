@@ -7,7 +7,6 @@ import { listExecutionEvents } from '../../core/execution_events.js';
 
 describe('Real atomic execution terminal fencing', () => {
   const organizationId = 'org_execution_terminal_fencing_test';
-  const executions = [];
 
   beforeAll(async () => {
     await ensureExecutionLifecycleSchema();
@@ -23,7 +22,6 @@ describe('Real atomic execution terminal fencing', () => {
 
   it('rejects terminal mutation after lease expiry without changing the attempt', async () => {
     const executionId = 'exec_atomic_terminal_expiry';
-    executions.push(executionId);
     await createExecutionRun({ organizationId, executionId });
     const lease = await acquireExecutionLease({ organizationId, executionId, workerId: 'worker-old', leaseSeconds: 15 });
     const node = await upsertGraphNode({ organizationId, executionId, nodeType: 'EXECUTION', logicalKey: executionId });
@@ -45,7 +43,6 @@ describe('Real atomic execution terminal fencing', () => {
 
   it('finishes attempt and execution in one durable transaction while preserving audit order', async () => {
     const executionId = 'exec_atomic_terminal_success';
-    executions.push(executionId);
     await createExecutionRun({ organizationId, executionId });
     const lease = await acquireExecutionLease({ organizationId, executionId, workerId: 'worker-good', leaseSeconds: 30 });
     const node = await upsertGraphNode({ organizationId, executionId, nodeType: 'EXECUTION', logicalKey: executionId });
@@ -59,15 +56,15 @@ describe('Real atomic execution terminal fencing', () => {
     expect(result.execution.status).toBe('SUCCEEDED');
     expect(result.attempt.status).toBe('SUCCEEDED');
     const events = await listExecutionEvents({ organizationId, executionId });
-    expect(events.some(event => event.event_type === 'NODE_ATTEMPT_FINISHED')).toBe(true);
-    expect(events.some(event => event.event_type === 'EXECUTION_FINISHED')).toBe(true);
-    expect(events.find(event => event.event_type === 'NODE_ATTEMPT_FINISHED').sequence)
-      .toBeLessThan(events.find(event => event.event_type === 'EXECUTION_FINISHED').sequence);
+    const nodeFinished = events.find(event => event.event_type === 'NODE_ATTEMPT_FINISHED');
+    const executionFinished = events.find(event => event.event_type === 'EXECUTION_FINISHED');
+    expect(nodeFinished).toBeTruthy();
+    expect(executionFinished).toBeTruthy();
+    expect(BigInt(nodeFinished.sequence)).toBeLessThan(BigInt(executionFinished.sequence));
   });
 
   it('allows a replacement worker to acquire a recovered execution while the old token remains fenced', async () => {
     const executionId = 'exec_atomic_replacement_worker';
-    executions.push(executionId);
     await createExecutionRun({ organizationId, executionId });
     const oldLease = await acquireExecutionLease({ organizationId, executionId, workerId: 'worker-old', leaseSeconds: 15 });
     await pool.query("UPDATE execution_runs SET lease_expires_at=NOW()-INTERVAL '1 second' WHERE id=$1", [executionId]);
