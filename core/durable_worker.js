@@ -9,7 +9,7 @@ import {
 } from './execution_lifecycle.js';
 
 function workerId() {
-  return process.env.COMPflow_WORKER_ID || process.env.HOSTNAME || `worker-${process.pid}`;
+  return process.env.COMPFLOW_WORKER_ID || process.env.HOSTNAME || `worker-${process.pid}`;
 }
 
 export async function durableWorkerHandler(payload) {
@@ -52,12 +52,7 @@ export async function durableWorkerHandler(payload) {
   }, async () => {
     try {
       const result = await workerHandler(payload);
-      await heartbeatExecutionLease({
-        organizationId,
-        executionId,
-        workerId: owner,
-        leaseToken: lease.lease_token
-      });
+      await heartbeatExecutionLease({ organizationId, executionId, workerId: owner, leaseToken: lease.lease_token });
       const terminalStatus = result?.status === 'completed' || result?.status === 'partial' ? 'SUCCEEDED' : 'FAILED';
       await finishExecution(execution.attempt.id, terminalStatus, terminalStatus === 'SUCCEEDED' ? null : 'EXECUTION_FAILED');
       await finishExecutionRun({
