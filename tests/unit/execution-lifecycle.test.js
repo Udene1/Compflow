@@ -92,4 +92,39 @@ describe('Durable execution lifecycle and leases', () => {
     await expect(heartbeatExecutionLease({ organizationId, executionId: staleId, workerId: 'dead-worker', leaseToken: run.lease_token }))
       .rejects.toThrow('EXECUTION_LEASE_LOST');
   });
+
+  it('hands an expired execution from recovery to one new lease holder without reviving the old worker', async () => {
+    const raceId = 'exec_engine_lifecycle_recovery_race';
+    await createExecutionRun({ organizationId, executionId: raceId });
+    const oldLease = await acquireExecutionLease({ organizationId, executionId: raceId, workerId: 'old-worker', leaseSeconds: 15 });
+    await pool.query(`UPDATE execution_runs SET lease_expires_at=NOW()-INTERVAL '1 second' WHERE id=$1`, [raceId]);
+
+    const [recoveryResult, acquireResult] = await Promise.all([
+      recoverExpiredExecutionLeases({ organizationId, executionId: raceId }),
+      acquireExecutionLease({ organizationId, executionId: raceId, workerId: 'new-worker', leaseSeconds: 60 })
+    ]);
+
+    const finalRun = await getExecutionRun(organizationId, raceId);
+    expect(finalRun.status).toBe('RUNNING');
+    expect(finalRun.lease_owner).toBe('new-worker');
+    expect(finalRun.lease_token).toBeTruthy();
+    expect(finalRun.lease_token).not.toBe(oldLease.lease_token);
+    expect(recoveryResult.length + (acquireResult ? 1 : 0)).toBeGreaterThanOrEqual(1);
+
+    await expect(heartbeatExecutionLease({
+      organizationId,
+      executionId: raceId,
+      workerId: 'old-worker',
+      leaseToken: oldLease.lease_token
+    })).rejects.toThrow('EXECUTION_LEASE_LOST');
+
+    await finishExecutionRun({
+      organizationId,
+      executionId: raceId,
+      workerId: 'new-worker',
+      leaseToken: finalRun.lease_token,
+      status: 'FAILED',
+      errorCode: 'TEST_CLEANUP'
+    });
+  });
 });
