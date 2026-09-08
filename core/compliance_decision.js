@@ -26,7 +26,12 @@ export async function ensureDecisionSchema() {
 }
 
 function assertOutcome(outcome) { if (!OUTCOMES.has(outcome)) throw new Error('DECISION_OUTCOME_INVALID'); }
-function finalDecisionHash(organizationId, executionId, outcome, summary) { return crypto.createHash('sha256').update(JSON.stringify({ organizationId, executionId, outcome, summary })).digest('hex'); }
+function canonicalize(value) {
+  if (Array.isArray(value)) return value.map(canonicalize);
+  if (value && typeof value === 'object') return Object.fromEntries(Object.keys(value).sort().map(key => [key, canonicalize(value[key])]));
+  return value;
+}
+function finalDecisionHash(organizationId, executionId, outcome, summary) { return crypto.createHash('sha256').update(JSON.stringify(canonicalize({ organizationId, executionId, outcome, summary }))).digest('hex'); }
 
 export async function recordControlDecision({ organizationId, executionId, controlId, scopeKey, outcome, evidenceHash = null, verificationHash = null, rationale = {} } = {}) {
   await ensureDecisionSchema(); assertOutcome(outcome);
