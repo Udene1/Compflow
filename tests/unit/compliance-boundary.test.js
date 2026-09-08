@@ -33,6 +33,7 @@ describe('compliance product boundary', () => {
 
   it('records decision history idempotently while keeping the final decision immutable', async () => {
     await clean();
+    await expect(recordControlDecision({ organizationId, executionId, controlId: 'CC6.1', scopeKey: 'CC6.1:evaluate:missing-evidence', outcome: 'PASS', evidenceHash: 'e'.repeat(64) })).rejects.toThrow('DECISION_EVIDENCE_INVALID');
     const node = await upsertGraphNode({ organizationId, executionId, nodeType: 'CONTROL_EVALUATION', logicalKey: 'CC6.1:evaluate:boundary', status: 'PENDING', metadata: { controlId: 'CC6.1' } });
     const attempt = await startNodeAttempt({ organizationId, executionId, nodeId: node.id, metadata: { result: { assessment: 'PASS' } } });
     const evidence = await recordEvidence({ organizationId, executionId, nodeId: node.id, attemptId: attempt.id, controlId: 'CC6.1', provider: 'aws', connectionId: 'conn_boundary_test', resourceId: 'resource-boundary', sourceType: 'aws_config', sourceRef: 'scan:resource-boundary', evidenceKind: 'observation', evidence: { resource: { id: 'resource-boundary', assessment: 'PASS' } } });
