@@ -20,6 +20,12 @@ describe('deterministic remediation verification', () => {
     expect(result.outcome).toBe('VERIFICATION_FAILED');
   });
 
+  it('IAM wildcard verification requires complete policy inspection', () => {
+    expect(evaluateFreshEvidence({ code: 'IAM_WILDCARD_PERMISSION', evidence: { inspectionComplete: false, policyCount: 0, policies: [] } }).outcome).toBe('INCONCLUSIVE');
+    expect(evaluateFreshEvidence({ code: 'IAM_WILDCARD_PERMISSION', evidence: { inspectionComplete: true, policyCount: 1, policies: [{ type: 'inline', wildcard: true }] } }).outcome).toBe('VERIFICATION_FAILED');
+    expect(evaluateFreshEvidence({ code: 'IAM_WILDCARD_PERMISSION', evidence: { inspectionComplete: true, policyCount: 2, policies: [{ type: 'inline', wildcard: false }, { type: 'managed', wildcard: false }] } }).outcome).toBe('VERIFIED');
+  });
+
   it('unknown evidence never becomes a false verification', () => {
     const result = evaluateFreshEvidence({ code: 'UNKNOWN_CODE', evidence: { healthy: true } });
     expect(result.outcome).toBe('INCONCLUSIVE');
