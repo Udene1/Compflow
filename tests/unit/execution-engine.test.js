@@ -20,18 +20,12 @@ describe('Durable execution graph engine', () => {
     await pool.query('DELETE FROM execution_graph_nodes WHERE organization_id=$1', [organizationId]);
   });
 
-  const nodeArgs = (nodeType, logicalKey) => ({
-    organizationId,
-    executionId: 'exec_engine_test',
-    nodeType,
-    logicalKey,
-    status: 'PENDING'
-  });
+  const nodeArgs = (nodeType, logicalKey) => ({ organizationId, executionId: 'exec_engine_test', nodeType, logicalKey, status: 'PENDING' });
 
   it('generates stable usage and edge IDs', async () => {
-    const a = await upsertGraphNode(nodeArgs('CONTROL', 'soc2:AWS'));
-    const b = await upsertGraphNode(nodeArgs('CONTROL', 'soc2:AWS'));
-    expect(a.id).toBe(b.id);
+    const a = await upsertGraphNode(nodeArgs('CONTROL', 'soc2:AWS-A'));
+    const b = await upsertGraphNode(nodeArgs('CONTROL', 'soc2:AWS-B'));
+    expect(a.id).not.toBe(b.id);
     const edge = await addDependencyEdge({ organizationId, executionId: 'exec_engine_test', fromNodeId: a.id, toNodeId: b.id });
     expect(edge.id).toBe((await addDependencyEdge({ organizationId, executionId: 'exec_engine_test', fromNodeId: a.id, toNodeId: b.id })).id);
   });
@@ -62,9 +56,12 @@ describe('Durable execution graph engine', () => {
     const source = await upsertGraphNode({ ...nodeArgs('SOURCE', 'ready-source'), executionId, status: 'SUCCEEDED' });
     const dependent = await upsertGraphNode({ ...nodeArgs('DEPENDENT', 'ready-dependent'), executionId, status: 'FAILED' });
     const blocked = await upsertGraphNode({ ...nodeArgs('DEPENDENT', 'blocked'), executionId, status: 'FAILED' });
+    const blocker = await upsertGraphNode({ ...nodeArgs('SOURCE', 'blocked-dependency'), executionId, status: 'FAILED' });
     await addDependencyEdge({ organizationId, executionId, fromNodeId: source.id, toNodeId: dependent.id });
-    await addDependencyEdge({ organizationId, executionId, fromNodeId: blocked.id, toNodeId: dependent.id });
-    expect((await getResumableNodes(organizationId, executionId)).map(n => n.id)).toContain(dependent.id);
+    await addDependencyEdge({ organizationId, executionId, fromNodeId: blocker.id, toNodeId: blocked.id });
+    const resumableIds = (await getResumableNodes(organizationId, executionId)).map(n => n.id);
+    expect(resumableIds).toContain(dependent.id);
+    expect(resumableIds).not.toContain(blocked.id);
   });
 
   it('claims a dependency-ready node exactly once for resume', async () => {
