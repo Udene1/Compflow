@@ -4,6 +4,7 @@ import { deriveExecutionRemediationBreakpoints } from '../core/remediation_break
 import { getExecutionExposurePaths } from '../core/exposure_paths.js';
 import { proposeRemediation, approveRemediation, executeApprovedRemediation, reportRemediationApplied, requestRemediationVerification, verifyRemediation, listRemediations } from '../core/remediation_verification.js';
 import { runRemediationPostcheck } from '../core/remediation_postcheck.js';
+import { getRemediationSecurityImpact } from '../core/remediation_impact.js';
 import pool from '../core/db.js';
 
 const router = express.Router();
@@ -29,6 +30,7 @@ router.get('/executions/:executionId/remediations', async (req, res, next) => {
 router.get('/executions/:executionId/remediation-candidates', async (req, res, next) => {
   try { const organizationId=org(req); if(!organizationId)return res.status(403).json({error:'ORGANIZATION_CONTEXT_REQUIRED'}); const executionId=validId(req.params.executionId,'EXECUTION_ID_INVALID'); return res.json({executionId,candidates:await candidatesFor({organizationId,executionId})}); } catch(error){next(error);}
 });
+router.get('/executions/:executionId/remediations/:remediationId/impact', async (req,res,next)=>{try{const organizationId=org(req);if(!organizationId)return res.status(403).json({error:'ORGANIZATION_CONTEXT_REQUIRED'});const executionId=validId(req.params.executionId,'EXECUTION_ID_INVALID');const remediationId=validId(req.params.remediationId,'REMEDIATION_ID_INVALID');return res.json(await getRemediationSecurityImpact({organizationId,executionId,remediationId}));}catch(error){next(error);}});
 router.post('/executions/:executionId/remediations', async (req, res, next) => {
   try {
     const organizationId=org(req); if(!organizationId)return res.status(403).json({error:'ORGANIZATION_CONTEXT_REQUIRED'}); authorize(req);
