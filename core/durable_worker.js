@@ -1,8 +1,8 @@
 import { handler as workerHandler } from '../worker.js';
-import { beginExecution, finishExecution } from './execution_worker_hooks.js';
+import { beginExecution } from './execution_worker_hooks.js';
 import { withExecutionContext } from './execution_context.js';
 import { heartbeatNodeAttempt } from './execution_engine.js';
-import { assertExecutionLease } from './execution_fencing.js';
+import { finishExecutionFenced } from './execution_terminal.js';
 import {
   createExecutionRun,
   acquireExecutionLease,
@@ -98,22 +98,16 @@ export async function durableWorkerHandler(payload) {
     try {
       const result = await workerHandler(payload);
 
-      // Fence the terminal commit: a worker that lost its lease cannot publish a
-      // successful execution merely because its provider work returned normally.
+      // The terminal transition is fenced in the same PostgreSQL transaction as
+      // the attempt update. This closes the check-then-write lease race.
       await heartbeat();
       if (heartbeatFailure || leaseLost) throw heartbeatFailure || new Error('EXECUTION_LEASE_LOST');
-      try {
-        await assertExecutionLease({ organizationId, executionId, workerId: owner, leaseToken: lease.lease_token });
-      } catch (error) {
-        leaseLost = true;
-        throw error;
-      }
 
       const terminalStatus = result?.status === 'completed' || result?.status === 'partial' ? 'SUCCEEDED' : 'FAILED';
-      await finishExecution(execution.attempt.id, terminalStatus, terminalStatus === 'SUCCEEDED' ? null : 'EXECUTION_FAILED');
-      await finishExecutionRun({
+      await finishExecutionFenced({
         organizationId,
         executionId,
+        attemptId: execution.attempt.id,
         workerId: owner,
         leaseToken: lease.lease_token,
         status: terminalStatus,
@@ -121,10 +115,18 @@ export async function durableWorkerHandler(payload) {
       });
       return result;
     } catch (error) {
-      // Once fencing is lost, do not mutate the node attempt: recovery or the
-      // current lease holder owns the durable state from this point onward.
+      // Once fencing is lost, recovery or the current lease holder owns durable state.
       if (!leaseLost && !heartbeatFailure) {
-        await finishExecution(execution.attempt.id, 'FAILED', 'EXECUTION_FAILED', 'Execution failed').catch(() => {});
+        await finishExecutionFenced({
+          organizationId,
+          executionId,
+          attemptId: execution.attempt.id,
+          workerId: owner,
+          leaseToken: lease.lease_token,
+          status: 'FAILED',
+          errorCode: 'EXECUTION_FAILED',
+          errorMessage: 'Execution failed'
+        }).catch(() => {});
       }
       await finishExecutionRun({
         organizationId,
