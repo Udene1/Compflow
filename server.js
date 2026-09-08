@@ -16,6 +16,7 @@ import remediateHandler from './api/remediate.js';
 import executionGraphHandler from './api/execution-graph.js';
 import authRouter from './api/auth.js';
 import onboardingRouter from './api/onboarding.js';
+import remediationVerificationRouter from './api/remediation-verification.js';
 import v1Router from './api/v1.js';
 import { durableWorkerHandler } from './core/durable_worker.js';
 import { listenWorkerQueue, closeQueue } from './core/queue.js';
@@ -80,6 +81,7 @@ app.get('/health/ready', async (req, res) => {
     } catch (error) { console.error('[READINESS] check failed:', error?.message || 'unknown error'); return res.status(503).json({ status: 'NOT_READY' }); }
 });
 app.use('/api/auth', authLimiter, authRouter);
+app.use('/api/remediation', heavyActionLimiter, requireAuth([ROLES.ENGINEER, ROLES.ADMIN, ROLES.OWNER]), remediationVerificationRouter);
 app.use('/api/v1', generalLimiter, requireAuth([ROLES.VIEWER]), v1Router);
 app.use('/api/onboarding', requireAuth(), onboardingRouter);
 app.post('/api/scan', heavyActionLimiter, requireAuth([ROLES.ENGINEER]), scanHandler);
@@ -106,7 +108,8 @@ app.use((error, req, res, next) => {
     if (error?.message === 'CORS origin blocked') return res.status(403).json({ error: 'CORS_ORIGIN_BLOCKED' });
     const known = new Map([
         ['EXECUTION_NOT_FOUND', 404], ['EXECUTION_PLAN_NOT_FOUND', 404], ['EXECUTION_ID_INVALID', 400], ['EXECUTION_ID_CONFLICT', 409], ['INTENT_REQUIRED', 400], ['INTENT_IMMUTABLE', 409], ['IDEMPOTENCY_KEY_INVALID', 400],
-        ['ACTION_INVALID', 400], ['NODE_IDS_INVALID', 400], ['EXECUTION_ALREADY_LEASED', 409], ['EXECUTION_ALREADY_TERMINAL', 409], ['DECISION_EXECUTION_NOT_TERMINAL', 409], ['EXECUTION_MISSING_CONNECTION_METADATA', 409], ['QUEUE_UNAVAILABLE', 503], ['FORBIDDEN_ACTION', 403], ['EXECUTION_STATUS_INVALID', 400]
+        ['ACTION_INVALID', 400], ['NODE_IDS_INVALID', 400], ['EXECUTION_ALREADY_LEASED', 409], ['EXECUTION_ALREADY_TERMINAL', 409], ['DECISION_EXECUTION_NOT_TERMINAL', 409], ['EXECUTION_MISSING_CONNECTION_METADATA', 409], ['QUEUE_UNAVAILABLE', 503], ['FORBIDDEN_ACTION', 403], ['EXECUTION_STATUS_INVALID', 400],
+        ['REMEDIATION_NOT_FOUND', 404], ['REMEDIATION_INPUT_INVALID', 400], ['REMEDIATION_TRANSITION_INVALID', 409], ['PATHID_INVALID', 400], ['FINDINGID_INVALID', 400], ['CODE_INVALID', 400], ['RESOURCEID_INVALID', 400], ['ACTION_INVALID', 400]
     ]);
     const status = error?.status || known.get(error?.message) || 500;
     console.error('[HTTP] Unhandled request error:', error?.message || error);
