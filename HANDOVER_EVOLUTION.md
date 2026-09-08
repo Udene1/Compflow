@@ -385,5 +385,33 @@ Features should be added only when they preserve the authority, fencing, recover
 
 ---
 
+## 22. 2026-09-08 Intent → Plan → Execution → Evidence → Verification → Decision Product Boundary
+
+The compliance domain is now being treated as a durable chain rather than a collection of loosely related scan functions:
+
+```text
+Intent
+  → immutable normalized intent + hash
+  → policy/plan compilation
+  → immutable persisted plan + stable graph identities
+  → durable node attempts + real BullMQ dispatch
+  → authoritative evidence records
+  → verification records
+  → deterministic control decisions
+  → immutable final decision artifact
+```
+
+Evidence is first-class durable data with provider/connection/resource provenance, source references, observation time, freshness expiry, bounded lineage, integrity hashes, and legacy promotion. Verification consumes durable evidence rather than treating worker output as the final truth. Decision derivation is idempotent when its substantive inputs are unchanged.
+
+The public `/api/v1` boundary is authenticated and organization-scoped. It exposes durable execution state, evidence, decisions, provider capabilities, live graph streaming, and execution controls. The existing dashboard consumes this boundary as a projection rather than becoming an execution authority.
+
+The plan boundary also canonicalizes provider aliases into the provider registry's supported identities. This prevents values such as `DO` from leaking into durable execution metadata as a second provider identity.
+
+Final decisions are now immutable artifacts before re-derivation: replay returns the stored artifact, and the stored SHA-256 is checked against its persisted outcome/summary so direct corruption is detected rather than silently accepted.
+
+### Verification status
+
+The latest known CI failure was based on an older checkout (`4f0f63fc675ccb521201a3e24fe9a8a9b332e527`) and therefore did not include several subsequent fixes. That run reported 8 failures: the queue integration test expected an export that the later queue boundary already provides, the planner had not yet received the technical-control/provider-boundary fixes, and final-decision history behavior exposed a replay-ordering flaw. Subsequent commits address those issues. The full post-fix CI gate remains mandatory before this milestone is declared green.
+
 *Last updated: September 8, 2026*
 *Purpose: preserve the architectural history, reliability discipline, security decisions, and current engineering direction of Compflow.*
