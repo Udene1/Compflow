@@ -1,6 +1,6 @@
 import { describe, expect, it, beforeAll, afterAll } from 'vitest';
 import pool from '../../core/db.js';
-import { ensureExecutionLifecycleSchema, createExecutionRun, acquireExecutionLease, recoverExpiredExecutionLeases, getExecutionRun } from '../../core/execution_lifecycle.js';
+import { ensureExecutionLifecycleSchema, createExecutionRun, acquireExecutionLease, recoverExpiredExecutionLeases, getExecutionRun, cancelExecutionRun } from '../../core/execution_lifecycle.js';
 import { ensureExecutionGraph, upsertGraphNode, startNodeAttempt } from '../../core/execution_engine.js';
 import { finishExecutionFenced } from '../../core/execution_terminal.js';
 import { listExecutionEvents } from '../../core/execution_events.js';
@@ -26,15 +26,9 @@ describe('Real atomic execution terminal fencing', () => {
     const lease = await acquireExecutionLease({ organizationId, executionId, workerId: 'worker-old', leaseSeconds: 15 });
     const node = await upsertGraphNode({ organizationId, executionId, nodeType: 'EXECUTION', logicalKey: executionId });
     const attempt = await startNodeAttempt({ organizationId, executionId, nodeId: node.id });
-
     await pool.query("UPDATE execution_runs SET lease_expires_at=NOW()-INTERVAL '1 second' WHERE id=$1", [executionId]);
     await recoverExpiredExecutionLeases({ organizationId, executionId });
-
-    await expect(finishExecutionFenced({
-      organizationId, executionId, attemptId: attempt.id,
-      workerId: 'worker-old', leaseToken: lease.lease_token, status: 'SUCCEEDED'
-    })).rejects.toThrow('EXECUTION_LEASE_LOST');
-
+    await expect(finishExecutionFenced({ organizationId, executionId, attemptId: attempt.id, workerId: 'worker-old', leaseToken: lease.lease_token, status: 'SUCCEEDED' })).rejects.toThrow('EXECUTION_LEASE_LOST');
     const attemptRow = (await pool.query('SELECT status,error_code FROM execution_attempts WHERE id=$1', [attempt.id])).rows[0];
     expect(attemptRow.status).toBe('FAILED');
     expect(attemptRow.error_code).toBe('STALE_EXECUTION_LEASE');
@@ -47,12 +41,7 @@ describe('Real atomic execution terminal fencing', () => {
     const lease = await acquireExecutionLease({ organizationId, executionId, workerId: 'worker-good', leaseSeconds: 30 });
     const node = await upsertGraphNode({ organizationId, executionId, nodeType: 'EXECUTION', logicalKey: executionId });
     const attempt = await startNodeAttempt({ organizationId, executionId, nodeId: node.id });
-
-    const result = await finishExecutionFenced({
-      organizationId, executionId, attemptId: attempt.id,
-      workerId: 'worker-good', leaseToken: lease.lease_token, status: 'SUCCEEDED'
-    });
-
+    const result = await finishExecutionFenced({ organizationId, executionId, attemptId: attempt.id, workerId: 'worker-good', leaseToken: lease.lease_token, status: 'SUCCEEDED' });
     expect(result.execution.status).toBe('SUCCEEDED');
     expect(result.attempt.status).toBe('SUCCEEDED');
     const events = await listExecutionEvents({ organizationId, executionId });
@@ -70,13 +59,22 @@ describe('Real atomic execution terminal fencing', () => {
     await pool.query("UPDATE execution_runs SET lease_expires_at=NOW()-INTERVAL '1 second' WHERE id=$1", [executionId]);
     await recoverExpiredExecutionLeases({ organizationId, executionId });
     const replacement = await acquireExecutionLease({ organizationId, executionId, workerId: 'worker-new', leaseSeconds: 30 });
-
-    await expect(finishExecutionFenced({
-      organizationId, executionId, attemptId: 'missing-attempt',
-      workerId: 'worker-old', leaseToken: oldLease.lease_token, status: 'SUCCEEDED'
-    })).rejects.toThrow('EXECUTION_LEASE_LOST');
-
+    await expect(finishExecutionFenced({ organizationId, executionId, attemptId: 'missing-attempt', workerId: 'worker-old', leaseToken: oldLease.lease_token, status: 'SUCCEEDED' })).rejects.toThrow('EXECUTION_LEASE_LOST');
     expect(replacement.lease_owner).toBe('worker-new');
     expect((await getExecutionRun(organizationId, executionId)).status).toBe('RUNNING');
+  });
+
+  it('fences a worker that races with operator cancellation', async () => {
+    const executionId = 'exec_atomic_cancel_race';
+    await createExecutionRun({ organizationId, executionId });
+    const lease = await acquireExecutionLease({ organizationId, executionId, workerId: 'worker-racing', leaseSeconds: 30 });
+    const node = await upsertGraphNode({ organizationId, executionId, nodeType: 'EXECUTION', logicalKey: executionId });
+    const attempt = await startNodeAttempt({ organizationId, executionId, nodeId: node.id });
+    const cancelled = await cancelExecutionRun({ organizationId, executionId, reason: 'operator cancelled', actorId: 'operator-1' });
+    expect(cancelled.status).toBe('CANCELLED');
+    await expect(finishExecutionFenced({ organizationId, executionId, attemptId: attempt.id, workerId: 'worker-racing', leaseToken: lease.lease_token, status: 'SUCCEEDED' })).rejects.toThrow('EXECUTION_LEASE_LOST');
+    const rows = await pool.query('SELECT status FROM execution_attempts WHERE id=$1', [attempt.id]);
+    expect(rows.rows[0].status).toBe('CANCELLED');
+    expect((await getExecutionRun(organizationId, executionId)).status).toBe('CANCELLED');
   });
 });
