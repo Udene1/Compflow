@@ -68,9 +68,21 @@ export async function cancelExecutionRun({ organizationId, executionId, reason =
   } catch (error) { await client.query('ROLLBACK').catch(() => {}); throw error; } finally { client.release(); }
 }
 export async function recoverExpiredExecutionLeases({ organizationId = null, executionId = null } = {}) {
-  await ensureSchema(); const params = []; const filters = ["status='RUNNING'", 'lease_expires_at IS NOT NULL', 'lease_expires_at<=NOW()']; if (organizationId) { params.push(organizationId); filters.push(`organization_id=$${params.length}`); } if (executionId) { params.push(executionId); filters.push(`id=$${params.length}`); }
-  const result = await pool.query(`UPDATE execution_runs SET status='FAILED', finished_at=NOW(), error_code='STALE_EXECUTION_LEASE', error_message='Execution worker lease expired', lease_owner=NULL, lease_token=NULL, lease_expires_at=NULL, updated_at=NOW(), version=version+1 WHERE ${filters.join(' AND ')} RETURNING *`, params);
-  for (const run of result.rows) await appendExecutionEvent({ organizationId: run.organization_id, executionId: run.id, eventType: 'EXECUTION_LEASE_EXPIRED', actorType: 'SYSTEM', result: 'failed', payload: { previousStatus: 'RUNNING', errorCode: 'STALE_EXECUTION_LEASE' } });
-  return result.rows;
+  await ensureSchema(); const client = await pool.connect(); const params = []; const filters = ["status='RUNNING'", 'lease_expires_at IS NOT NULL', 'lease_expires_at<=NOW()']; if (organizationId) { params.push(organizationId); filters.push(`organization_id=$${params.length}`); } if (executionId) { params.push(executionId); filters.push(`id=$${params.length}`); }
+  try {
+    await client.query('BEGIN');
+    const runs = await client.query(`SELECT * FROM execution_runs WHERE ${filters.join(' AND ')} FOR UPDATE` , params);
+    const recovered = [];
+    for (const run of runs.rows) {
+      const updated = await client.query(`UPDATE execution_runs SET status='FAILED', finished_at=NOW(), error_code='STALE_EXECUTION_LEASE', error_message='Execution worker lease expired', lease_owner=NULL, lease_token=NULL, lease_expires_at=NULL, updated_at=NOW(), version=version+1 WHERE id=$1 AND organization_id=$2 AND status='RUNNING' RETURNING *`, [run.id, run.organization_id]);
+      if (!updated.rows[0]) continue;
+      await client.query(`UPDATE execution_attempts SET status='FAILED', finished_at=NOW(), heartbeat_at=NOW(), error_code='STALE_EXECUTION_LEASE', error_message='Execution worker lease expired' WHERE organization_id=$1 AND execution_id=$2 AND status='RUNNING'`, [run.organization_id, run.id]);
+      await client.query(`UPDATE execution_graph_nodes SET status='FAILED', updated_at=NOW() WHERE organization_id=$1 AND execution_id=$2 AND status='RUNNING'`, [run.organization_id, run.id]);
+      await appendExecutionEvent({ client, organizationId: run.organization_id, executionId: run.id, eventType: 'EXECUTION_LEASE_EXPIRED', actorType: 'SYSTEM', result: 'failed', payload: { previousStatus: 'RUNNING', errorCode: 'STALE_EXECUTION_LEASE' } });
+      recovered.push(updated.rows[0]);
+    }
+    await client.query('COMMIT');
+    return recovered;
+  } catch (error) { await client.query('ROLLBACK').catch(() => {}); throw error; } finally { client.release(); }
 }
 export async function listActiveExecutions(organizationId) { await ensureSchema(); if (!organizationId) throw new Error('ORGANIZATION_ID_REQUIRED'); const result = await pool.query('SELECT * FROM execution_runs WHERE organization_id=$1 ORDER BY created_at ASC', [organizationId]); return result.rows; }
