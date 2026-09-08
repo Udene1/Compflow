@@ -7,24 +7,17 @@ import { ensureExecutionGraph, upsertGraphNode, startNodeAttempt, finishNodeAtte
 const organizationId = 'org_boundary_test';
 const executionId = 'exec_boundary_test';
 
-beforeAll(async () => {
-  await ensureDecisionSchema();
-  await ensureExecutionGraph();
-  await pool.query('DELETE FROM execution_final_decisions WHERE organization_id=$1 AND execution_id=$2', [organizationId, executionId]);
-  await pool.query('DELETE FROM compliance_decision_history WHERE organization_id=$1 AND execution_id=$2', [organizationId, executionId]);
-  await pool.query('DELETE FROM compliance_decisions WHERE organization_id=$1 AND execution_id=$2', [organizationId, executionId]);
-  await pool.query('DELETE FROM execution_graph_edges WHERE organization_id=$1 AND execution_id=$2', [organizationId, executionId]);
-  await pool.query('DELETE FROM execution_graph_nodes WHERE organization_id=$1 AND execution_id=$2', [organizationId, executionId]);
-});
-
-afterAll(async () => {
+async function clean() {
   await pool.query('DELETE FROM execution_final_decisions WHERE organization_id=$1 AND execution_id=$2', [organizationId, executionId]);
   await pool.query('DELETE FROM compliance_decision_history WHERE organization_id=$1 AND execution_id=$2', [organizationId, executionId]);
   await pool.query('DELETE FROM compliance_decisions WHERE organization_id=$1 AND execution_id=$2', [organizationId, executionId]);
   await pool.query('DELETE FROM execution_attempts WHERE organization_id=$1 AND execution_id=$2', [organizationId, executionId]);
   await pool.query('DELETE FROM execution_graph_edges WHERE organization_id=$1 AND execution_id=$2', [organizationId, executionId]);
   await pool.query('DELETE FROM execution_graph_nodes WHERE organization_id=$1 AND execution_id=$2', [organizationId, executionId]);
-});
+}
+
+beforeAll(async () => { await ensureDecisionSchema(); await ensureExecutionGraph(); await clean(); });
+afterAll(clean);
 
 describe('compliance product boundary', () => {
   it('centralizes provider capabilities without aliases leaking into execution', () => {
