@@ -2,12 +2,13 @@ import crypto from 'crypto';
 import { GoogleGenerativeAI } from '@google/generative-ai';
 import pool from './db.js';
 import { appendExecutionEvent } from './execution_events.js';
+import { aggregateSecurityRisk } from './security_risk.js';
 
 const MODEL = process.env.GEMINI_ANALYST_MODEL || process.env.GEMINI_MODEL || 'gemini-1.5-flash';
 const MAX_RETRIES = 3;
 const MAX_FINDINGS = 100;
 const MAX_PATHS = 50;
-const PROMPT_VERSION = 'security-analyst-v1';
+const PROMPT_VERSION = 'security-analyst-v2';
 
 function clean(value, max = 500) { return String(value ?? '').trim().slice(0, max); }
 function sha256(value) { return crypto.createHash('sha256').update(value).digest('hex'); }
@@ -19,7 +20,8 @@ function normalizeFinding(row) {
     resourceId: clean(row.resource_id, 255),
     controlId: clean(row.control_id, 128),
     severity: clean(row.severity, 32).toUpperCase(),
-    status: clean(row.status, 32)
+    status: clean(row.status, 32),
+    issue: clean(row.issue || row.title || row.description, 500)
   };
 }
 
@@ -48,7 +50,7 @@ function normalizePath(path) {
   };
 }
 
-export function buildAnalystContext({ findings = [], paths = [], evidence = [] } = {}) {
+export function buildAnalystContext({ findings = [], paths = [], evidence = [], risk = null } = {}) {
   const safeFindings = findings.slice(0, MAX_FINDINGS).map(normalizeFinding);
   const safePaths = paths.slice(0, MAX_PATHS).map(normalizePath);
   const safeEvidence = evidence.slice(0, 200).map(row => ({
@@ -60,7 +62,28 @@ export function buildAnalystContext({ findings = [], paths = [], evidence = [] }
     evidenceHash: clean(row.evidence_hash, 128),
     observedAt: row.observed_at || row.collected_at || null
   }));
-  return { findings: safeFindings, paths: safePaths, evidence: safeEvidence };
+  const deterministicRisk = risk || aggregateSecurityRisk({ findings, paths });
+  return {
+    findings: safeFindings,
+    paths: safePaths,
+    evidence: safeEvidence,
+    risk: {
+      riskLevel: clean(deterministicRisk.riskLevel, 32),
+      score: Number(deterministicRisk.score) || 0,
+      findingCount: Number(deterministicRisk.findingCount) || 0,
+      weaknessCount: Number(deterministicRisk.weaknessCount) || 0,
+      pathCount: Number(deterministicRisk.pathCount) || 0,
+      verifiedPathCount: Number(deterministicRisk.verifiedPathCount) || 0,
+      potentialPathCount: Number(deterministicRisk.potentialPathCount) || 0,
+      correlatedFindingCount: Number(deterministicRisk.correlatedFindingCount) || 0,
+      compromiseConfirmed: false,
+      weaknesses: Array.isArray(deterministicRisk.weaknesses) ? deterministicRisk.weaknesses.slice(0, 200).map(item => ({
+        id: clean(item.id, 128), code: clean(item.code, 128), controlId: clean(item.controlId, 128),
+        resourceId: clean(item.resourceId, 255), severity: clean(item.severity, 32),
+        findingIds: Array.isArray(item.findingIds) ? item.findingIds.slice(0, 50) : []
+      })) : []
+    }
+  };
 }
 
 function validateAnalysis(value, context) {
@@ -104,7 +127,7 @@ export async function analyzeSecurityContext(context) {
   const sourceHash = sha256(JSON.stringify(safeContext));
   const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
   const model = genAI.getGenerativeModel({ model: MODEL });
-  const prompt = `You are Compflow's security analyst. You explain security/compliance state using ONLY the supplied deterministic facts. Do not invent relationships, findings, resources, evidence, controls, exploits, or compromise. Do not infer compromise from a potential or verified path. Every reference must use an ID present in the input. If evidence is incomplete, say so. Recommended breakpoints must be conservative and describe the smallest likely change that would break an observed relationship; do not claim that the change has been executed or verified.
+  const prompt = `You are Compflow's security analyst. You explain security/compliance state using ONLY the supplied deterministic facts. The risk section is calculated by deterministic code and is authoritative for prioritization; do not recalculate or override it. Do not invent relationships, findings, resources, evidence, controls, exploits, or compromise. Do not infer compromise from a potential or verified path. Every reference must use an ID present in the input. If evidence is incomplete, say so. Recommended breakpoints must be conservative and describe the smallest likely change that would break an observed relationship; do not claim that the change has been executed or verified.
 
 Return JSON only with exactly these concepts: summary, why_it_matters, finding_refs, path_refs, evidence_refs, affected_resources, uncertainty, recommended_breakpoints, compromise_confirmed. compromise_confirmed MUST be false.
 
