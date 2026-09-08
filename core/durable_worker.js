@@ -1,6 +1,7 @@
 import { handler as workerHandler } from '../worker.js';
 import { beginExecution, finishExecution } from './execution_worker_hooks.js';
 import { withExecutionContext } from './execution_context.js';
+import { heartbeatNodeAttempt } from './execution_engine.js';
 import {
   createExecutionRun,
   acquireExecutionLease,
@@ -10,6 +11,11 @@ import {
 
 function workerId() {
   return process.env.COMPFLOW_WORKER_ID || process.env.HOSTNAME || `worker-${process.pid}`;
+}
+
+function heartbeatIntervalMs() {
+  const seconds = Math.max(5, Math.min(Number(process.env.COMPFLOW_HEARTBEAT_SECONDS) || 20, 120));
+  return seconds * 1000;
 }
 
 export async function durableWorkerHandler(payload) {
@@ -31,16 +37,31 @@ export async function durableWorkerHandler(payload) {
     executionId,
     metadata: { provider, clientId, jobId: data?.jobId || null, connectionId: data?.connectionId || null, scanId: data?.scanId || null }
   });
+
   const lease = await acquireExecutionLease({ organizationId, executionId, workerId: owner });
-  const execution = await beginExecution({
-    organizationId,
-    executionId,
-    provider,
-    clientId,
-    jobId: data?.jobId || null,
-    connectionId: data?.connectionId || null,
-    scanId: data?.scanId || null
-  });
+  let execution;
+  try {
+    execution = await beginExecution({
+      organizationId,
+      executionId,
+      provider,
+      clientId,
+      jobId: data?.jobId || null,
+      connectionId: data?.connectionId || null,
+      scanId: data?.scanId || null
+    });
+  } catch (error) {
+    await finishExecutionRun({
+      organizationId,
+      executionId,
+      workerId: owner,
+      leaseToken: lease.lease_token,
+      status: 'FAILED',
+      errorCode: 'EXECUTION_BEGIN_FAILED',
+      errorMessage: 'Execution initialization failed'
+    }).catch(() => {});
+    throw error;
+  }
 
   return withExecutionContext({
     organizationId,
@@ -50,9 +71,31 @@ export async function durableWorkerHandler(payload) {
     executionNodeId: execution.node.id,
     executionAttemptId: execution.attempt.id
   }, async () => {
+    let heartbeatTimer;
+    let heartbeatFailure = null;
+    let heartbeatInFlight = false;
+
+    const heartbeat = async () => {
+      if (heartbeatInFlight || heartbeatFailure) return;
+      heartbeatInFlight = true;
+      try {
+        await heartbeatExecutionLease({ organizationId, executionId, workerId: owner, leaseToken: lease.lease_token });
+        await heartbeatNodeAttempt({ attemptId: execution.attempt.id });
+      } catch (error) {
+        heartbeatFailure = error;
+        console.error('[EXECUTION-HEARTBEAT] Lease heartbeat failed:', error?.message || error);
+      } finally {
+        heartbeatInFlight = false;
+      }
+    };
+
+    heartbeatTimer = setInterval(() => { void heartbeat(); }, heartbeatIntervalMs());
+    heartbeatTimer.unref?.();
+
     try {
       const result = await workerHandler(payload);
-      await heartbeatExecutionLease({ organizationId, executionId, workerId: owner, leaseToken: lease.lease_token });
+      if (heartbeatFailure) throw heartbeatFailure;
+
       const terminalStatus = result?.status === 'completed' || result?.status === 'partial' ? 'SUCCEEDED' : 'FAILED';
       await finishExecution(execution.attempt.id, terminalStatus, terminalStatus === 'SUCCEEDED' ? null : 'EXECUTION_FAILED');
       await finishExecutionRun({
@@ -65,17 +108,19 @@ export async function durableWorkerHandler(payload) {
       });
       return result;
     } catch (error) {
-      await finishExecution(execution.attempt.id, 'FAILED', 'EXECUTION_FAILED', 'Execution failed').catch(() => {});
+      await finishExecution(execution.attempt.id, 'FAILED', heartbeatFailure ? 'EXECUTION_LEASE_LOST' : 'EXECUTION_FAILED', heartbeatFailure ? 'Execution worker lease lost' : 'Execution failed').catch(() => {});
       await finishExecutionRun({
         organizationId,
         executionId,
         workerId: owner,
         leaseToken: lease.lease_token,
         status: 'FAILED',
-        errorCode: 'EXECUTION_FAILED',
-        errorMessage: 'Execution failed'
+        errorCode: heartbeatFailure ? 'EXECUTION_LEASE_LOST' : 'EXECUTION_FAILED',
+        errorMessage: heartbeatFailure ? 'Execution worker lease lost' : 'Execution failed'
       }).catch(() => {});
       throw error;
+    } finally {
+      clearInterval(heartbeatTimer);
     }
   });
 }
