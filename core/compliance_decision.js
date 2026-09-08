@@ -18,6 +18,7 @@ export async function ensureDecisionSchema() {
     rationale JSONB NOT NULL DEFAULT '{}'::jsonb, decided_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
   );
   CREATE INDEX IF NOT EXISTS compliance_decision_history_execution_idx ON compliance_decision_history (organization_id, execution_id, decided_at);
+  CREATE UNIQUE INDEX IF NOT EXISTS compliance_decision_history_state_idx ON compliance_decision_history (decision_id, outcome, COALESCE(evidence_hash, ''), COALESCE(verification_hash, ''));
   CREATE TABLE IF NOT EXISTS execution_final_decisions (
     id TEXT PRIMARY KEY, organization_id TEXT NOT NULL, execution_id TEXT NOT NULL, outcome TEXT NOT NULL, decision_hash TEXT NOT NULL,
     summary JSONB NOT NULL, decided_at TIMESTAMPTZ NOT NULL DEFAULT NOW(), UNIQUE (organization_id, execution_id)
@@ -43,7 +44,7 @@ export async function recordControlDecision({ organizationId, executionId, contr
     } else {
       current = (await client.query(`INSERT INTO compliance_decisions (id,organization_id,execution_id,control_id,scope_key,outcome,evidence_hash,verification_hash,rationale) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9::jsonb) RETURNING *`, [id,organizationId,executionId,controlId,scopeKey,outcome,evidenceHash,verificationHash,JSON.stringify(rationale)])).rows[0];
     }
-    await client.query(`INSERT INTO compliance_decision_history (id,organization_id,execution_id,decision_id,control_id,scope_key,outcome,evidence_hash,verification_hash,rationale) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10::jsonb)`, [`decision_history_${crypto.randomUUID()}`,organizationId,executionId,current.id,controlId,scopeKey,outcome,evidenceHash,verificationHash,JSON.stringify(rationale)]);
+    await client.query(`INSERT INTO compliance_decision_history (id,organization_id,execution_id,decision_id,control_id,scope_key,outcome,evidence_hash,verification_hash,rationale) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10::jsonb) ON CONFLICT (decision_id, outcome, COALESCE(evidence_hash, ''), COALESCE(verification_hash, '')) DO NOTHING`, [`decision_history_${crypto.randomUUID()}`,organizationId,executionId,current.id,controlId,scopeKey,outcome,evidenceHash,verificationHash,JSON.stringify(rationale)]);
     await client.query('COMMIT'); return current;
   } catch (error) { await client.query('ROLLBACK').catch(() => {}); throw error; } finally { client.release(); }
 }
@@ -74,8 +75,7 @@ export async function finalizeExecutionDecision({ organizationId, executionId } 
   const existingFinal = await pool.query('SELECT * FROM execution_final_decisions WHERE organization_id=$1 AND execution_id=$2', [organizationId, executionId]);
   if (existingFinal.rows[0]) {
     const row = existingFinal.rows[0];
-    const expected = finalDecisionHash(organizationId, executionId, row.outcome, row.summary);
-    if (row.decision_hash !== expected) throw new Error('FINAL_DECISION_IMMUTABLE');
+    if (row.decision_hash !== finalDecisionHash(organizationId, executionId, row.outcome, row.summary)) throw new Error('FINAL_DECISION_IMMUTABLE');
     return row;
   }
   const graph = await pool.query(`SELECT node_type,status FROM execution_graph_nodes WHERE organization_id=$1 AND execution_id=$2`, [organizationId, executionId]);
