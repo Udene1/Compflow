@@ -54,7 +54,7 @@ app.use(express.json({ limit: '10mb' }));
 const generalLimiter = rateLimit({
     windowMs: 15 * 60 * 1000, limit: 300, standardHeaders: 'draft-7', legacyHeaders: false,
     message: { error: 'Too Many Requests', message: 'API rate limit exceeded. Please try again later.' },
-    skip: (req) => req.path === '/health' || req.path === '/api/job-stream' || (req.path === '/api/execution-graph' && req.query?.stream === '1')
+    skip: (req) => req.path === '/health' || req.path === '/api/job-stream'
 });
 const heavyActionLimiter = rateLimit({
     windowMs: 5 * 60 * 1000, limit: 30, standardHeaders: 'draft-7', legacyHeaders: false,
