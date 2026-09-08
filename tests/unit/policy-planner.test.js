@@ -22,6 +22,12 @@ describe('policy planner', () => {
     const tampered = structuredClone(first); tampered.nodes[0].label = 'tampered';
     expect(() => validatePolicyPlan(tampered)).toThrow('POLICY_PLAN_HASH_INVALID');
   });
+  it('canonicalizes provider aliases before they enter the execution graph', () => {
+    const plan = compilePolicyPlan({ organizationId: 'org-1', executionId: 'exec-alias', policy: { ...base, mode: 'AUDIT', rules: [base.rules[0]] }, targets: [{ ...targets[0], provider: 'DO' }] });
+    expect(plan.targets[0].provider).toBe('digitalocean');
+    expect(plan.nodes.find(node => node.nodeType === 'EVIDENCE_COLLECTION').metadata.provider).toBe('digitalocean');
+    expect(() => compilePolicyPlan({ organizationId: 'org-1', executionId: 'exec-bad-provider', policy: { ...base, mode: 'AUDIT' }, targets: [{ ...targets[0], provider: 'unknown-cloud' }] })).toThrow('POLICY_TARGET_PROVIDER_INVALID:0');
+  });
   it('deduplicates evidence collection for the same target and control', () => {
     const plan = compilePolicyPlan({ organizationId: 'org-1', executionId: 'exec-2', policy: { ...base, rules: [base.rules[0], { ...base.rules[0], id: 'public-storage-copy' }] }, targets });
     expect(plan.counts.evidence).toBe(1); expect(plan.counts.evaluations).toBe(2);
