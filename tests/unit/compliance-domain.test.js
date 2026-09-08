@@ -1,7 +1,7 @@
 import { beforeAll, afterAll, describe, expect, it } from 'vitest';
 import pool from '../../core/db.js';
 import { normalizeIntent, persistIntent, ensureIntentSchema } from '../../core/intent.js';
-import { recordEvidence, getEvidenceForNode, verifyEvidenceIntegrity, ensureEvidenceSchema } from '../../core/evidence.js';
+import { recordEvidence, getEvidenceForNode, verifyEvidenceIntegrity, getEvidenceFreshness, ensureEvidenceSchema } from '../../core/evidence.js';
 import { recordVerification, ensureVerificationSchema } from '../../core/compliance_verification.js';
 import { recordControlDecision, finalizeExecutionDecision, ensureDecisionSchema } from '../../core/compliance_decision.js';
 
@@ -38,9 +38,13 @@ describe('durable compliance domain', () => {
     await expect(persistIntent({ organizationId, intent: { ...normalized, objective: 'changed' } })).rejects.toThrow('INTENT_IMMUTABLE');
   });
 
-  it('stores immutable evidence with provenance and detects tampering', async () => {
-    const row = await recordEvidence({ organizationId, executionId, nodeId: 'node_evidence_domain', attemptId: 'attempt_evidence_domain', controlId: 'CC6.1', provider: 'aws', connectionId: 'conn_domain_test', resourceId: 'resource-1', evidence: { resources: [{ id: 'resource-1', status: 'pass' }] } });
+  it('stores immutable evidence with provenance, lineage and freshness', async () => {
+    const expires = new Date(Date.now() + 60_000).toISOString();
+    const row = await recordEvidence({ organizationId, executionId, nodeId: 'node_evidence_domain', attemptId: 'attempt_evidence_domain', controlId: 'CC6.1', provider: 'aws', connectionId: 'conn_domain_test', resourceId: 'resource-1', sourceType: 'aws_config', sourceRef: 'scan:resource-1', evidenceKind: 'observation', observedAt: new Date().toISOString(), freshnessExpiresAt: expires, lineage: [{ type: 'scan', id: 'scan-domain-1' }, { type: 'resource', id: 'resource-1' }], evidence: { resources: [{ id: 'resource-1', status: 'pass' }] } });
     expect(verifyEvidenceIntegrity(row)).toBe(true);
+    expect(row.evidence_kind).toBe('observation');
+    expect(row.lineage).toHaveLength(2);
+    expect(getEvidenceFreshness(row).state).toBe('FRESH');
     const fetched = await getEvidenceForNode({ organizationId, executionId, nodeId: 'node_evidence_domain', attemptId: 'attempt_evidence_domain' });
     expect(fetched.evidence_hash).toBe(row.evidence_hash);
   });
