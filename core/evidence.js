@@ -34,7 +34,7 @@ export async function recordEvidence({ organizationId, executionId, nodeId, atte
   if (!evidence || typeof evidence !== 'object' || Array.isArray(evidence)) throw new Error('EVIDENCE_PAYLOAD_INVALID');
   const bounded = { ...evidence, resources: Array.isArray(evidence.resources) ? evidence.resources.slice(0, MAX_PAYLOAD) : [] };
   const collectedAt = new Date().toISOString();
-  const evidenceHash = hashEvidence({ ...bounded, collectedAt });
+  const evidenceHash = hashEvidence(bounded);
   const id = `evidence_${crypto.randomUUID()}`;
   const result = await pool.query(`INSERT INTO execution_evidence (id,organization_id,execution_id,node_id,attempt_id,control_id,provider,connection_id,resource_id,source_type,source_ref,collected_at,evidence,evidence_hash) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13::jsonb,$14) RETURNING *`, [id, organizationId, executionId, nodeId, attemptId, controlId, provider, connectionId, resourceId, sourceType, sourceRef, collectedAt, canonical(bounded), evidenceHash]);
   return result.rows[0];
@@ -48,7 +48,5 @@ export async function getEvidenceForNode({ organizationId, executionId, nodeId, 
 
 export function verifyEvidenceIntegrity(row) {
   if (!row) return false;
-  const value = row.evidence || {};
-  const expected = hashEvidence({ ...value, collectedAt: new Date(row.collected_at).toISOString() });
-  return expected === row.evidence_hash;
+  return hashEvidence(row.evidence || {}) === row.evidence_hash;
 }
