@@ -6,7 +6,7 @@ function canonical(value) { return JSON.stringify(value); }
 function hashEvidence(value) { return crypto.createHash('sha256').update(canonical(value)).digest('hex'); }
 
 export async function ensureEvidenceSchema() {
-  await pool.query(`CREATE TABLE IF NOT EXISTS execution_evidence (
+  await pool.query(`CREATE TABLE IF NOT EXISTS execution_evidence_records (
     id TEXT PRIMARY KEY,
     organization_id TEXT NOT NULL,
     execution_id TEXT NOT NULL,
@@ -24,8 +24,8 @@ export async function ensureEvidenceSchema() {
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     UNIQUE (organization_id, execution_id, node_id, attempt_id)
   );
-  CREATE INDEX IF NOT EXISTS execution_evidence_control_idx ON execution_evidence (organization_id, execution_id, control_id, collected_at DESC);
-  CREATE INDEX IF NOT EXISTS execution_evidence_resource_idx ON execution_evidence (organization_id, resource_id, collected_at DESC);`);
+  CREATE INDEX IF NOT EXISTS execution_evidence_records_control_idx ON execution_evidence_records (organization_id, execution_id, control_id, collected_at DESC);
+  CREATE INDEX IF NOT EXISTS execution_evidence_records_resource_idx ON execution_evidence_records (organization_id, resource_id, collected_at DESC);`);
 }
 
 export async function recordEvidence({ organizationId, executionId, nodeId, attemptId, controlId, provider, connectionId, resourceId = null, sourceType = 'cloud_scan', sourceRef = null, evidence } = {}) {
@@ -36,13 +36,13 @@ export async function recordEvidence({ organizationId, executionId, nodeId, atte
   const collectedAt = new Date().toISOString();
   const evidenceHash = hashEvidence(bounded);
   const id = `evidence_${crypto.randomUUID()}`;
-  const result = await pool.query(`INSERT INTO execution_evidence (id,organization_id,execution_id,node_id,attempt_id,control_id,provider,connection_id,resource_id,source_type,source_ref,collected_at,evidence,evidence_hash) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13::jsonb,$14) RETURNING *`, [id, organizationId, executionId, nodeId, attemptId, controlId, provider, connectionId, resourceId, sourceType, sourceRef, collectedAt, canonical(bounded), evidenceHash]);
+  const result = await pool.query(`INSERT INTO execution_evidence_records (id,organization_id,execution_id,node_id,attempt_id,control_id,provider,connection_id,resource_id,source_type,source_ref,collected_at,evidence,evidence_hash) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13::jsonb,$14) RETURNING *`, [id, organizationId, executionId, nodeId, attemptId, controlId, provider, connectionId, resourceId, sourceType, sourceRef, collectedAt, canonical(bounded), evidenceHash]);
   return result.rows[0];
 }
 
 export async function getEvidenceForNode({ organizationId, executionId, nodeId, attemptId = null } = {}) {
   await ensureEvidenceSchema();
-  const result = await pool.query(`SELECT * FROM execution_evidence WHERE organization_id=$1 AND execution_id=$2 AND node_id=$3 ${attemptId ? 'AND attempt_id=$4' : ''} ORDER BY collected_at DESC LIMIT 1`, attemptId ? [organizationId, executionId, nodeId, attemptId] : [organizationId, executionId, nodeId]);
+  const result = await pool.query(`SELECT * FROM execution_evidence_records WHERE organization_id=$1 AND execution_id=$2 AND node_id=$3 ${attemptId ? 'AND attempt_id=$4' : ''} ORDER BY collected_at DESC LIMIT 1`, attemptId ? [organizationId, executionId, nodeId, attemptId] : [organizationId, executionId, nodeId]);
   return result.rows[0] || null;
 }
 
