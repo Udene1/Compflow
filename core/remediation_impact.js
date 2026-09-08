@@ -21,7 +21,7 @@ export async function getRemediationSecurityImpact({ organizationId, executionId
     const findings = await pool.query('SELECT id,code,severity,resource_id FROM findings WHERE organization_id=$1 AND scan_id=$2 ORDER BY created_at ASC LIMIT 1000', [organizationId, scanId]);
     risk = aggregateSecurityRisk({ findings: findings.rows, paths });
   }
-  const latest = await pool.query(`SELECT id,collected_at,evidence_hash,evidence,evidence_kind,observed_at,freshness_expires_at FROM execution_evidence_records WHERE organization_id=$1 AND execution_id=$2 AND remediation_id IS NULL AND resource_id=$3 ORDER BY collected_at DESC LIMIT 1`, [organizationId, executionId, remediation.resourceId]);
+  const latest = await pool.query(`SELECT id,collected_at,evidence_hash,evidence,evidence_kind,observed_at,freshness_expires_at FROM execution_evidence_records WHERE organization_id=$1 AND execution_id=$2 AND resource_id=$3 AND source_type='post_remediation_targeted_check' AND source_ref=$4 ORDER BY collected_at DESC LIMIT 1`, [organizationId, executionId, remediation.resourceId, remediationId]);
   const freshEvidence = latest.rows[0] || null;
   const effect = deriveRemediationSecurityEffect({ code: remediation.code, remediationState: remediation.state, evidence: freshEvidence, affectedPathCount: affectedPaths.length });
   return {
