@@ -1,3 +1,4 @@
+import pool from './db.js';
 import { recoverExpiredExecutionLeases } from './execution_lifecycle.js';
 import { recoverStaleNodeAttempts } from './execution_engine.js';
 
@@ -5,23 +6,17 @@ const DEFAULT_INTERVAL_MS = 15_000;
 const DEFAULT_STALE_AFTER_SECONDS = 90;
 
 export async function recoverStaleExecutions({ organizationId = null, staleAfterSeconds = DEFAULT_STALE_AFTER_SECONDS } = {}) {
-  const leaseRecovery = organizationId
-    ? await recoverExpiredExecutionLeases({ organizationId })
-    : [];
-
+  const executions = await recoverExpiredExecutionLeases({ organizationId });
   const organizations = organizationId
     ? [organizationId]
-    : leaseRecovery.map(run => run.organization_id);
+    : (await pool.query("SELECT DISTINCT organization_id FROM execution_runs WHERE status='RUNNING' OR lease_expires_at IS NOT NULL")).rows.map(row => row.organization_id);
 
-  const attemptRecovery = [];
+  const attempts = [];
   for (const orgId of organizations) {
-    attemptRecovery.push(...await recoverStaleNodeAttempts({
-      organizationId: orgId,
-      staleAfterSeconds
-    }));
+    attempts.push(...await recoverStaleNodeAttempts({ organizationId: orgId, staleAfterSeconds }));
   }
 
-  return { executions: leaseRecovery, attempts: attemptRecovery };
+  return { executions, attempts };
 }
 
 export function startExecutionRecovery({
