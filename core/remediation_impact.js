@@ -1,11 +1,12 @@
 import { listRemediations } from './remediation_verification.js';
 import { getExecutionExposurePaths } from './exposure_paths.js';
 import { aggregateSecurityRisk } from './security_risk.js';
+import { deriveRemediationSecurityEffect } from './remediation_security_effect.js';
 import pool from './db.js';
 
 /**
- * Security effect is deliberately conservative: a verified control change is not
- * converted into a lower risk score until a fresh finding/exposure analysis exists.
+ * Security effect remains conservative: verified control evidence is distinct from
+ * proof that an exposure path or aggregate risk has disappeared.
  */
 export async function getRemediationSecurityImpact({ organizationId, executionId, remediationId }) {
   if (!organizationId || !executionId || !remediationId) throw new Error('REMEDIATION_IMPACT_INPUT_INVALID');
@@ -20,18 +21,20 @@ export async function getRemediationSecurityImpact({ organizationId, executionId
     const findings = await pool.query('SELECT id,code,severity,resource_id FROM findings WHERE organization_id=$1 AND scan_id=$2 ORDER BY created_at ASC LIMIT 1000', [organizationId, scanId]);
     risk = aggregateSecurityRisk({ findings: findings.rows, paths });
   }
-  const verified = remediation.state === 'VERIFIED';
+  const latest = await pool.query(`SELECT id,collected_at,evidence_hash,evidence,evidence_kind,observed_at,freshness_expires_at FROM execution_evidence_records WHERE organization_id=$1 AND execution_id=$2 AND remediation_id IS NULL AND resource_id=$3 ORDER BY collected_at DESC LIMIT 1`, [organizationId, executionId, remediation.resourceId]);
+  const freshEvidence = latest.rows[0] || null;
+  const effect = deriveRemediationSecurityEffect({ code: remediation.code, remediationState: remediation.state, evidence: freshEvidence, affectedPathCount: affectedPaths.length });
   return {
     remediationId,
     findingId: remediation.findingId,
     code: remediation.code,
     state: remediation.state,
-    verified,
+    verified: effect.verified,
     affectedPathCount: affectedPaths.length,
     affectedPathIds: affectedPaths.map(path => path.id),
     riskBeforeFreshReanalysis: risk,
     riskDelta: null,
-    securityEffect: verified ? 'CONTROL_VERIFIED_FRESH_PATH_REANALYSIS_REQUIRED' : 'CONTROL_NOT_VERIFIED',
-    claimSafe: verified ? 'The targeted control has been verified, but risk/exposure reduction is not claimed until a fresh scan and exposure analysis removes the finding/path.' : 'No verified security effect is claimed.'
+    securityEffect: effect,
+    claimSafe: effect.pathImpactClaimed ? 'Fresh exposure analysis confirms the affected path is removed.' : 'Compflow does not claim exposure-path or aggregate-risk reduction until fresh exposure analysis confirms the change.'
   };
 }
