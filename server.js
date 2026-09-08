@@ -17,7 +17,7 @@ import executionGraphHandler from './api/execution-graph.js';
 import authRouter from './api/auth.js';
 import onboardingRouter from './api/onboarding.js';
 import { durableWorkerHandler } from './core/durable_worker.js';
-import { listenWorkerQueue } from './core/queue.js';
+import { listenWorkerQueue, closeQueue } from './core/queue.js';
 import { initDb } from './core/db.js';
 import { startExecutionRecovery } from './core/execution_recovery.js';
 import { requireAuth } from './core/auth_guard.js';
@@ -162,6 +162,7 @@ async function shutdown(signal) {
     try {
         if (httpServer) await new Promise(resolve => httpServer.close(resolve));
         if (worker) await worker.close();
+        await closeQueue();
         const { default: pool } = await import('./core/db.js');
         await pool.end();
         clearTimeout(forceTimer);
