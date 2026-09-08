@@ -75,15 +75,17 @@ export async function durableWorkerHandler(payload) {
     let heartbeatTimer;
     let heartbeatFailure = null;
     let heartbeatInFlight = false;
+    let leaseLost = false;
 
     const heartbeat = async () => {
-      if (heartbeatInFlight || heartbeatFailure) return;
+      if (heartbeatInFlight || heartbeatFailure || leaseLost) return;
       heartbeatInFlight = true;
       try {
         await heartbeatExecutionLease({ organizationId, executionId, workerId: owner, leaseToken: lease.lease_token });
         await heartbeatNodeAttempt({ attemptId: execution.attempt.id });
       } catch (error) {
         heartbeatFailure = error;
+        leaseLost = true;
         console.error('[EXECUTION-HEARTBEAT] Lease heartbeat failed:', error?.message || error);
       } finally {
         heartbeatInFlight = false;
@@ -99,8 +101,13 @@ export async function durableWorkerHandler(payload) {
       // Fence the terminal commit: a worker that lost its lease cannot publish a
       // successful execution merely because its provider work returned normally.
       await heartbeat();
-      if (heartbeatFailure) throw heartbeatFailure;
-      await assertExecutionLease({ organizationId, executionId, workerId: owner, leaseToken: lease.lease_token });
+      if (heartbeatFailure || leaseLost) throw heartbeatFailure || new Error('EXECUTION_LEASE_LOST');
+      try {
+        await assertExecutionLease({ organizationId, executionId, workerId: owner, leaseToken: lease.lease_token });
+      } catch (error) {
+        leaseLost = true;
+        throw error;
+      }
 
       const terminalStatus = result?.status === 'completed' || result?.status === 'partial' ? 'SUCCEEDED' : 'FAILED';
       await finishExecution(execution.attempt.id, terminalStatus, terminalStatus === 'SUCCEEDED' ? null : 'EXECUTION_FAILED');
@@ -114,15 +121,19 @@ export async function durableWorkerHandler(payload) {
       });
       return result;
     } catch (error) {
-      await finishExecution(execution.attempt.id, 'FAILED', heartbeatFailure ? 'EXECUTION_LEASE_LOST' : 'EXECUTION_FAILED', heartbeatFailure ? 'Execution worker lease lost' : 'Execution failed').catch(() => {});
+      // Once fencing is lost, do not mutate the node attempt: recovery or the
+      // current lease holder owns the durable state from this point onward.
+      if (!leaseLost && !heartbeatFailure) {
+        await finishExecution(execution.attempt.id, 'FAILED', 'EXECUTION_FAILED', 'Execution failed').catch(() => {});
+      }
       await finishExecutionRun({
         organizationId,
         executionId,
         workerId: owner,
         leaseToken: lease.lease_token,
         status: 'FAILED',
-        errorCode: heartbeatFailure ? 'EXECUTION_LEASE_LOST' : 'EXECUTION_FAILED',
-        errorMessage: heartbeatFailure ? 'Execution worker lease lost' : 'Execution failed'
+        errorCode: heartbeatFailure || leaseLost ? 'EXECUTION_LEASE_LOST' : 'EXECUTION_FAILED',
+        errorMessage: heartbeatFailure || leaseLost ? 'Execution worker lease lost' : 'Execution failed'
       }).catch(() => {});
       throw error;
     } finally {
