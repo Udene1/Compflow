@@ -26,7 +26,7 @@ async function getQueue() {
 }
 
 const ALLOWED_PAYLOAD_KEYS = new Set([
-    'jobId', 'scanId', 'executionId', 'clientId', 'organizationId', 'connectionId', 'provider', 'scanType', 'roleArn', 'enqueuedAt', 'resumeNodeIds'
+    'jobId', 'scanId', 'executionId', 'clientId', 'organizationId', 'connectionId', 'provider', 'scanType', 'roleArn', 'enqueuedAt', 'resumeNodeIds', 'normalMetadata'
 ]);
 const PROVIDERS = new Set(['aws', 'azure', 'gcp', 'digitalocean', 'hetzner']);
 const SCAN_TYPES = new Set(['initial', 'initial_onboarding_scan', 'manual', 'scheduled', 'resume', 'adhoc']);
@@ -44,6 +44,10 @@ export function sanitizeJobPayload(jobData) {
             if (Array.isArray(v) && v.length <= 100 && v.every(id => boundedString(id, 128))) clean[k] = [...new Set(v)];
             continue;
         }
+        if (k === 'normalMetadata') {
+            if (typeof v === 'string' && v.length <= 2000) clean[k] = v;
+            continue;
+        }
         clean[k] = v;
     }
     return clean;
@@ -54,6 +58,8 @@ export async function enqueueJob(jobData) {
     if (!boundedString(cleanPayload.jobId) || !boundedString(cleanPayload.scanId) || !boundedString(cleanPayload.organizationId) || !boundedString(cleanPayload.connectionId)) {
         throw Object.assign(new Error('INVALID_QUEUE_PAYLOAD'), { code: 'INVALID_QUEUE_PAYLOAD' });
     }
+    // executionId is derived from the authoritative scan job when older producers omit it.
+    if (!cleanPayload.executionId) cleanPayload.executionId = cleanPayload.jobId;
     if (!boundedString(cleanPayload.executionId) || !PROVIDERS.has(cleanPayload.provider) || !SCAN_TYPES.has(cleanPayload.scanType)) {
         throw Object.assign(new Error('INVALID_QUEUE_PAYLOAD'), { code: 'INVALID_QUEUE_PAYLOAD' });
     }
