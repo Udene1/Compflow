@@ -59,14 +59,13 @@ export async function persistIntent({ organizationId, intent, client = null } = 
   await ensureIntentSchema();
   const normalized = normalizeIntent({ organizationId, intent: intent.intent || intent, targets: intent.targets });
   const db = client || pool;
-  const existing = await db.query('SELECT * FROM compliance_intents WHERE organization_id=$1 AND intent_id=$2 AND intent_version=$3 FOR UPDATE', [organizationId, normalized.id, normalized.version]);
-  if (existing.rows[0]) {
-    if (existing.rows[0].intent_hash !== normalized.intentHash) throw new Error('INTENT_IMMUTABLE');
-    return existing.rows[0];
-  }
   const id = `intent_${crypto.createHash('sha256').update(`${organizationId}:${normalized.id}:${normalized.version}`).digest('hex').slice(0, 32)}`;
-  const result = await db.query(`INSERT INTO compliance_intents (id,organization_id,intent_id,intent_version,intent_hash,intent) VALUES ($1,$2,$3,$4,$5,$6::jsonb) RETURNING *`, [id, organizationId, normalized.id, normalized.version, normalized.intentHash, canonical(normalized)]);
-  return result.rows[0];
+  const inserted = await db.query(`INSERT INTO compliance_intents (id,organization_id,intent_id,intent_version,intent_hash,intent) VALUES ($1,$2,$3,$4,$5,$6::jsonb) ON CONFLICT (organization_id,intent_id,intent_version) DO NOTHING RETURNING *`, [id,organizationId,normalized.id,normalized.version,normalized.intentHash,canonical(normalized)]);
+  if (inserted.rows[0]) return inserted.rows[0];
+  const existing = await db.query('SELECT * FROM compliance_intents WHERE organization_id=$1 AND intent_id=$2 AND intent_version=$3', [organizationId, normalized.id, normalized.version]);
+  if (!existing.rows[0]) throw new Error('INTENT_CREATE_RACE');
+  if (existing.rows[0].intent_hash !== normalized.intentHash) throw new Error('INTENT_IMMUTABLE');
+  return existing.rows[0];
 }
 
 export function intentToPolicy(intent) {
