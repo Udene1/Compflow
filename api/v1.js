@@ -7,6 +7,7 @@ import { approveExecutionNode, dispatchReadyPlanNodes, startPersistedPlanExecuti
 import { getDependencyAwareResumePlan } from '../core/execution_resume.js';
 import { enqueueJob } from '../core/queue.js';
 import { getEvidenceFreshness, verifyEvidenceIntegrity } from '../core/evidence.js';
+import { hasRole, ROLES } from '../core/auth.js';
 import pool from '../core/db.js';
 import { listProviders } from '../core/provider_registry.js';
 import executionGraphHandler from './execution-graph.js';
@@ -15,24 +16,33 @@ const router = express.Router();
 const ID = /^[A-Za-z0-9._:-]{1,128}$/;
 const KEY = /^[A-Za-z0-9._:-]{1,128}$/;
 const LIMIT = 100;
+const ACTION_ROLES = Object.freeze({ start: [ROLES.ENGINEER], resume: [ROLES.ENGINEER], retry: [ROLES.ENGINEER], approve: [ROLES.ADMIN, ROLES.OWNER], cancel: [ROLES.ADMIN, ROLES.OWNER], finalize: [ROLES.ENGINEER] });
 
 function org(req) { return req.user?.orgId || req.authContext?.orgId || null; }
 function actor(req) { return req.user?.userId || req.user?.id || req.authContext?.userId || null; }
 function executionId(value) { if (!ID.test(String(value || ''))) throw new Error('EXECUTION_ID_INVALID'); return String(value); }
 function idempotency(req) { const value = req.get('Idempotency-Key'); if (value == null) return null; if (!KEY.test(value)) throw new Error('IDEMPOTENCY_KEY_INVALID'); return value; }
 function page(value, fallback = 100) { const n = Number(value); return Number.isSafeInteger(n) ? Math.max(1, Math.min(n, LIMIT)) : fallback; }
+function authorizeAction(req, action) { const allowed = ACTION_ROLES[action]; if (!allowed || !hasRole(req.user?.role, allowed)) { const error = new Error('FORBIDDEN_ACTION'); error.status = 403; throw error; } }
 
 router.get('/providers', (req, res) => res.json({ providers: listProviders() }));
+
+router.get('/executions', async (req, res, next) => {
+  try {
+    const organizationId = org(req); if (!organizationId) return res.status(403).json({ error: 'ORGANIZATION_CONTEXT_REQUIRED' });
+    const limit = page(req.query.limit, 50); const params = [organizationId]; const filters = ['organization_id=$1'];
+    if (req.query.status != null) { const status = String(req.query.status); if (!['PENDING','RUNNING','SUCCEEDED','FAILED','CANCELLED'].includes(status)) return res.status(400).json({ error: 'EXECUTION_STATUS_INVALID' }); params.push(status); filters.push(`status=$${params.length}`); }
+    const result = await pool.query(`SELECT id,status,lease_owner,lease_expires_at,heartbeat_at,started_at,finished_at,error_code,error_message,metadata,created_at,updated_at FROM execution_runs WHERE ${filters.join(' AND ')} ORDER BY created_at DESC LIMIT $${params.length + 1}`, [...params, limit]);
+    return res.json({ executions: result.rows, limit });
+  } catch (error) { next(error); }
+});
 
 router.post('/executions', async (req, res, next) => {
   try {
     const organizationId = org(req); if (!organizationId) return res.status(403).json({ error: 'ORGANIZATION_CONTEXT_REQUIRED' });
     const key = idempotency(req); const id = executionId(req.body?.executionId);
     if (!req.body?.intent || typeof req.body.intent !== 'object' || Array.isArray(req.body.intent)) return res.status(400).json({ error: 'INTENT_REQUIRED' });
-    if (key) {
-      const existingEvent = await getExecutionEventByIdempotencyKey({ organizationId, executionId: id, eventType: 'EXECUTION_CREATED', idempotencyKey: `create:${key}` });
-      if (existingEvent) return res.status(200).json({ ...(existingEvent.payload?.result || {}), idempotencyKey: key, idempotentReplay: true });
-    }
+    if (key) { const existingEvent = await getExecutionEventByIdempotencyKey({ organizationId, executionId: id, eventType: 'EXECUTION_CREATED', idempotencyKey: `create:${key}` }); if (existingEvent) return res.status(200).json({ ...(existingEvent.payload?.result || {}), idempotencyKey: key, idempotentReplay: true }); }
     const existing = await pool.query('SELECT * FROM execution_runs WHERE id=$1 AND organization_id=$2', [id, organizationId]);
     if (existing.rows[0]) { if (key) throw new Error('EXECUTION_ID_CONFLICT'); return res.status(200).json({ execution: existing.rows[0], idempotentReplay: true }); }
     const result = await startComplianceExecution({ organizationId, executionId: id, intent: req.body.intent });
@@ -77,6 +87,7 @@ router.post('/executions/:executionId/actions', async (req, res, next) => {
     const organizationId = org(req); if (!organizationId) return res.status(403).json({ error: 'ORGANIZATION_CONTEXT_REQUIRED' });
     const id = executionId(req.params.executionId); const action = req.body?.action; const key = idempotency(req);
     if (!['start','resume','retry','approve','cancel','finalize'].includes(action)) return res.status(400).json({ error: 'ACTION_INVALID' });
+    authorizeAction(req, action);
     if (action === 'start') return res.status(202).json(await startPersistedPlanExecution({ organizationId, executionId: id }));
     if (action === 'finalize') return res.status(200).json(await finalizeComplianceDecision({ organizationId, executionId: id }));
     if (action === 'approve') return res.status(200).json(await approveExecutionNode({ organizationId, executionId: id, nodeId: req.body?.nodeId, actorId: actor(req) }));
