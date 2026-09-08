@@ -5,6 +5,7 @@ import { getExecutionGraph } from '../../core/execution_engine.js';
 import { getExecutionPlan } from '../../core/execution_plans.js';
 import { getExecutionRun } from '../../core/execution_lifecycle.js';
 import { getQueue, listenWorkerQueue } from '../../core/queue.js';
+import { durableWorkerHandler } from '../../core/durable_worker.js';
 
 const organizationId = 'org_real_compliance_integration';
 const executionId = 'exec_real_compliance_integration';
@@ -45,7 +46,7 @@ describe('real compliance execution boundary', () => {
   });
 
   it('runs a real worker against PostgreSQL and Redis and durably records provider failure', async () => {
-    const worker = await listenWorkerQueue();
+    const worker = await listenWorkerQueue(durableWorkerHandler);
     try {
       await startComplianceExecution({ organizationId, executionId: workerExecutionId, intent: { id: 'intent_real_worker_failure', version: '1', objective: 'Exercise the real worker failure boundary', mode: 'AUDIT', frameworks: ['soc2'], rules: [{ id: 'rule-worker-1', controlId: 'CC6.1', action: 'EVALUATE' }], targets: [{ connectionId: 'missing-worker-credentials', provider: 'aws', resourceId: 'resource-worker-1' }] } });
       const deadline = Date.now() + 10_000; let graph;
