@@ -33,10 +33,14 @@ router.post('/executions/:executionId/remediations', async (req, res, next) => {
     const organizationId=org(req); if(!organizationId)return res.status(403).json({error:'ORGANIZATION_CONTEXT_REQUIRED'}); authorize(req);
     const executionId=validId(req.params.executionId,'EXECUTION_ID_INVALID');
     const pathId=validId(req.body?.pathId,'PATH_ID_INVALID'); const findingId=validId(req.body?.findingId,'FINDING_ID_INVALID'); const code=validId(req.body?.code,'CODE_INVALID'); const resourceId=validId(req.body?.resourceId,'RESOURCE_ID_INVALID');
-    const action=text(req.body?.action,'ACTION_TEXT_INVALID'); const rationale=text(req.body?.rationale || 'Deterministic remediation candidate derived from the execution findings.','RATIONALE_TEXT_INVALID');
-    const candidate=(await candidatesFor({organizationId,executionId})).find(item => item.pathId===pathId && item.findingId===findingId && item.code===code.toUpperCase() && item.resourceId===resourceId);
+    const candidates=await candidatesFor({organizationId,executionId});
+    const candidate=candidates.find(item => item.pathId===pathId && item.findingId===findingId && item.code===code.toUpperCase() && item.resourceId===resourceId);
     if(!candidate) return res.status(409).json({error:'REMEDIATION_CANDIDATE_INVALID'});
-    const result=await proposeRemediation({organizationId,executionId,pathId,findingId,code: candidate.code,resourceId,action,rationale,actorId:actor(req),idempotencyKey:req.get('Idempotency-Key')||null});
+    const requestedAction=text(req.body?.action,'ACTION_TEXT_INVALID');
+    if(requestedAction!==candidate.action) return res.status(409).json({error:'REMEDIATION_ACTION_MISMATCH'});
+    const requestedRationale=text(req.body?.rationale || candidate.rationale,'RATIONALE_TEXT_INVALID');
+    if(requestedRationale!==candidate.rationale) return res.status(409).json({error:'REMEDIATION_RATIONALE_MISMATCH'});
+    const result=await proposeRemediation({organizationId,executionId,pathId,findingId,code:candidate.code,resourceId,action:candidate.action,rationale:candidate.rationale,actorId:actor(req),idempotencyKey:req.get('Idempotency-Key')||null});
     return res.status(201).json(result);
   } catch(error){next(error);}
 });
