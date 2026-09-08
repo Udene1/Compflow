@@ -123,14 +123,10 @@ describe('Onboarding & Cloud Verification Hardening — All Suites', () => {
             expect(verifyRes.body.status).toBe('VERIFIED'); expect(['QUEUED', 'FAILED']).toContain(verifyRes.body.scanStatus); expect(verifyRes.body.scanStatus).not.toBe('COMPLETED');
         });
         it('POST /complete blocks skipping prerequisites', async () => {
-            // A valid authenticated session has an organization FK, so a missing organizations row is not a reachable state.
-            // Exercise the real first unmet prerequisite instead of manufacturing an impossible FK violation.
             const emptyOrgId = 'org_empty_prereq_99';
             const emptySession = await createSessionToken({ id: 'usr_empty', email: 'empty@org.io' }, { id: emptyOrgId, name: 'Empty Org' }, ROLES.ADMIN, 1);
-
             const resNoFw = await invokeOnboarding({ method: 'POST', url: '/complete', sessionToken: emptySession.token });
             expect(resNoFw.statusCode).toBe(400); expect(resNoFw.body.error).toBe('Prerequisite Failed'); expect(resNoFw.body.message).toContain('compliance framework objective');
-
             await pool.query('INSERT INTO organization_frameworks (id, org_id, framework_id, status) VALUES ($1, $2, $3, $4);', ['fw_obj_99', emptyOrgId, 'soc2', 'selected']);
             const resNoConn = await invokeOnboarding({ method: 'POST', url: '/complete', sessionToken: emptySession.token });
             expect(resNoConn.statusCode).toBe(400); expect(resNoConn.body.error).toBe('Prerequisite Failed'); expect(resNoConn.body.message).toContain('verified cloud connection');
@@ -152,8 +148,10 @@ describe('Onboarding & Cloud Verification Hardening — All Suites', () => {
             await pool.query('INSERT INTO organizations (id, name) VALUES ($1, $2) ON CONFLICT (id) DO NOTHING;', [summaryOrgId, 'Summary Dedicated Corp']);
             const summarySession = await createSessionToken({ id: 'usr_summary_lead', email: 'summary@lead.io' }, { id: summaryOrgId, name: 'Summary Dedicated Corp' }, ROLES.ADMIN, 1);
             await pool.query('INSERT INTO organization_frameworks (id, org_id, framework_id, status) VALUES ($1, $2, $3, $4);', ['fw_sum_1', summaryOrgId, 'soc2', 'selected']);
+            const connectionId = 'conn_summary_test_101';
+            await pool.query('INSERT INTO cloud_connections (id, organization_id, provider, display_name, status) VALUES ($1, $2, $3, $4, $5);', [connectionId, summaryOrgId, 'aws', 'Summary Test AWS', 'VERIFIED']);
             const scanId = 'scan_completed_test_101';
-            await pool.query(`INSERT INTO scans (id, organization_id, connection_id, scan_type, status) VALUES ($1, $2, 'conn_test', 'initial_onboarding_scan', 'COMPLETED');`, [scanId, summaryOrgId]);
+            await pool.query(`INSERT INTO scans (id, organization_id, connection_id, scan_type, status) VALUES ($1, $2, $3, 'initial_onboarding_scan', 'COMPLETED');`, [scanId, summaryOrgId, connectionId]);
             await pool.query(`UPDATE scans SET resources_discovered = $1, findings_count = $2, evidence_count = $3 WHERE id = $4;`, [25, 4, 30, scanId]);
             await pool.query(`INSERT INTO findings (id, organization_id, scan_id, resource_id, control_id, severity, status, code) VALUES ($1, $2, $3, 's3-bucket-1', 'S3_PUBLIC', 'CRITICAL', 'FAIL', 'S3_PUBLIC_ACCESS');`, ['f_1', summaryOrgId, scanId]);
             await pool.query(`INSERT INTO findings (id, organization_id, scan_id, resource_id, control_id, severity, status, code) VALUES ($1, $2, $3, 'sg-1', 'SG_OPEN_PORTS', 'HIGH', 'FAIL', 'SG_OPEN_SSH');`, ['f_2', summaryOrgId, scanId]);
