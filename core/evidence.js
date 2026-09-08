@@ -8,19 +8,10 @@ function hashEvidence(value) { return crypto.createHash('sha256').update(canonic
 function assertTimestamp(value, code) { const date = new Date(value); if (Number.isNaN(date.getTime())) throw new Error(code); return date.toISOString(); }
 function normalizeLineage(lineage) { if (lineage == null) return []; if (!Array.isArray(lineage) || lineage.length > MAX_LINEAGE) throw new Error('EVIDENCE_LINEAGE_INVALID'); return lineage.map((item, index) => { if (!item || typeof item !== 'object' || Array.isArray(item)) throw new Error(`EVIDENCE_LINEAGE_INVALID:${index}`); const clean = {}; for (const [key, value] of Object.entries(item)) { if (typeof key !== 'string' || key.length > 64) continue; if (typeof value === 'string') clean[key] = value.slice(0, 256); else if (typeof value === 'number' || typeof value === 'boolean' || value === null) clean[key] = value; } return clean; }); }
 
+// Schema is owned by core/db.js and initialized before workers/API traffic start.
+// Evidence operations only verify that the authoritative table is present.
 export async function ensureEvidenceSchema() {
-  await pool.query(`CREATE TABLE IF NOT EXISTS execution_evidence_records (
-    id TEXT PRIMARY KEY, organization_id TEXT NOT NULL, execution_id TEXT NOT NULL, node_id TEXT NOT NULL, attempt_id TEXT NOT NULL,
-    control_id TEXT NOT NULL, provider TEXT NOT NULL, connection_id TEXT NOT NULL, resource_id TEXT, source_type TEXT NOT NULL, source_ref TEXT,
-    collected_at TIMESTAMPTZ NOT NULL, evidence JSONB NOT NULL, evidence_hash TEXT NOT NULL, created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-    UNIQUE (organization_id, execution_id, node_id, attempt_id)
-  );
-  CREATE INDEX IF NOT EXISTS execution_evidence_records_control_idx ON execution_evidence_records (organization_id, execution_id, control_id, collected_at DESC);
-  CREATE INDEX IF NOT EXISTS execution_evidence_records_resource_idx ON execution_evidence_records (organization_id, resource_id, collected_at DESC);
-  ALTER TABLE execution_evidence_records ADD COLUMN IF NOT EXISTS evidence_kind TEXT NOT NULL DEFAULT 'observation';
-  ALTER TABLE execution_evidence_records ADD COLUMN IF NOT EXISTS observed_at TIMESTAMPTZ;
-  ALTER TABLE execution_evidence_records ADD COLUMN IF NOT EXISTS freshness_expires_at TIMESTAMPTZ;
-  ALTER TABLE execution_evidence_records ADD COLUMN IF NOT EXISTS lineage JSONB NOT NULL DEFAULT '[]'::jsonb;`);
+  await pool.query('SELECT 1 FROM execution_evidence_records LIMIT 0');
 }
 
 export async function recordEvidence({ organizationId, executionId, nodeId, attemptId, controlId, provider, connectionId, resourceId = null, sourceType = 'cloud_scan', sourceRef = null, evidenceKind = 'observation', observedAt = null, freshnessExpiresAt = null, lineage = [], evidence } = {}) {
