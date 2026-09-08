@@ -107,8 +107,7 @@ jobs:
             ['org_csrf','CSRF Test Organization'],
             ['org_empty_prereq_99','Empty Prerequisite Test Organization'],
             ['org_cross','Cross Instance Test Organization'],
-            ['org_rotate','Rotate Test Organization'],
-            ['org_summary_test_exclusive','Summary Test Organization']
+            ['org_rotate','Rotate Test Organization']
           ];
           for (const [id,email] of users) {
             await client.query('INSERT INTO users (id,email,name) VALUES ($1,$2,$1) ON CONFLICT (id) DO NOTHING', [id,email]);
