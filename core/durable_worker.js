@@ -3,80 +3,37 @@ import { beginExecution } from './execution_worker_hooks.js';
 import { withExecutionContext } from './execution_context.js';
 import { heartbeatNodeAttempt } from './execution_engine.js';
 import { finishExecutionFenced } from './execution_terminal.js';
-import {
-  createExecutionRun,
-  acquireExecutionLease,
-  heartbeatExecutionLease,
-  finishExecutionRun
-} from './execution_lifecycle.js';
+import { createExecutionRun, acquireExecutionLease, heartbeatExecutionLease, finishExecutionRun } from './execution_lifecycle.js';
 
-function workerId() {
-  return process.env.COMPFLOW_WORKER_ID || process.env.HOSTNAME || `worker-${process.pid}`;
-}
-
-function heartbeatIntervalMs() {
-  const seconds = Math.max(5, Math.min(Number(process.env.COMPFLOW_HEARTBEAT_SECONDS) || 20, 120));
-  return seconds * 1000;
-}
+function workerId() { return process.env.COMPFLOW_WORKER_ID || process.env.HOSTNAME || `worker-${process.pid}`; }
+function heartbeatIntervalMs() { const seconds = Math.max(5, Math.min(Number(process.env.COMPFLOW_HEARTBEAT_SECONDS) || 20, 120)); return seconds * 1000; }
 
 export async function durableWorkerHandler(payload) {
   let data = payload;
-  if (payload?.Records?.[0]?.body) {
-    data = typeof payload.Records[0].body === 'string' ? JSON.parse(payload.Records[0].body) : payload.Records[0].body;
-  }
-
+  if (payload?.Records?.[0]?.body) data = typeof payload.Records[0].body === 'string' ? JSON.parse(payload.Records[0].body) : payload.Records[0].body;
   const jobId = data?.jobId || `exec-${Date.now()}`;
   const executionId = data?.executionId || jobId;
   const organizationId = data?.organizationId || data?.orgId || 'org_default';
   const provider = data?.provider || 'aws';
   const clientId = data?.clientId || data?.id || 'adhoc_user';
-  const resumeNodeIds = Array.isArray(data?.resumeNodeIds) ? [...new Set(data.resumeNodeIds)].slice(0, 100) : [];
+  const resumeNodeIds = Array.isArray(data?.resumeNodeIds) ? [...new Set(data.resumeNodeIds)].filter(id => typeof id === 'string' && id.length <= 128).slice(0, 100) : [];
   const owner = workerId();
 
-  await createExecutionRun({
-    organizationId,
-    executionId,
-    metadata: { provider, clientId, jobId: data?.jobId || null, connectionId: data?.connectionId || null, scanId: data?.scanId || null }
-  });
-
+  await createExecutionRun({ organizationId, executionId, metadata: { provider, clientId, jobId: data?.jobId || null, connectionId: data?.connectionId || null, scanId: data?.scanId || null } });
   const lease = await acquireExecutionLease({ organizationId, executionId, workerId: owner });
   let execution;
   try {
-    execution = await beginExecution({
-      organizationId,
-      executionId,
-      provider,
-      clientId,
-      jobId: data?.jobId || null,
-      connectionId: data?.connectionId || null,
-      scanId: data?.scanId || null
-    });
+    execution = await beginExecution({ organizationId, executionId, provider, clientId, jobId: data?.jobId || null, connectionId: data?.connectionId || null, scanId: data?.scanId || null });
   } catch (error) {
-    await finishExecutionRun({
-      organizationId,
-      executionId,
-      workerId: owner,
-      leaseToken: lease.lease_token,
-      status: 'FAILED',
-      errorCode: 'EXECUTION_BEGIN_FAILED',
-      errorMessage: 'Execution initialization failed'
-    }).catch(() => {});
+    await finishExecutionRun({ organizationId, executionId, workerId: owner, leaseToken: lease.lease_token, status: 'FAILED', errorCode: 'EXECUTION_BEGIN_FAILED', errorMessage: 'Execution initialization failed' }).catch(() => {});
     throw error;
   }
 
-  return withExecutionContext({
-    organizationId,
-    executionId,
-    provider,
-    resumeNodeIds,
-    executionNodeId: execution.node.id,
-    executionAttemptId: execution.attempt.id
-  }, async () => {
+  return withExecutionContext({ organizationId, executionId, provider, resumeNodeIds, executionNodeId: execution.node.id, executionAttemptId: execution.attempt.id }, async () => {
     let heartbeatTimer;
     let heartbeatFailure = null;
     let heartbeatInFlight = false;
     let leaseLost = false;
-
     const heartbeat = async () => {
       if (heartbeatInFlight || heartbeatFailure || leaseLost) return;
       heartbeatInFlight = true;
@@ -87,59 +44,25 @@ export async function durableWorkerHandler(payload) {
         heartbeatFailure = error;
         leaseLost = true;
         console.error('[EXECUTION-HEARTBEAT] Lease heartbeat failed:', error?.message || error);
-      } finally {
-        heartbeatInFlight = false;
-      }
+      } finally { heartbeatInFlight = false; }
     };
-
     heartbeatTimer = setInterval(() => { void heartbeat(); }, heartbeatIntervalMs());
     heartbeatTimer.unref?.();
-
     try {
       const result = await workerHandler(payload);
-
-      // The terminal transition is fenced in the same PostgreSQL transaction as
-      // the attempt update. This closes the check-then-write lease race.
       await heartbeat();
       if (heartbeatFailure || leaseLost) throw heartbeatFailure || new Error('EXECUTION_LEASE_LOST');
-
       const terminalStatus = result?.status === 'completed' || result?.status === 'partial' ? 'SUCCEEDED' : 'FAILED';
-      await finishExecutionFenced({
-        organizationId,
-        executionId,
-        attemptId: execution.attempt.id,
-        workerId: owner,
-        leaseToken: lease.lease_token,
-        status: terminalStatus,
-        errorCode: terminalStatus === 'SUCCEEDED' ? null : 'EXECUTION_FAILED'
-      });
+      await finishExecutionFenced({ organizationId, executionId, attemptId: execution.attempt.id, workerId: owner, leaseToken: lease.lease_token, status: terminalStatus, errorCode: terminalStatus === 'SUCCEEDED' ? null : 'EXECUTION_FAILED' });
       return result;
     } catch (error) {
-      // Once fencing is lost, recovery or the current lease holder owns durable state.
       if (!leaseLost && !heartbeatFailure) {
-        await finishExecutionFenced({
-          organizationId,
-          executionId,
-          attemptId: execution.attempt.id,
-          workerId: owner,
-          leaseToken: lease.lease_token,
-          status: 'FAILED',
-          errorCode: 'EXECUTION_FAILED',
-          errorMessage: 'Execution failed'
-        }).catch(() => {});
+        await finishExecutionFenced({ organizationId, executionId, attemptId: execution.attempt.id, workerId: owner, leaseToken: lease.lease_token, status: 'FAILED', errorCode: 'EXECUTION_FAILED', errorMessage: 'Execution failed' }).catch(() => {});
       }
-      await finishExecutionRun({
-        organizationId,
-        executionId,
-        workerId: owner,
-        leaseToken: lease.lease_token,
-        status: 'FAILED',
-        errorCode: heartbeatFailure || leaseLost ? 'EXECUTION_LEASE_LOST' : 'EXECUTION_FAILED',
-        errorMessage: heartbeatFailure || leaseLost ? 'Execution worker lease lost' : 'Execution failed'
-      }).catch(() => {});
+      // Do not issue a second terminal mutation here. The fenced terminal path
+      // is the sole owner of attempt + execution terminal state; recovery owns
+      // the state after fencing is lost.
       throw error;
-    } finally {
-      clearInterval(heartbeatTimer);
-    }
+    } finally { clearInterval(heartbeatTimer); }
   });
 }
