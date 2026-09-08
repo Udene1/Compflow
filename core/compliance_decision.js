@@ -1,5 +1,4 @@
 import crypto from 'crypto';
-import pool from './db.js';
 import { promoteLegacyExecutionEvidence, getEvidenceFreshness, verifyEvidenceIntegrity } from './evidence.js';
 import { promoteExecutionVerifications } from './compliance_verification.js';
 
@@ -74,23 +73,26 @@ export async function deriveExecutionDecisions({ organizationId, executionId } =
     const attempt = latest.get(node.id); const result = attempt?.metadata?.result || {};
     const verificationNode = nodes.rows.find(candidate => candidate.node_type === 'VERIFICATION' && candidate.logical_key.startsWith(node.logical_key.replace(/:evaluate:[^:]+$/, '') + ':verify:'));
     const verification = verificationNode ? verificationByKey.get(verificationNode.id) : null;
-    const evidenceHash = result.evidenceHash || null; const verificationHash = verification?.verification_hash || null;
+    const evaluationEvidenceHash = result.evidenceHash || null;
+    const verificationEvidenceHash = verification?.evidence_hash || null;
+    const effectiveEvidenceHash = verificationEvidenceHash || evaluationEvidenceHash;
+    const verificationHash = verification?.verification_hash || null;
     let evidence = null;
-    if (evidenceHash) {
-      const evidenceResult = await pool.query('SELECT * FROM execution_evidence_records WHERE organization_id=$1 AND execution_id=$2 AND evidence_hash=$3 ORDER BY collected_at DESC LIMIT 1', [organizationId, executionId, evidenceHash]);
+    if (effectiveEvidenceHash) {
+      const evidenceResult = await pool.query('SELECT * FROM execution_evidence_records WHERE organization_id=$1 AND execution_id=$2 AND evidence_hash=$3 ORDER BY collected_at DESC LIMIT 1', [organizationId, executionId, effectiveEvidenceHash]);
       evidence = evidenceResult.rows[0] || null;
     }
     let outcome;
-    if (verification?.outcome) outcome = verification.evidence_hash && verification.evidence_hash === evidenceHash ? verification.outcome : 'INSUFFICIENT_EVIDENCE';
-    else if (attempt?.status === 'SUCCEEDED') outcome = result.assessment === 'PASS' && evidenceHash ? 'PASS' : result.assessment === 'FAIL' && evidenceHash ? 'FAIL' : 'INSUFFICIENT_EVIDENCE';
+    if (verification?.outcome) outcome = verificationEvidenceHash && evidence && verifyEvidenceIntegrity(evidence) ? verification.outcome : 'INSUFFICIENT_EVIDENCE';
+    else if (attempt?.status === 'SUCCEEDED') outcome = result.assessment === 'PASS' && evaluationEvidenceHash ? 'PASS' : result.assessment === 'FAIL' && evaluationEvidenceHash ? 'FAIL' : 'INSUFFICIENT_EVIDENCE';
     else outcome = 'INSUFFICIENT_EVIDENCE';
     const freshness = getEvidenceFreshness(evidence);
     if (!['FRESH', 'UNBOUNDED'].includes(freshness.state)) outcome = 'INSUFFICIENT_EVIDENCE';
-    const persistedEvidenceHash = outcome === 'INSUFFICIENT_EVIDENCE' ? null : evidenceHash;
+    const persistedEvidenceHash = outcome === 'INSUFFICIENT_EVIDENCE' ? null : effectiveEvidenceHash;
     const persistedVerificationHash = outcome === 'INSUFFICIENT_EVIDENCE' ? null : verificationHash;
     const existing = await pool.query('SELECT * FROM compliance_decisions WHERE organization_id=$1 AND execution_id=$2 AND scope_key=$3', [organizationId, executionId, node.logical_key]);
     if (existing.rows[0] && existing.rows[0].outcome === outcome && existing.rows[0].evidence_hash === persistedEvidenceHash && existing.rows[0].verification_hash === persistedVerificationHash) { decisions.push(existing.rows[0]); continue; }
-    decisions.push(await recordControlDecision({ organizationId, executionId, controlId: node.metadata?.controlId, scopeKey: node.logical_key, outcome, evidenceHash: persistedEvidenceHash, verificationHash: persistedVerificationHash, rationale: { evaluation: result, evaluationAttemptStatus: attempt?.status || 'MISSING', evidenceRequired: true, evidenceFreshness: freshness, verification: verification ? { outcome: verification.outcome, id: verification.id, evidenceHash: verification.evidence_hash } : null, nodeId: node.id } }));
+    decisions.push(await recordControlDecision({ organizationId, executionId, controlId: node.metadata?.controlId, scopeKey: node.logical_key, outcome, evidenceHash: persistedEvidenceHash, verificationHash: persistedVerificationHash, rationale: { evaluation: result, evaluationAttemptStatus: attempt?.status || 'MISSING', evidenceRequired: true, evidenceFreshness: freshness, evidenceRole: verification ? 'post_verification' : 'evaluation', verification: verification ? { outcome: verification.outcome, id: verification.id, evidenceHash: verification.evidence_hash } : null, nodeId: node.id } }));
   }
   return decisions;
 }
