@@ -36,14 +36,41 @@ export async function recordControlDecision({ organizationId, executionId, contr
   await ensureDecisionSchema();
   assertOutcome(outcome);
   if (!organizationId || !executionId || !controlId || !scopeKey) throw new Error('DECISION_INPUT_INVALID');
-  const payload = { controlId, scopeKey, outcome, evidenceHash, verificationHash, rationale };
   const id = `decision_${crypto.createHash('sha256').update(`${organizationId}:${executionId}:${scopeKey}`).digest('hex').slice(0, 32)}`;
   const result = await pool.query(`INSERT INTO compliance_decisions (id,organization_id,execution_id,control_id,scope_key,outcome,evidence_hash,verification_hash,rationale) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9::jsonb) ON CONFLICT (organization_id,execution_id,scope_key) DO UPDATE SET outcome=EXCLUDED.outcome,evidence_hash=EXCLUDED.evidence_hash,verification_hash=EXCLUDED.verification_hash,rationale=EXCLUDED.rationale,decided_at=NOW() RETURNING *`, [id, organizationId, executionId, controlId, scopeKey, outcome, evidenceHash, verificationHash, JSON.stringify(rationale)]);
   return result.rows[0];
 }
 
+export async function deriveExecutionDecisions({ organizationId, executionId } = {}) {
+  await ensureDecisionSchema();
+  const nodes = await pool.query(`SELECT id,node_type,logical_key,status,metadata FROM execution_graph_nodes WHERE organization_id=$1 AND execution_id=$2 AND node_type IN ('CONTROL_EVALUATION','VERIFICATION') ORDER BY created_at ASC`, [organizationId, executionId]);
+  const attempts = await pool.query(`SELECT DISTINCT ON (node_id) node_id,status,metadata FROM execution_attempts WHERE organization_id=$1 AND execution_id=$2 ORDER BY node_id,attempt_number DESC`, [organizationId, executionId]);
+  const latest = new Map(attempts.rows.map(row => [row.node_id, row]));
+  const verificationByKey = new Map();
+  for (const node of nodes.rows.filter(row => row.node_type === 'VERIFICATION')) {
+    const attempt = latest.get(node.id);
+    const result = attempt?.metadata?.result;
+    if (attempt?.status === 'SUCCEEDED' && result?.verified) verificationByKey.set(node.logical_key.replace(/:verify:[^:]+$/, ''), { node, attempt, result });
+  }
+  const decisions = [];
+  for (const node of nodes.rows.filter(row => row.node_type === 'CONTROL_EVALUATION')) {
+    const attempt = latest.get(node.id);
+    if (attempt?.status !== 'SUCCEEDED') continue;
+    const result = attempt.metadata?.result || {};
+    const key = node.logical_key.replace(/:evaluate:[^:]+$/, '');
+    const verification = verificationByKey.get(key);
+    const outcome = verification ? 'PASS' : result.assessment === 'PASS' ? 'PASS' : result.assessment === 'FAIL' ? 'FAIL' : 'INSUFFICIENT_EVIDENCE';
+    decisions.push(await recordControlDecision({ organizationId, executionId, controlId: node.metadata?.controlId, scopeKey: node.logical_key, outcome, evidenceHash: result.evidenceHash || null, verificationHash: verification?.result ? crypto.createHash('sha256').update(JSON.stringify(verification.result)).digest('hex') : null, rationale: { evaluation: result, verified: Boolean(verification), nodeId: node.id } }));
+  }
+  return decisions;
+}
+
 export async function finalizeExecutionDecision({ organizationId, executionId } = {}) {
   await ensureDecisionSchema();
+  const graph = await pool.query(`SELECT node_type,status FROM execution_graph_nodes WHERE organization_id=$1 AND execution_id=$2`, [organizationId, executionId]);
+  const active = graph.rows.some(node => ['PENDING', 'RUNNING'].includes(node.status) && ['EVIDENCE_COLLECTION','CONTROL_EVALUATION','APPROVAL','REMEDIATION','VERIFICATION'].includes(node.node_type));
+  if (active) throw new Error('DECISION_EXECUTION_NOT_TERMINAL');
+  await deriveExecutionDecisions({ organizationId, executionId });
   const result = await pool.query('SELECT * FROM compliance_decisions WHERE organization_id=$1 AND execution_id=$2 ORDER BY control_id,scope_key', [organizationId, executionId]);
   if (!result.rows.length) throw new Error('DECISION_INPUTS_MISSING');
   const outcomes = result.rows.map(row => row.outcome);
