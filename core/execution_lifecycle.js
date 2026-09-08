@@ -1,5 +1,6 @@
 import crypto from 'crypto';
 import pool from './db.js';
+import { appendExecutionEvent } from './execution_events.js';
 
 const LIFECYCLE_SCHEMA = `
 CREATE TABLE IF NOT EXISTS execution_runs (
@@ -37,28 +38,21 @@ let schemaPromise;
 
 async function ensureSchema() {
   if (!schemaPromise) {
-    schemaPromise = pool.query(LIFECYCLE_SCHEMA).catch(error => {
-      schemaPromise = null;
-      throw error;
-    });
+    schemaPromise = pool.query(LIFECYCLE_SCHEMA).catch(error => { schemaPromise = null; throw error; });
   }
   await schemaPromise;
 }
 
 function cleanError(value) {
   if (!value) return null;
-  return String(value)
-    .replace(/(authorization|token|secret|password|client_secret|api[_-]?key)\s*[:=]\s[^\s,;]+/gi, '$1=[REDACTED]')
-    .slice(0, 500);
+  return String(value).replace(/(authorization|token|secret|password|client_secret|api[_-]?key)\s*[:=]\s[^\s,;]+/gi, '$1=[REDACTED]').slice(0, 500);
 }
 
 function assertTransition(current, next) {
   if (!LEGAL[current]?.has(next)) throw new Error(`EXECUTION_TRANSITION_INVALID:${current}->${next}`);
 }
 
-function leaseToken() {
-  return `lease_${crypto.randomUUID()}`;
-}
+function leaseToken() { return `lease_${crypto.randomUUID()}`; }
 
 export async function ensureExecutionLifecycleSchema() { await ensureSchema(); }
 
@@ -72,6 +66,7 @@ export async function createExecutionRun({ organizationId, executionId = null, m
     return existing.rows[0];
   }
   const result = await pool.query(`INSERT INTO execution_runs (id, organization_id, status, metadata) VALUES ($1,$2,'PENDING',$3::jsonb) RETURNING *`, [id, organizationId, JSON.stringify(metadata)]);
+  await appendExecutionEvent({ organizationId, executionId: id, eventType: 'EXECUTION_CREATED', result: 'success', payload: { status: 'PENDING' }, idempotencyKey: 'created' });
   return result.rows[0];
 }
 
@@ -96,6 +91,7 @@ export async function acquireExecutionLease({ organizationId, executionId, worke
     if (run.status === 'RUNNING' && run.lease_expires_at && new Date(run.lease_expires_at).getTime() > Date.now() && run.lease_owner !== workerId) throw new Error('EXECUTION_ALREADY_LEASED');
     assertTransition(run.status, 'RUNNING');
     const result = await client.query(`UPDATE execution_runs SET status='RUNNING', lease_owner=$1, lease_token=$2, lease_expires_at=NOW()+($3 * INTERVAL '1 second'), heartbeat_at=NOW(), started_at=COALESCE(started_at,NOW()), version=version+1, updated_at=NOW() WHERE id=$4 AND organization_id=$5 RETURNING *`, [workerId, token, ttl, executionId, organizationId]);
+    await appendExecutionEvent({ client, organizationId, executionId, eventType: 'EXECUTION_LEASE_ACQUIRED', actorType: 'WORKER', actorId: workerId, result: 'success', payload: { status: 'RUNNING', leaseSeconds: ttl } });
     await client.query('COMMIT');
     return result.rows[0];
   } catch (error) {
@@ -124,6 +120,7 @@ export async function finishExecutionRun({ organizationId, executionId, workerId
     if (!current.rows[0]) throw new Error('EXECUTION_LEASE_LOST');
     assertTransition(current.rows[0].status, status);
     const result = await client.query(`UPDATE execution_runs SET status=$1, finished_at=NOW(), heartbeat_at=NOW(), lease_expires_at=NULL, lease_owner=NULL, lease_token=NULL, error_code=$2, error_message=$3, metadata=metadata||$4::jsonb, version=version+1, updated_at=NOW() WHERE id=$5 AND organization_id=$6 AND lease_owner=$7 AND lease_token=$8 RETURNING *`, [status, errorCode, cleanError(errorMessage), JSON.stringify(metadata), executionId, organizationId, workerId, token]);
+    await appendExecutionEvent({ client, organizationId, executionId, eventType: 'EXECUTION_FINISHED', actorType: 'WORKER', actorId: workerId, result: status === 'SUCCEEDED' ? 'success' : 'failed', payload: { status, errorCode: errorCode || null, errorMessage: cleanError(errorMessage) } });
     await client.query('COMMIT');
     return result.rows[0];
   } catch (error) {
@@ -145,10 +142,9 @@ export async function cancelExecutionRun({ organizationId, executionId, reason =
       if (current.rows[0].status === 'CANCELLED') { await client.query('COMMIT'); return current.rows[0]; }
       throw new Error('EXECUTION_CANCEL_CONFLICT');
     }
-    await client.query(`UPDATE execution_attempts SET status='CANCELLED', finished_at=NOW(), heartbeat_at=NOW(), error_code='EXECUTION_CANCELLED', error_message=$3 WHERE organization_id=$1 AND execution_id=$2 AND status='RUNNING'`, [organizationId, executionId, cleanError(reason)]).catch(error => {
-      if (error.code !== '42P01') throw error;
-    });
+    await client.query(`UPDATE execution_attempts SET status='CANCELLED', finished_at=NOW(), heartbeat_at=NOW(), error_code='EXECUTION_CANCELLED', error_message=$3 WHERE organization_id=$1 AND execution_id=$2 AND status='RUNNING'`, [organizationId, executionId, cleanError(reason)]).catch(error => { if (error.code !== '42P01') throw error; });
     await client.query(`UPDATE execution_graph_nodes SET status='CANCELLED', updated_at=NOW() WHERE organization_id=$1 AND execution_id=$2 AND status IN ('PENDING','RUNNING','FAILED')`, [organizationId, executionId]);
+    await appendExecutionEvent({ client, organizationId, executionId, eventType: 'EXECUTION_CANCELLED', actorType: 'USER', result: 'success', payload: { reason: cleanError(reason) } });
     await client.query('COMMIT');
     return result.rows[0];
   } catch (error) {
@@ -164,6 +160,9 @@ export async function recoverExpiredExecutionLeases({ organizationId = null, exe
   if (organizationId) { params.push(organizationId); filters.push(`organization_id=$${params.length}`); }
   if (executionId) { params.push(executionId); filters.push(`id=$${params.length}`); }
   const result = await pool.query(`UPDATE execution_runs SET status='FAILED', finished_at=NOW(), error_code='STALE_EXECUTION_LEASE', error_message='Execution worker lease expired', lease_owner=NULL, lease_token=NULL, lease_expires_at=NULL, updated_at=NOW(), version=version+1 WHERE ${filters.join(' AND ')} RETURNING *`, params);
+  for (const run of result.rows) {
+    await appendExecutionEvent({ organizationId: run.organization_id, executionId: run.id, eventType: 'EXECUTION_LEASE_EXPIRED', actorType: 'SYSTEM', result: 'failed', payload: { previousStatus: 'RUNNING', errorCode: 'STALE_EXECUTION_LEASE' } });
+  }
   return result.rows;
 }
 
