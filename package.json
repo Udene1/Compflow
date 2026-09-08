@@ -78,7 +78,7 @@
     "@azure/arm-sql": "^10.0.0",
     "@azure/arm-storage": "^20.0.0",
     "@azure/arm-subscriptions": "^6.0.0",
-    "@azure/identity": "^4.0.0",
+    "@azure/identity": "^4.13.2",
     "@google-cloud/appengine-admin": "^4.2.2",
     "@google-cloud/artifact-registry": "^4.7.1",
     "@google-cloud/bigquery": "^8.3.1",
