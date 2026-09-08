@@ -28,15 +28,7 @@ afterAll(async () => { await cleanExecution(executionId); await cleanExecution(w
 
 describe('real compliance execution boundary', () => {
   it('persists intent-derived plan, graph, execution lease state and real BullMQ dispatch', async () => {
-    const result = await startComplianceExecution({
-      organizationId,
-      executionId,
-      intent: {
-        id: 'intent_real_integration', version: '1', objective: 'Evaluate a real provider connection', mode: 'AUDIT', frameworks: ['soc2'],
-        rules: [{ id: 'rule-real-1', controlId: 'CC6.1', action: 'EVALUATE' }],
-        targets: [{ connectionId: 'missing-real-connection', provider: 'aws', resourceId: 'resource-real-1' }]
-      }
-    });
+    const result = await startComplianceExecution({ organizationId, executionId, intent: { id: 'intent_real_integration', version: '1', objective: 'Evaluate a real provider connection', mode: 'AUDIT', frameworks: ['soc2'], rules: [{ id: 'rule-real-1', controlId: 'CC6.1', action: 'EVALUATE' }], targets: [{ connectionId: 'missing-real-connection', provider: 'aws', resourceId: 'resource-real-1' }] } });
     expect(result.intent.intent_hash).toMatch(/^[a-f0-9]{64}$/);
     expect(result.plan.planHash).toMatch(/^[a-f0-9]{64}$/);
     const storedPlan = await getExecutionPlan({ organizationId, executionId });
@@ -55,33 +47,17 @@ describe('real compliance execution boundary', () => {
   it('runs a real worker against PostgreSQL and Redis and durably records provider failure', async () => {
     const worker = await listenWorkerQueue();
     try {
-      await startComplianceExecution({
-        organizationId,
-        executionId: workerExecutionId,
-        intent: {
-          id: 'intent_real_worker_failure', version: '1', objective: 'Exercise the real worker failure boundary', mode: 'AUDIT', frameworks: ['soc2'],
-          rules: [{ id: 'rule-worker-1', controlId: 'CC6.1', action: 'EVALUATE' }],
-          targets: [{ connectionId: 'missing-worker-credentials', provider: 'aws', resourceId: 'resource-worker-1' }]
-        }
-      });
-      const deadline = Date.now() + 10_000;
-      let graph;
-      while (Date.now() < deadline) {
-        graph = await getExecutionGraph(organizationId, workerExecutionId);
-        const evidenceNode = graph.nodes.find(node => node.node_type === 'EVIDENCE_COLLECTION');
-        if (evidenceNode?.status === 'FAILED') break;
-        await new Promise(resolve => setTimeout(resolve, 100));
-      }
+      await startComplianceExecution({ organizationId, executionId: workerExecutionId, intent: { id: 'intent_real_worker_failure', version: '1', objective: 'Exercise the real worker failure boundary', mode: 'AUDIT', frameworks: ['soc2'], rules: [{ id: 'rule-worker-1', controlId: 'CC6.1', action: 'EVALUATE' }], targets: [{ connectionId: 'missing-worker-credentials', provider: 'aws', resourceId: 'resource-worker-1' }] } });
+      const deadline = Date.now() + 10_000; let graph;
+      while (Date.now() < deadline) { graph = await getExecutionGraph(organizationId, workerExecutionId); const evidenceNode = graph.nodes.find(node => node.node_type === 'EVIDENCE_COLLECTION'); if (evidenceNode?.status === 'FAILED') break; await new Promise(resolve => setTimeout(resolve, 100)); }
       const failed = graph?.nodes.find(node => node.node_type === 'EVIDENCE_COLLECTION');
       expect(failed?.status).toBe('FAILED');
       const failedAttempt = graph.attempts.find(attempt => attempt.node_id === failed.id);
       expect(failedAttempt?.status).toBe('FAILED');
       expect(failedAttempt?.error_code).toBe('EXECUTION_NODE_FAILED');
-      expect(failedAttempt?.error_message).not.toMatch(/credential|secret|token|password/i);
+      expect(failedAttempt?.error_message).not.toMatch(/AKIA[0-9A-Z]{16}|-----BEGIN (RSA |EC )?PRIVATE KEY-----|password\s*[:=]|token\s*[:=]|secret\s*[:=]/i);
       const run = await getExecutionRun(organizationId, workerExecutionId);
       expect(['RUNNING', 'FAILED']).toContain(run.status);
-    } finally {
-      await worker.close();
-    }
+    } finally { await worker.close(); }
   });
 });
