@@ -43,11 +43,12 @@ function eventId({ organizationId, executionId, nodeId, attemptId, eventType, id
 
 export async function ensureExecutionEventsSchema() { await ensureSchema(); }
 
-export async function appendExecutionEvent({ organizationId, executionId, nodeId = null, attemptId = null, eventType, actorType = 'SYSTEM', actorId = null, result = null, payload = {}, idempotencyKey = null } = {}) {
+export async function appendExecutionEvent({ organizationId, executionId, nodeId = null, attemptId = null, eventType, actorType = 'SYSTEM', actorId = null, result = null, payload = {}, idempotencyKey = null, client = null } = {}) {
   await ensureSchema();
   if (!organizationId || !executionId || !eventType) throw new Error('EXECUTION_EVENT_INPUT_INVALID');
   const id = eventId({ organizationId, executionId, nodeId, attemptId, eventType, idempotencyKey });
-  const resultRow = await pool.query(
+  const db = client || pool;
+  const resultRow = await db.query(
     `INSERT INTO execution_events (id, organization_id, execution_id, node_id, attempt_id, event_type, actor_type, actor_id, result, payload)
      VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10::jsonb)
      ON CONFLICT (id) DO NOTHING
@@ -55,7 +56,7 @@ export async function appendExecutionEvent({ organizationId, executionId, nodeId
     [id, organizationId, executionId, nodeId, attemptId, eventType, String(actorType).slice(0, 50), actorId ? String(actorId).slice(0, 200) : null, result ? String(result).slice(0, 50) : null, JSON.stringify(sanitize(payload))]
   );
   if (resultRow.rows[0]) return resultRow.rows[0];
-  const existing = await pool.query('SELECT * FROM execution_events WHERE id=$1', [id]);
+  const existing = await db.query('SELECT * FROM execution_events WHERE id=$1', [id]);
   return existing.rows[0];
 }
 
