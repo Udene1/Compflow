@@ -24,6 +24,8 @@ function executionId(value) { if (!ID.test(String(value || ''))) throw new Error
 function idempotency(req) { const value = req.get('Idempotency-Key'); if (value == null) return null; if (!KEY.test(value)) throw new Error('IDEMPOTENCY_KEY_INVALID'); return value; }
 function page(value, fallback = 100) { const n = Number(value); return Number.isSafeInteger(n) ? Math.max(1, Math.min(n, LIMIT)) : fallback; }
 function authorizeAction(req, action) { const allowed = ACTION_ROLES[action]; if (!allowed || !hasRole(req.user?.role, allowed)) { const error = new Error('FORBIDDEN_ACTION'); error.status = 403; throw error; } }
+async function replayAction({ organizationId, executionId, action, key }) { if (!key) return null; return getExecutionEventByIdempotencyKey({ organizationId, executionId, eventType: 'EXECUTION_ACTION_COMPLETED', idempotencyKey: `v1:${action}:${key}` }); }
+async function recordAction({ organizationId, executionId, action, key, actorId, result }) { if (!key) return; await appendExecutionEvent({ organizationId, executionId, eventType: 'EXECUTION_ACTION_COMPLETED', actorType: 'USER', actorId, result: 'success', payload: { action, result }, idempotencyKey: `v1:${action}:${key}` }); }
 
 router.get('/providers', (req, res) => res.json({ providers: listProviders() }));
 
@@ -51,10 +53,7 @@ router.post('/executions', async (req, res, next) => {
   } catch (error) { next(error); }
 });
 
-router.get('/executions/:executionId/stream', async (req, res, next) => {
-  try { const id = executionId(req.params.executionId); req.query.executionId = id; req.query.stream = '1'; return executionGraphHandler(req, res); }
-  catch (error) { next(error); }
-});
+router.get('/executions/:executionId/stream', async (req, res, next) => { try { const id = executionId(req.params.executionId); req.query.executionId = id; req.query.stream = '1'; return executionGraphHandler(req, res); } catch (error) { next(error); } });
 
 router.get('/executions/:executionId', async (req, res, next) => {
   try {
@@ -88,9 +87,21 @@ router.post('/executions/:executionId/actions', async (req, res, next) => {
     const id = executionId(req.params.executionId); const action = req.body?.action; const key = idempotency(req);
     if (!['start','resume','retry','approve','cancel','finalize'].includes(action)) return res.status(400).json({ error: 'ACTION_INVALID' });
     authorizeAction(req, action);
-    if (action === 'start') return res.status(202).json(await startPersistedPlanExecution({ organizationId, executionId: id }));
-    if (action === 'finalize') return res.status(200).json(await finalizeComplianceDecision({ organizationId, executionId: id }));
-    if (action === 'approve') return res.status(200).json(await approveExecutionNode({ organizationId, executionId: id, nodeId: req.body?.nodeId, actorId: actor(req) }));
+    if (action === 'start' || action === 'finalize') {
+      const replay = await replayAction({ organizationId, executionId: id, action, key });
+      if (replay) return res.status(200).json({ ...(replay.payload?.result || {}), executionId: id, action, idempotencyKey: key, idempotentReplay: true });
+      const result = action === 'start' ? await startPersistedPlanExecution({ organizationId, executionId: id }) : await finalizeComplianceDecision({ organizationId, executionId: id });
+      await recordAction({ organizationId, executionId: id, action, key, actorId: actor(req), result });
+      return res.status(action === 'start' ? 202 : 200).json({ ...result, idempotencyKey: key });
+    }
+    if (action === 'approve') {
+      const nodeId = req.body?.nodeId; if (!ID.test(String(nodeId || ''))) throw new Error('NODE_IDS_INVALID');
+      const actionKey = key ? `approve:${nodeId}:${key}` : null; const replay = await replayAction({ organizationId, executionId: id, action: actionKey || 'approve', key: actionKey ? null : null });
+      if (replay) return res.status(200).json({ ...(replay.payload?.result || {}), executionId: id, action, nodeId, idempotencyKey: key, idempotentReplay: true });
+      const result = await approveExecutionNode({ organizationId, executionId: id, nodeId, actorId: actor(req) });
+      if (key) await appendExecutionEvent({ organizationId, executionId: id, eventType: 'EXECUTION_ACTION_COMPLETED', actorType: 'USER', actorId: actor(req), result: 'success', payload: { action, nodeId, result }, idempotencyKey: `v1:approve:${nodeId}:${key}` });
+      return res.status(200).json({ ...result, idempotencyKey: key });
+    }
     if (action === 'cancel') return res.status(200).json(await cancelExecutionRun({ organizationId, executionId: id, reason: String(req.body?.reason || 'Cancelled by operator').slice(0,500), actorId: actor(req), idempotencyKey: key ? `v1:cancel:${key}` : null }));
     const eventKey = key ? `control:${action}:${key}` : null;
     if (eventKey) { const existingEvent = await getExecutionEventByIdempotencyKey({ organizationId, executionId: id, eventType: 'EXECUTION_CONTROL_QUEUED', idempotencyKey: eventKey }); if (existingEvent) return res.status(202).json({ success:true,status:'queued',executionId:id,action,jobId:existingEvent.payload?.jobId||null,resumableNodeIds:existingEvent.payload?.nodeIds||[],idempotencyKey:key,idempotentReplay:true }); }
