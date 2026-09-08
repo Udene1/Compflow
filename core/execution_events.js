@@ -53,11 +53,20 @@ export async function appendExecutionEvent({ organizationId, executionId, nodeId
      VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10::jsonb)
      ON CONFLICT (id) DO NOTHING
      RETURNING *`,
-    [id, organizationId, executionId, nodeId, attemptId, eventType, String(actorType).slice(0, 50), actorId ? String(actorId).slice(0, 200) : null, result ? String(result).slice(0, 50) : null, JSON.stringify(sanitize(payload))]
+    [id, organizationId, executionId, nodeId, attemptId, eventType, actorType ? String(actorType).slice(0, 50) : 'SYSTEM', actorId ? String(actorId).slice(0, 200) : null, result ? String(result).slice(0, 50) : null, JSON.stringify(sanitize(payload))]
   );
   if (resultRow.rows[0]) return resultRow.rows[0];
   const existing = await db.query('SELECT * FROM execution_events WHERE id=$1', [id]);
   return existing.rows[0];
+}
+
+export async function getExecutionEventByIdempotencyKey({ organizationId, executionId, eventType, idempotencyKey, client = null } = {}) {
+  await ensureSchema();
+  if (!organizationId || !executionId || !eventType || !idempotencyKey) return null;
+  const id = eventId({ organizationId, executionId, eventType, idempotencyKey });
+  const db = client || pool;
+  const result = await db.query('SELECT * FROM execution_events WHERE id=$1 AND organization_id=$2 AND execution_id=$3', [id, organizationId, executionId]);
+  return result.rows[0] || null;
 }
 
 export async function listExecutionEvents({ organizationId, executionId, afterSequence = 0, limit = 200 } = {}) {
