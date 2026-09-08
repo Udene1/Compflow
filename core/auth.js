@@ -40,10 +40,14 @@ export async function revokeSession(tokenString) {
     const expiry = Date.now() + (7 * 24 * 60 * 60 * 1000);
 
     try {
-        await pool.query('UPDATE sessions SET is_revoked = true WHERE token_hash = $1;', [hash]);
+        const result = await pool.query('UPDATE sessions SET is_revoked = true WHERE token_hash = $1 RETURNING id;', [hash]);
+        if (result.rowCount === 0) {
+            log.warn('[AUTH] Attempted to revoke a session that is not present in authoritative storage.');
+            return;
+        }
     } catch (err) {
-        log.warn(`[AUTH] Failed to mark session revoked in DB: ${err.message}`);
-        if (process.env.NODE_ENV === 'production') throw err;
+        log.error(`[AUTH] Failed to mark session revoked in DB: ${err.message}`);
+        throw new Error('Session revocation persistence failed.');
     }
 
     _revokedSessions.set(hash, expiry);
@@ -57,17 +61,14 @@ export async function isSessionRevoked(tokenString) {
     if (_revokedSessions.has(hash)) return true;
 
     try {
-        const res = await pool.query('SELECT is_revoked, expires_at FROM sessions WHERE token_hash = $1;', [hash]);
-        if (res.rows && res.rows.length > 0) {
-            const row = res.rows[0];
-            if (row.is_revoked) {
-                _revokedSessions.set(hash, Date.now() + (7 * 24 * 60 * 60 * 1000));
-                return true;
-            }
+        const res = await pool.query('SELECT is_revoked FROM sessions WHERE token_hash = $1;', [hash]);
+        if (res.rows && res.rows.length > 0 && res.rows[0].is_revoked) {
+            _revokedSessions.set(hash, Date.now() + (7 * 24 * 60 * 60 * 1000));
+            return true;
         }
     } catch (err) {
-        log.warn(`[AUTH] Persistent revocation check failed: ${err.message}`);
-        if (process.env.NODE_ENV === 'production') return true;
+        log.error(`[AUTH] Persistent revocation check failed: ${err.message}`);
+        throw new Error('Session authority unavailable.');
     }
 
     return false;
@@ -192,7 +193,7 @@ export async function validateSessionToken(tokenString) {
 
         return { valid: true, user: payload };
     } catch (err) {
-        if (err?.code === 'ECONNREFUSED' || err?.code === '57P01' || err?.code === '08006') {
+        if (err?.message === 'Session authority unavailable.' || err?.code === 'ECONNREFUSED' || err?.code === '57P01' || err?.code === '08006') {
             return { valid: false, error: 'Session authority unavailable' };
         }
         return { valid: false, error: 'Failed to decode session token: ' + err.message };
