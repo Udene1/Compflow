@@ -61,11 +61,14 @@ export async function deriveExecutionDecisions({ organizationId, executionId } =
     const attempt = latest.get(node.id); const result = attempt?.metadata?.result || {};
     const verificationNode = nodes.rows.find(candidate => candidate.node_type === 'VERIFICATION' && candidate.logical_key.startsWith(node.logical_key.replace(/:evaluate:[^:]+$/, '') + ':verify:'));
     const verification = verificationNode ? verificationByKey.get(verificationNode.id) : null;
-    let outcome; if (verification?.outcome) outcome = verification.outcome; else if (attempt?.status === 'SUCCEEDED') outcome = result.assessment === 'PASS' ? 'PASS' : result.assessment === 'FAIL' ? 'FAIL' : 'INSUFFICIENT_EVIDENCE'; else outcome = 'INSUFFICIENT_EVIDENCE';
     const evidenceHash = result.evidenceHash || null; const verificationHash = verification?.verification_hash || null;
+    let outcome;
+    if (verification?.outcome) outcome = verification.evidence_hash ? verification.outcome : 'INSUFFICIENT_EVIDENCE';
+    else if (attempt?.status === 'SUCCEEDED') outcome = result.assessment === 'PASS' && evidenceHash ? 'PASS' : result.assessment === 'FAIL' && evidenceHash ? 'FAIL' : 'INSUFFICIENT_EVIDENCE';
+    else outcome = 'INSUFFICIENT_EVIDENCE';
     const existing = await pool.query('SELECT * FROM compliance_decisions WHERE organization_id=$1 AND execution_id=$2 AND scope_key=$3', [organizationId, executionId, node.logical_key]);
     if (existing.rows[0] && existing.rows[0].outcome === outcome && existing.rows[0].evidence_hash === evidenceHash && existing.rows[0].verification_hash === verificationHash) { decisions.push(existing.rows[0]); continue; }
-    decisions.push(await recordControlDecision({ organizationId, executionId, controlId: node.metadata?.controlId, scopeKey: node.logical_key, outcome, evidenceHash, verificationHash, rationale: { evaluation: result, evaluationAttemptStatus: attempt?.status || 'MISSING', verification: verification ? { outcome: verification.outcome, id: verification.id } : null, nodeId: node.id } }));
+    decisions.push(await recordControlDecision({ organizationId, executionId, controlId: node.metadata?.controlId, scopeKey: node.logical_key, outcome, evidenceHash, verificationHash, rationale: { evaluation: result, evaluationAttemptStatus: attempt?.status || 'MISSING', evidenceRequired: true, verification: verification ? { outcome: verification.outcome, id: verification.id, evidenceHash: verification.evidence_hash } : null, nodeId: node.id } }));
   }
   return decisions;
 }
