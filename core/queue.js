@@ -26,10 +26,10 @@ async function getQueue() {
 }
 
 const ALLOWED_PAYLOAD_KEYS = new Set([
-    'jobId', 'scanId', 'executionId', 'organizationId', 'connectionId', 'provider', 'scanType', 'enqueuedAt', 'resumeNodeIds'
+    'jobId', 'scanId', 'executionId', 'clientId', 'organizationId', 'connectionId', 'provider', 'scanType', 'roleArn', 'enqueuedAt', 'resumeNodeIds'
 ]);
 const PROVIDERS = new Set(['aws', 'azure', 'gcp', 'digitalocean', 'hetzner']);
-const SCAN_TYPES = new Set(['initial', 'manual', 'scheduled', 'resume', 'adhoc']);
+const SCAN_TYPES = new Set(['initial', 'initial_onboarding_scan', 'manual', 'scheduled', 'resume', 'adhoc']);
 
 function boundedString(value, max = 128) {
     return typeof value === 'string' && value.length > 0 && value.length <= max ? value : null;
@@ -41,9 +41,7 @@ export function sanitizeJobPayload(jobData) {
     for (const [k, v] of Object.entries(jobData)) {
         if (!ALLOWED_PAYLOAD_KEYS.has(k)) continue;
         if (k === 'resumeNodeIds') {
-            if (Array.isArray(v) && v.length <= 100 && v.every(id => boundedString(id, 128))) {
-                clean[k] = [...new Set(v)];
-            }
+            if (Array.isArray(v) && v.length <= 100 && v.every(id => boundedString(id, 128))) clean[k] = [...new Set(v)];
             continue;
         }
         clean[k] = v;
