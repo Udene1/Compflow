@@ -7,7 +7,7 @@ on:
     branches: [main]
 
 permissions:
-  contents: write
+  contents: read
 
 jobs:
   test:
@@ -53,34 +53,6 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
-
-      - name: Restore transactional DB access from known-good adapter
-        run: |
-          set -euo pipefail
-          git fetch origin c3bb9e21fd3336cef7d7fa2363957308855dfc87 --no-tags
-          git checkout c3bb9e21fd3336cef7d7fa2363957308855dfc87 -- core/db.js
-          python3 - <<'PY'
-          from pathlib import Path
-          p = Path('core/db.js')
-          s = p.read_text()
-          start = s.index('const resilientPool = {')
-          end = s.index('\n};', start) + 3
-          block = s[start:end]
-          if 'async connect()' not in block:
-              old = '    }\n};'
-              new = '''    },\n    async connect() {\n        if (realPool) {\n            try { return await realPool.connect(); }\n            catch (err) {\n                if (process.env.NODE_ENV === 'production') throw new Error(`[DB] Production database unavailable: ${err.message}`);\n                throw new Error(`[DB] Transactional PostgreSQL connection unavailable: ${err.message}`);\n            }\n        }\n        if (process.env.NODE_ENV === 'production') throw new Error('[DB] Production database pool not initialized');\n        throw new Error('[DB] Transactional PostgreSQL connection unavailable: real database required');\n    }\n};'''
-              if not block.endswith(old):
-                  raise SystemExit('Unexpected resilientPool shape')
-              s = s[:start] + block[:-len(old)] + new + s[end:]
-              p.write_text(s)
-          PY
-          if ! git diff --quiet -- core/db.js; then
-            git config user.name 'github-actions[bot]'
-            git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-            git add core/db.js
-            git commit -m 'fix(db): expose real transactional PostgreSQL access'
-            git push origin HEAD:main
-          fi
 
       - name: Setup Node.js
         uses: actions/setup-node@v4
@@ -135,7 +107,8 @@ jobs:
             ['org_csrf','CSRF Test Organization'],
             ['org_empty_prereq_99','Empty Prerequisite Test Organization'],
             ['org_cross','Cross Instance Test Organization'],
-            ['org_rotate','Rotate Test Organization']
+            ['org_rotate','Rotate Test Organization'],
+            ['org_summary_test_exclusive','Summary Test Organization']
           ];
           for (const [id,email] of users) {
             await client.query('INSERT INTO users (id,email,name) VALUES ($1,$2,$1) ON CONFLICT (id) DO NOTHING', [id,email]);
