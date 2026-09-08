@@ -23,7 +23,7 @@ export function compilePolicyPlan({ organizationId, executionId, policy, targets
   const policyId = assertString(policy.id, 'POLICY_ID_INVALID'); const version = assertString(String(policy.version ?? ''), 'POLICY_VERSION_INVALID', 32); const frameworks = assertFrameworks(policy.frameworks); const mode = policy.mode || 'AUDIT';
   if (!MODES.has(mode)) throw new Error('POLICY_MODE_INVALID'); if (!Array.isArray(policy.rules) || policy.rules.length < 1 || policy.rules.length > MAX_RULES) throw new Error('POLICY_RULES_INVALID');
   const rules = policy.rules.map(normalizeRule); const normalizedTargets = normalizeTargets(targets);
-  const planNode = node({ organizationId, executionId, nodeType: 'PLAN', logicalKey: `${policyId}@${version}`, label: `Policy plan ${policyId}@${version}`, metadata: { policyId, policyVersion: version, frameworks, mode } });
+  const planNode = node({ organizationId, executionId, nodeType: 'PLAN', logicalKey: `${policyId}@${version}`, label: `Policy plan ${policyId}@${version}`, metadata: { policyId, policyVersion: version, intentHash: policy.intentHash || null, frameworks, mode } });
   const nodes = [planNode]; const edges = []; const evidenceByCheck = new Map();
   for (const target of normalizedTargets) for (const rule of rules) {
     const evidenceKey = `${target.connectionId}:${target.resourceId || '*'}:${rule.controlId}`; let evidenceNode = evidenceByCheck.get(evidenceKey);
@@ -39,7 +39,7 @@ export function compilePolicyPlan({ organizationId, executionId, policy, targets
       nodes.push(verification); edges.push(edge(executionId, remediation.id, verification.id, { reason: 'post-remediation-verification' }));
     }
   }
-  const plan = { planVersion: 1, planHash: null, policy: { id: policyId, version, frameworks, mode }, targets: normalizedTargets, nodes, edges, counts: { nodes: nodes.length, edges: edges.length, evidence: nodes.filter(n => n.nodeType === 'EVIDENCE_COLLECTION').length, evaluations: nodes.filter(n => n.nodeType === 'CONTROL_EVALUATION').length, approvals: nodes.filter(n => n.nodeType === 'APPROVAL').length, remediations: nodes.filter(n => n.nodeType === 'REMEDIATION').length, verifications: nodes.filter(n => n.nodeType === 'VERIFICATION').length } };
+  const plan = { planVersion: 1, planHash: null, policy: { id: policyId, version, intentHash: policy.intentHash || null, frameworks, mode }, targets: normalizedTargets, nodes, edges, counts: { nodes: nodes.length, edges: edges.length, evidence: nodes.filter(n => n.nodeType === 'EVIDENCE_COLLECTION').length, evaluations: nodes.filter(n => n.nodeType === 'CONTROL_EVALUATION').length, approvals: nodes.filter(n => n.nodeType === 'APPROVAL').length, remediations: nodes.filter(n => n.nodeType === 'REMEDIATION').length, verifications: nodes.filter(n => n.nodeType === 'VERIFICATION').length } };
   plan.planHash = hashPlan(plan); return plan;
 }
 export function validatePolicyPlan(plan) { if (!plan || plan.planVersion !== 1 || typeof plan.planHash !== 'string' || !Array.isArray(plan.nodes) || !Array.isArray(plan.edges)) throw new Error('POLICY_PLAN_INVALID'); const nodeIds = new Set(plan.nodes.map(n => n.id)); if (nodeIds.size !== plan.nodes.length) throw new Error('POLICY_PLAN_DUPLICATE_NODE'); for (const e of plan.edges) if (!nodeIds.has(e.fromNodeId) || !nodeIds.has(e.toNodeId) || e.fromNodeId === e.toNodeId) throw new Error('POLICY_PLAN_EDGE_INVALID'); if (hashPlan(plan) !== plan.planHash) throw new Error('POLICY_PLAN_HASH_INVALID'); return true; }
