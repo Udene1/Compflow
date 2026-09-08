@@ -1,25 +1,22 @@
 import { beforeAll, afterAll, describe, expect, it } from 'vitest';
 import pool from '../../core/db.js';
-import { normalizeIntent, persistIntent } from '../../core/intent.js';
-import { recordEvidence, getEvidenceForNode, verifyEvidenceIntegrity } from '../../core/evidence.js';
-import { recordVerification } from '../../core/compliance_verification.js';
-import { recordControlDecision, finalizeExecutionDecision } from '../../core/compliance_decision.js';
+import { normalizeIntent, persistIntent, ensureIntentSchema } from '../../core/intent.js';
+import { recordEvidence, getEvidenceForNode, verifyEvidenceIntegrity, ensureEvidenceSchema } from '../../core/evidence.js';
+import { recordVerification, ensureVerificationSchema } from '../../core/compliance_verification.js';
+import { recordControlDecision, finalizeExecutionDecision, ensureDecisionSchema } from '../../core/compliance_decision.js';
 
 const organizationId = 'org_compliance_domain_test';
 const executionId = 'exec_compliance_domain_test';
 
 const intent = {
-  id: 'intent_domain_test',
-  version: '1',
-  objective: 'Evaluate cloud compliance and remediate approved failures',
-  mode: 'REMEDIATE',
-  frameworks: ['soc2'],
+  id: 'intent_domain_test', version: '1', objective: 'Evaluate cloud compliance and remediate approved failures', mode: 'REMEDIATE', frameworks: ['soc2'],
   rules: [{ id: 'rule-domain-1', controlId: 'CC6.1', action: 'REMEDIATE', requiresApproval: true }],
   targets: [{ connectionId: 'conn_domain_test', provider: 'aws', resourceId: 'resource-1' }]
 };
 
 describe('durable compliance domain', () => {
   beforeAll(async () => {
+    await ensureIntentSchema(); await ensureEvidenceSchema(); await ensureVerificationSchema(); await ensureDecisionSchema();
     await pool.query('DELETE FROM execution_final_decisions WHERE organization_id=$1 AND execution_id=$2', [organizationId, executionId]);
     await pool.query('DELETE FROM compliance_decisions WHERE organization_id=$1 AND execution_id=$2', [organizationId, executionId]);
     await pool.query('DELETE FROM execution_verifications WHERE organization_id=$1 AND execution_id=$2', [organizationId, executionId]);
