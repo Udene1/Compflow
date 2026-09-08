@@ -1,0 +1,124 @@
+/* Compflow production authentication gate */
+#auth-gate-overlay {
+    position: fixed;
+    inset: 0;
+    z-index: 5000;
+    display: none;
+    align-items: center;
+    justify-content: center;
+    padding: 24px;
+    background: rgba(2, 6, 23, 0.82);
+    backdrop-filter: blur(18px) saturate(120%);
+    -webkit-backdrop-filter: blur(18px) saturate(120%);
+}
+
+#auth-gate-overlay.active { display: flex; }
+
+#auth-gate-overlay .auth-gate-card {
+    width: min(100%, 430px);
+    padding: 34px;
+    border: 1px solid rgba(148, 163, 184, 0.18);
+    border-radius: 22px;
+    background: linear-gradient(180deg, rgba(15, 23, 42, 0.97), rgba(7, 12, 24, 0.98));
+    box-shadow: 0 28px 90px rgba(0,0,0,.55), 0 0 0 1px rgba(99,102,241,.06);
+    color: #f8fafc;
+}
+
+#auth-gate-overlay .auth-gate-logo {
+    font-size: 14px;
+    font-weight: 800;
+    letter-spacing: .08em;
+    text-transform: uppercase;
+    color: #f8fafc;
+    margin-bottom: 28px;
+}
+
+#auth-gate-overlay .auth-gate-logo span {
+    color: #818cf8;
+}
+
+#auth-gate-overlay h2 {
+    margin: 0;
+    font-size: 27px;
+    line-height: 1.15;
+    letter-spacing: -.025em;
+}
+
+#auth-gate-overlay .auth-gate-subtitle {
+    margin: 9px 0 24px;
+    color: #94a3b8;
+    font-size: 14px;
+    line-height: 1.5;
+}
+
+#auth-gate-overlay .auth-gate-actions {
+    display: grid;
+    gap: 10px;
+}
+
+#auth-gate-overlay .auth-gate-actions > button {
+    min-height: 48px;
+    width: 100%;
+    margin: 0 !important;
+    border-radius: 11px !important;
+    font-family: inherit;
+    font-size: 14px !important;
+    font-weight: 650 !important;
+    transition: transform .16s ease, box-shadow .16s ease, border-color .16s ease, background .16s ease;
+}
+
+#auth-gate-overlay .auth-gate-actions > button:hover {
+    transform: translateY(-1px);
+    box-shadow: 0 8px 22px rgba(0,0,0,.22);
+}
+
+#auth-gate-overlay .btn-sso-google {
+    background: #fff !important;
+    color: #111827 !important;
+    border: 1px solid #e5e7eb !important;
+}
+
+#auth-gate-overlay .btn-sso-github {
+    background: #171717 !important;
+    color: #fff !important;
+    border: 1px solid #303030 !important;
+}
+
+#auth-gate-overlay .pilot-login-form {
+    padding-top: 2px;
+}
+
+#auth-gate-overlay .pilot-login-form input {
+    width: 100% !important;
+    min-height: 45px;
+    padding: 10px 12px !important;
+    border-radius: 9px !important;
+    background: rgba(2, 6, 23, .65) !important;
+    border: 1px solid rgba(148,163,184,.18) !important;
+    color: #f8fafc !important;
+    outline: none;
+}
+
+#auth-gate-overlay .pilot-login-form input:focus {
+    border-color: rgba(129,140,248,.75) !important;
+    box-shadow: 0 0 0 3px rgba(99,102,241,.12);
+}
+
+#auth-gate-overlay .pilot-login-form .btn-primary {
+    min-height: 45px;
+    border-radius: 9px;
+}
+
+#auth-gate-overlay details {
+    background: rgba(255,255,255,.025);
+}
+
+/* The dashboard had two authentication UIs. Production uses the real auth gate;
+   keep the legacy role/SSO modal out of the visual tree to prevent conflicting flows. */
+#modal-auth { display: none !important; }
+
+@media (max-width: 520px) {
+    #auth-gate-overlay { padding: 14px; }
+    #auth-gate-overlay .auth-gate-card { padding: 26px 20px; border-radius: 18px; }
+    #auth-gate-overlay h2 { font-size: 24px; }
+}
