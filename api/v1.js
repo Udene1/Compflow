@@ -6,6 +6,7 @@ import { listExecutionEvents, appendExecutionEvent, getExecutionEventByIdempoten
 import { approveExecutionNode, dispatchReadyPlanNodes, startPersistedPlanExecution } from '../core/plan_executor.js';
 import { getDependencyAwareResumePlan } from '../core/execution_resume.js';
 import { enqueueJob } from '../core/queue.js';
+import { getEvidenceFreshness, verifyEvidenceIntegrity } from '../core/evidence.js';
 import pool from '../core/db.js';
 import { listProviders } from '../core/provider_registry.js';
 import executionGraphHandler from './execution-graph.js';
@@ -58,16 +59,16 @@ router.get('/executions/:executionId', async (req, res, next) => {
 router.get('/executions/:executionId/evidence', async (req, res, next) => {
   try {
     const organizationId = org(req); if (!organizationId) return res.status(403).json({ error: 'ORGANIZATION_CONTEXT_REQUIRED' });
-    const id = executionId(req.params.executionId); const result = await pool.query(`SELECT id,node_id,attempt_id,control_id,provider,connection_id,resource_id,source_type,source_ref,collected_at,evidence,evidence_hash,created_at FROM execution_evidence_records WHERE organization_id=$1 AND execution_id=$2 ORDER BY collected_at DESC LIMIT $3`, [organizationId, id, page(req.query.limit)]);
-    return res.json({ executionId: id, evidence: result.rows });
+    const id = executionId(req.params.executionId); const result = await pool.query(`SELECT id,node_id,attempt_id,control_id,provider,connection_id,resource_id,source_type,source_ref,collected_at,evidence,evidence_hash,evidence_kind,observed_at,freshness_expires_at,lineage,created_at FROM execution_evidence_records WHERE organization_id=$1 AND execution_id=$2 ORDER BY collected_at DESC LIMIT $3`, [organizationId, id, page(req.query.limit)]);
+    return res.json({ executionId: id, evidence: result.rows.map(row => ({ ...row, integrityValid: verifyEvidenceIntegrity(row), freshness: getEvidenceFreshness(row) })) });
   } catch (error) { next(error); }
 });
 
 router.get('/executions/:executionId/decisions', async (req, res, next) => {
   try {
     const organizationId = org(req); if (!organizationId) return res.status(403).json({ error: 'ORGANIZATION_CONTEXT_REQUIRED' });
-    const id = executionId(req.params.executionId); const controls = await pool.query('SELECT * FROM compliance_decisions WHERE organization_id=$1 AND execution_id=$2 ORDER BY control_id,scope_key LIMIT $3', [organizationId, id, page(req.query.limit)]); const final = await pool.query('SELECT * FROM execution_final_decisions WHERE organization_id=$1 AND execution_id=$2', [organizationId, id]);
-    return res.json({ executionId: id, controls: controls.rows, final: final.rows[0] || null });
+    const id = executionId(req.params.executionId); const controls = await pool.query('SELECT * FROM compliance_decisions WHERE organization_id=$1 AND execution_id=$2 ORDER BY control_id,scope_key LIMIT $3', [organizationId, id, page(req.query.limit)]); const history = await pool.query('SELECT * FROM compliance_decision_history WHERE organization_id=$1 AND execution_id=$2 ORDER BY decided_at ASC LIMIT $3', [organizationId, id, page(req.query.limit)]); const final = await pool.query('SELECT * FROM execution_final_decisions WHERE organization_id=$1 AND execution_id=$2', [organizationId, id]);
+    return res.json({ executionId: id, controls: controls.rows, history: history.rows, final: final.rows[0] || null });
   } catch (error) { next(error); }
 });
 
