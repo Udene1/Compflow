@@ -1,5 +1,6 @@
 import crypto from 'crypto';
 import { normalizeSeverity, severityWeight, riskLevel, capScore, RISK_CONTRACT_VERSION } from './risk_contract.js';
+import { scoreExposurePath, exposurePathCriticality } from './exposure_risk.js';
 
 const MAX_WEAKNESSES = 200;
 const MAX_PATHS = 100;
@@ -13,8 +14,6 @@ export function deriveWeaknesses(findings = []) {
     if (!finding?.id) continue;
     const code = clean(finding.code, 'UNKNOWN').toUpperCase();
     const controlId = clean(finding.control_id || finding.controlId, 'UNKNOWN');
-    // A weakness is the underlying control/code condition, not one occurrence
-    // of that condition on one resource. Resource IDs remain affected assets.
     const key = `${controlId}:${code}`;
     const list = groups.get(key) || [];
     list.push(finding);
@@ -25,22 +24,17 @@ export function deriveWeaknesses(findings = []) {
     const resources = [...new Set(rows.map(row => clean(row.resource_id || row.resourceId)).filter(Boolean))];
     return {
       id: stableId('weakness', key), key,
-      code: clean(rows[0].code, 'UNKNOWN'),
-      controlId: clean(rows[0].control_id || rows[0].controlId, 'UNKNOWN'),
+      code: clean(rows[0].code, 'UNKNOWN'), controlId: clean(rows[0].control_id || rows[0].controlId, 'UNKNOWN'),
       severity: normalizeSeverity(rows.find(row => severityWeight(row.severity) === maxScore)?.severity),
-      resourceIds: resources,
-      affectedResourceCount: resources.length,
-      findingIds: rows.map(row => clean(row.id)).filter(Boolean),
-      findingCount: rows.length,
+      resourceIds: resources, affectedResourceCount: resources.length,
+      findingIds: rows.map(row => clean(row.id)).filter(Boolean), findingCount: rows.length,
       issue: clean(rows[0].issue || rows[0].title || rows[0].description || rows[0].code, 255)
     };
   });
 }
 
 function pathFindingIds(path) {
-  return new Set((path?.nodes || []).flatMap(node => Array.isArray(node.finding_ids)
-    ? node.finding_ids
-    : Array.isArray(node.findingIds) ? node.findingIds : []));
+  return new Set((path?.nodes || []).flatMap(node => Array.isArray(node.finding_ids) ? node.finding_ids : Array.isArray(node.findingIds) ? node.findingIds : []));
 }
 
 export function aggregateSecurityRisk({ findings = [], paths = [] } = {}) {
@@ -51,30 +45,27 @@ export function aggregateSecurityRisk({ findings = [], paths = [] } = {}) {
   const riskPaths = paths.slice(0, MAX_PATHS).map(path => {
     const ids = pathFindingIds(path);
     const linkedWeaknesses = [...ids].map(id => weaknessByFinding.get(id)).filter(Boolean);
-    const pathScore = severityWeight(path.severity);
-    const weaknessScore = linkedWeaknesses.reduce((max, item) => Math.max(max, severityWeight(item.severity)), 1);
+    const pathScore = scoreExposurePath(path);
+    const weaknessScore = linkedWeaknesses.reduce((max, item) => Math.max(max, severityWeight(item.severity) * 25), 1);
     const score = Math.max(pathScore, weaknessScore);
+    const criticality = exposurePathCriticality(path);
     return {
       id: clean(path.id), title: clean(path.title || path.path_key || 'Security exposure path', 255),
       status: clean(path.status, 'POTENTIAL').toUpperCase(), severity: normalizeSeverity(path.severity || riskLevel(score)),
-      score, confidence: Math.max(0, Math.min(1, Number(path.confidence) || 0)),
-      evidenceComplete: Boolean(path.evidence_complete ?? path.evidenceComplete),
+      score, confidence: criticality.confidence, criticality: criticality.criticality,
+      sensitivity: criticality.sensitivity, verified: criticality.verified, evidenceComplete: criticality.evidenceComplete,
       weaknessIds: [...new Set(linkedWeaknesses.map(item => item.id))], findingIds: [...ids].filter(Boolean)
     };
   });
 
-  const highestWeight = Math.max(
-    riskPaths.reduce((max, path) => Math.max(max, path.score), 0),
-    weaknesses.reduce((max, item) => Math.max(max, severityWeight(item.severity)), 0)
-  );
+  const highestWeight = Math.max(riskPaths.reduce((max, path) => Math.max(max, path.score), 0), weaknesses.reduce((max, item) => Math.max(max, severityWeight(item.severity) * 25), 0));
   const verifiedPaths = riskPaths.filter(path => path.status === 'VERIFIED').length;
   const potentialPaths = riskPaths.filter(path => path.status === 'POTENTIAL').length;
   const affectedFindingIds = new Set(riskPaths.flatMap(path => path.findingIds));
-  const score = capScore(highestWeight * 25);
+  const score = capScore(highestWeight);
 
   return {
-    contractVersion: RISK_CONTRACT_VERSION,
-    riskLevel: riskLevel(score), score,
+    contractVersion: RISK_CONTRACT_VERSION, riskLevel: riskLevel(score), score,
     findingCount: findings.length, weaknessCount: weaknesses.length, pathCount: riskPaths.length,
     verifiedPathCount: verifiedPaths, potentialPathCount: potentialPaths,
     correlatedFindingCount: affectedFindingIds.size, compromiseConfirmed: false,
