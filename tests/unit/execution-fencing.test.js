@@ -49,6 +49,33 @@ describe('Real execution lease fencing', () => {
     expect((await getExecutionRun(organizationId, executionId)).status).toBe('FAILED');
   });
 
+  it('fences terminal completion when the lease expires while the transaction waits for the execution row', async () => {
+    const executionId = 'exec_execution_fencing_expiry_race';
+    await createExecutionRun({ organizationId, executionId });
+    const lease = await acquireExecutionLease({ organizationId, executionId, workerId: 'worker-race', leaseSeconds: 15 });
+    await pool.query("UPDATE execution_runs SET lease_expires_at=clock_timestamp()+INTERVAL '1 second' WHERE id=$1", [executionId]);
+
+    const blocker = await pool.connect();
+    try {
+      await blocker.query('BEGIN');
+      await blocker.query('SELECT id FROM execution_runs WHERE id=$1 FOR UPDATE', [executionId]);
+      const finishing = finishExecutionRun({
+        organizationId,
+        executionId,
+        workerId: 'worker-race',
+        leaseToken: lease.lease_token,
+        status: 'SUCCEEDED'
+      });
+      await new Promise(resolve => setTimeout(resolve, 1500));
+      await blocker.query('COMMIT');
+      await expect(finishing).rejects.toThrow('EXECUTION_LEASE_LOST');
+      expect((await getExecutionRun(organizationId, executionId)).status).toBe('RUNNING');
+    } finally {
+      await blocker.query('ROLLBACK').catch(() => {});
+      blocker.release();
+    }
+  });
+
   it('does not allow an old worker to finish a recovered node attempt', async () => {
     const executionId = 'exec_execution_fencing_attempt';
     await createExecutionRun({ organizationId, executionId });
