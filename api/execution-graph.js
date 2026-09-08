@@ -16,7 +16,8 @@ function snapshot(graph, execution, resumableNodeIds, recovery = {}) {
     recovery,
     resumableNodeIds
   };
-  return { body, hash: crypto.createHash('sha256').update(JSON.stringify(body)).digest('hex') };
+  const stableBody = { ...body, observedAt: undefined };
+  return { body, hash: crypto.createHash('sha256').update(JSON.stringify(stableBody)).digest('hex') };
 }
 
 async function readState(organizationId, executionId) {
