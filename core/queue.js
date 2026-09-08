@@ -2,7 +2,13 @@ const redisHost = process.env.REDIS_HOST || 'localhost';
 const redisPort = parseInt(process.env.REDIS_PORT || '6379', 10);
 const QUEUE_NAME = 'scan_jobs';
 let scanQueue = null;
+let queueConnection = null;
 let queueInitPromise = null;
+let workerConnections = new Set();
+
+function queueJobId(organizationId, jobId) {
+    return `${organizationId}:${jobId}`;
+}
 
 async function getQueue() {
     if (scanQueue) return scanQueue;
@@ -15,6 +21,7 @@ async function getQueue() {
             await connection.connect();
             await connection.ping();
             scanQueue = new Queue(QUEUE_NAME, { connection });
+            queueConnection = connection;
             await scanQueue.waitUntilReady();
             return scanQueue;
         } catch (e) {
@@ -58,7 +65,6 @@ export async function enqueueJob(jobData) {
     if (!boundedString(cleanPayload.jobId) || !boundedString(cleanPayload.scanId) || !boundedString(cleanPayload.organizationId) || !boundedString(cleanPayload.connectionId)) {
         throw Object.assign(new Error('INVALID_QUEUE_PAYLOAD'), { code: 'INVALID_QUEUE_PAYLOAD' });
     }
-    // executionId is derived from the authoritative scan job when older producers omit it.
     if (!cleanPayload.executionId) cleanPayload.executionId = cleanPayload.jobId;
     if (!boundedString(cleanPayload.executionId) || !PROVIDERS.has(cleanPayload.provider) || !SCAN_TYPES.has(cleanPayload.scanType)) {
         throw Object.assign(new Error('INVALID_QUEUE_PAYLOAD'), { code: 'INVALID_QUEUE_PAYLOAD' });
@@ -69,7 +75,7 @@ export async function enqueueJob(jobData) {
     const queue = await getQueue();
     try {
         const job = await queue.add('scan', cleanPayload, {
-            jobId: cleanPayload.jobId,
+            jobId: queueJobId(cleanPayload.organizationId, cleanPayload.jobId),
             attempts: 3,
             backoff: { type: 'exponential', delay: 1000 },
             removeOnComplete: false,
@@ -77,7 +83,10 @@ export async function enqueueJob(jobData) {
         });
         return job;
     } catch (e) {
-        if (scanQueue === queue) scanQueue = null;
+        if (scanQueue === queue) {
+            scanQueue = null;
+            queueConnection = null;
+        }
         queueInitPromise = null;
         throw Object.assign(new Error(e?.code || 'QUEUE_ENQUEUE_FAILED'), { code: e?.code || 'QUEUE_ENQUEUE_FAILED' });
     }
@@ -85,7 +94,22 @@ export async function enqueueJob(jobData) {
 
 export function resetQueueForTests() {
     scanQueue = null;
+    queueConnection = null;
     queueInitPromise = null;
+    workerConnections.clear();
+}
+
+export async function closeQueue() {
+    const queue = scanQueue;
+    const connection = queueConnection;
+    scanQueue = null;
+    queueConnection = null;
+    queueInitPromise = null;
+    if (queue) await queue.close();
+    if (connection) await connection.quit().catch(() => {});
+    const connections = [...workerConnections];
+    workerConnections.clear();
+    await Promise.all(connections.map(connection => connection.quit().catch(() => {})));
 }
 
 export async function listenWorkerQueue(processorFn) {
@@ -93,7 +117,9 @@ export async function listenWorkerQueue(processorFn) {
     const { default: Redis } = await import('ioredis');
     const connection = new Redis({ host: redisHost, port: redisPort, maxRetriesPerRequest: null });
     await connection.ping();
+    workerConnections.add(connection);
     const worker = new Worker(QUEUE_NAME, async (job) => processorFn(job.data), { connection, concurrency: 5 });
     worker.on('failed', (job, err) => console.error(`[BULLMQ WORKER] Job ${job?.id} failed:`, err?.message || 'unknown error'));
+    worker.on('closed', () => workerConnections.delete(connection));
     return worker;
 }
