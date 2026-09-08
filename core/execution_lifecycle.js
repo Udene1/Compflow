@@ -40,7 +40,10 @@ export async function acquireExecutionLease({ organizationId, executionId, worke
   try { await client.query('BEGIN'); const current = await client.query('SELECT * FROM execution_runs WHERE id=$1 AND organization_id=$2 FOR UPDATE', [executionId, organizationId]);
     if (!current.rows[0]) throw new Error('EXECUTION_NOT_FOUND'); const run = current.rows[0];
     if (run.status === 'SUCCEEDED' || run.status === 'CANCELLED') throw new Error('EXECUTION_ALREADY_TERMINAL');
-    if (run.status === 'RUNNING' && run.lease_expires_at && new Date(run.lease_expires_at).getTime() > Date.now() && run.lease_owner !== workerId) throw new Error('EXECUTION_ALREADY_LEASED');
+    // A live lease is authoritative regardless of whether the contender is the same worker.
+    // Replacing the token would silently fence the still-active actor and create two valid
+    // execution authorities in the same process/worker identity.
+    if (run.status === 'RUNNING' && run.lease_expires_at && new Date(run.lease_expires_at).getTime() > Date.now()) throw new Error('EXECUTION_ALREADY_LEASED');
     assertTransition(run.status, 'RUNNING');
     const result = await client.query(`UPDATE execution_runs SET status='RUNNING', lease_owner=$1, lease_token=$2, lease_expires_at=clock_timestamp()+($3 * INTERVAL '1 second'), heartbeat_at=clock_timestamp(), started_at=COALESCE(started_at,clock_timestamp()), finished_at=NULL, error_code=NULL, error_message=NULL, version=version+1, updated_at=clock_timestamp() WHERE id=$4 AND organization_id=$5 RETURNING *`, [workerId, token, ttl, executionId, organizationId]);
     await appendExecutionEvent({ client, organizationId, executionId, eventType: 'EXECUTION_LEASE_ACQUIRED', actorType: 'WORKER', actorId: workerId, result: 'success', payload: { status: 'RUNNING', leaseSeconds: ttl } }); await client.query('COMMIT'); return result.rows[0];
