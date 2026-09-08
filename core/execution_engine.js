@@ -1,35 +1,6 @@
 import crypto from 'crypto';
 import pool from './db.js';
 
-const SCHEMA_SQL = `
-CREATE TABLE IF NOT EXISTS execution_graph_nodes (
-  id TEXT PRIMARY KEY, organization_id TEXT NOT NULL, execution_id TEXT NOT NULL,
-  node_type TEXT NOT NULL, logical_key TEXT NOT NULL, status TEXT NOT NULL DEFAULT 'PENDING',
-  label TEXT, metadata JSONB NOT NULL DEFAULT '{}'::jsonb, created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(), updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-  UNIQUE (organization_id, execution_id, node_type, logical_key)
-);
-CREATE INDEX IF NOT EXISTS execution_graph_nodes_execution_idx ON execution_graph_nodes (organization_id, execution_id);
-CREATE TABLE IF NOT EXISTS execution_graph_edges (
-  id TEXT PRIMARY KEY, organization_id TEXT NOT NULL, execution_id TEXT NOT NULL,
-  from_node_id TEXT NOT NULL REFERENCES execution_graph_nodes(id) ON DELETE CASCADE,
-  to_node_id TEXT NOT NULL REFERENCES execution_graph_nodes(id) ON DELETE CASCADE,
-  edge_type TEXT NOT NULL DEFAULT 'DEPENDS_ON', metadata JSONB NOT NULL DEFAULT '{}'::jsonb,
-  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(), UNIQUE (execution_id, from_node_id, to_node_id, edge_type)
-);
-CREATE INDEX IF NOT EXISTS execution_graph_edges_execution_idx ON execution_graph_edges (organization_id, execution_id);
-CREATE TABLE IF NOT EXISTS execution_attempts (
-  id TEXT PRIMARY KEY, organization_id TEXT NOT NULL, execution_id TEXT NOT NULL,
-  node_id TEXT NOT NULL REFERENCES execution_graph_nodes(id) ON DELETE CASCADE,
-  attempt_number INTEGER NOT NULL, status TEXT NOT NULL DEFAULT 'RUNNING', started_at TIMESTAMPTZ NOT NULL DEFAULT NOW(), finished_at TIMESTAMPTZ,
-  heartbeat_at TIMESTAMPTZ NOT NULL DEFAULT NOW(), error_code TEXT, error_message TEXT, metadata JSONB NOT NULL DEFAULT '{}'::jsonb, UNIQUE (node_id, attempt_number)
-);
-ALTER TABLE execution_attempts ADD COLUMN IF NOT EXISTS heartbeat_at TIMESTAMPTZ NOT NULL DEFAULT NOW();
-CREATE INDEX IF NOT EXISTS execution_attempts_execution_idx ON execution_attempts (organization_id, execution_id, started_at);
-CREATE INDEX IF NOT EXISTS execution_attempts_running_heartbeat_idx ON execution_attempts (organization_id, status, heartbeat_at) WHERE status = 'RUNNING';
-CREATE UNIQUE INDEX IF NOT EXISTS execution_attempts_one_running_node_idx ON execution_attempts (node_id) WHERE status = 'RUNNING';
-`;
-let schemaPromise;
-
 const NODE_STATUS = new Set(['PENDING', 'RUNNING', 'FAILED', 'CANCELLED', 'SUCCEEDED', 'SKIPPED']);
 const ATTEMPT_STATUS = new Set(['SUCCEEDED', 'FAILED', 'CANCELLED', 'SKIPPED']);
 const LEGAL_NODE_TRANSITIONS = {
@@ -41,18 +12,13 @@ const LEGAL_NODE_TRANSITIONS = {
   SKIPPED: new Set(['SKIPPED'])
 };
 
+// Schema ownership is centralized in core/db.js and initialized before the
+// application serves work. Execution code only verifies the authoritative
+// tables exist; it never performs runtime DDL, which would race with workers.
 async function ensureSchema() {
-  if (!schemaPromise) schemaPromise = (async () => {
-    const client = await pool.connect();
-    try {
-      // Match core/db.js's schema lock exactly; graph DDL must serialize with all other DDL.
-      await client.query("SELECT pg_advisory_lock(hashtextextended('compflow:schema',0))");
-      try { await client.query('BEGIN'); await client.query(SCHEMA_SQL); await client.query('COMMIT'); }
-      catch (error) { await client.query('ROLLBACK').catch(() => {}); throw error; }
-      finally { await client.query("SELECT pg_advisory_unlock(hashtextextended('compflow:schema',0))").catch(() => {}); }
-    } finally { client.release(); }
-  })().catch(error => { schemaPromise = null; throw error; });
-  return schemaPromise;
+  await pool.query('SELECT 1 FROM execution_graph_nodes LIMIT 0');
+  await pool.query('SELECT 1 FROM execution_graph_edges LIMIT 0');
+  await pool.query('SELECT 1 FROM execution_attempts LIMIT 0');
 }
 
 function cleanErrorMessage(value) { if (!value) return null; return String(value).replace(/(authorization|token|secret|password|client_secret|api[_-]?key)\s*[:=]\s*[^\s,;]+/gi, '$1=[REDACTED]').slice(0, 500); }
