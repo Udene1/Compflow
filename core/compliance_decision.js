@@ -1,6 +1,6 @@
 import crypto from 'crypto';
 import pool from './db.js';
-import { promoteLegacyExecutionEvidence, getEvidenceFreshness } from './evidence.js';
+import { promoteLegacyExecutionEvidence, getEvidenceFreshness, verifyEvidenceIntegrity } from './evidence.js';
 import { promoteExecutionVerifications } from './compliance_verification.js';
 
 const OUTCOMES = new Set(['PASS', 'FAIL', 'NOT_APPLICABLE', 'INSUFFICIENT_EVIDENCE']);
@@ -36,7 +36,14 @@ function finalDecisionHash(organizationId, executionId, outcome, summary) { retu
 export async function recordControlDecision({ organizationId, executionId, controlId, scopeKey, outcome, evidenceHash = null, verificationHash = null, rationale = {} } = {}) {
   await ensureDecisionSchema(); assertOutcome(outcome);
   if (!organizationId || !executionId || !controlId || !scopeKey) throw new Error('DECISION_INPUT_INVALID');
-  if (['PASS', 'FAIL'].includes(outcome) && !evidenceHash) throw new Error('DECISION_EVIDENCE_REQUIRED');
+  if (['PASS', 'FAIL'].includes(outcome)) {
+    if (!evidenceHash) throw new Error('DECISION_EVIDENCE_REQUIRED');
+    const evidenceResult = await pool.query('SELECT * FROM execution_evidence_records WHERE organization_id=$1 AND execution_id=$2 AND evidence_hash=$3 ORDER BY collected_at DESC LIMIT 1', [organizationId, executionId, evidenceHash]);
+    const evidence = evidenceResult.rows[0];
+    if (!evidence || !verifyEvidenceIntegrity(evidence)) throw new Error('DECISION_EVIDENCE_INVALID');
+    const freshness = getEvidenceFreshness(evidence);
+    if (!['FRESH', 'UNBOUNDED'].includes(freshness.state)) throw new Error('DECISION_EVIDENCE_STALE');
+  }
   const id = `decision_${crypto.createHash('sha256').update(`${organizationId}:${executionId}:${scopeKey}`).digest('hex').slice(0, 32)}`;
   const client = await pool.connect();
   try {
