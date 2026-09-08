@@ -36,6 +36,16 @@ describe('Durable execution lifecycle and leases', () => {
       .rejects.toThrow('EXECUTION_ALREADY_LEASED');
   });
 
+  it('rejects active lease replacement even when the contender has the same worker identity', async () => {
+    const run = await getExecutionRun(organizationId, executionId);
+    await expect(acquireExecutionLease({ organizationId, executionId, workerId: 'worker-a', leaseSeconds: 60 }))
+      .rejects.toThrow('EXECUTION_ALREADY_LEASED');
+
+    const after = await getExecutionRun(organizationId, executionId);
+    expect(after.lease_token).toBe(run.lease_token);
+    expect(after.lease_owner).toBe('worker-a');
+  });
+
   it('heartbeats only with the current fencing credentials', async () => {
     const run = await getExecutionRun(organizationId, executionId);
     const heartbeat = await heartbeatExecutionLease({
