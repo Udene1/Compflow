@@ -28,8 +28,9 @@ export async function promoteExecutionVerifications({ organizationId, executionI
   const promoted = [];
   for (const row of result.rows) {
     const nodeResult = row.attempt_metadata?.result || {};
-    const outcome = nodeResult.verified ? 'PASS' : 'FAIL';
-    const evidence = await getEvidenceForNode({ organizationId, executionId, nodeId: row.id });
+    const outcome = typeof nodeResult.verified === 'boolean' ? (nodeResult.verified ? 'PASS' : 'FAIL') : 'INSUFFICIENT_EVIDENCE';
+    const evidence = await getEvidenceForNode({ organizationId, executionId, nodeId: row.id, attemptId: row.attempt_id });
+    if (!evidence) continue;
     const stored = await recordVerification({ organizationId, executionId, nodeId: row.id, attemptId: row.attempt_id, controlId: row.metadata?.controlId, outcome, evidence, details: nodeResult });
     if (stored) promoted.push(stored);
   }
