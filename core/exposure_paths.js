@@ -56,6 +56,17 @@ function isExposure(finding) { return EXPOSURE_CODES.has(clean(finding.code).toU
 function isPrivilege(finding) { return PRIVILEGE_CODES.has(clean(finding.code).toUpperCase()); }
 function isTerminal(resource) { return TERMINAL_RESOURCE_TYPES.has(resource.type); }
 
+function serializeFinding(finding) {
+  return {
+    id: clean(finding.id),
+    code: clean(finding.code),
+    severity: severity(finding.severity),
+    control: clean(finding.control || finding.control_id || finding.controlId),
+    issue: clean(finding.issue || finding.title || finding.description),
+    status: clean(finding.status)
+  };
+}
+
 function buildGraph(evidenceRows, findingRows) {
   const resources = new Map();
   const edges = [];
@@ -86,8 +97,6 @@ function buildGraph(evidenceRows, findingRows) {
     edges.push(...extractRelationships(row));
   }
 
-  // Findings may refer to resources that the evidence payload did not enumerate.
-  // They remain nodes, but a path never becomes evidence-complete without evidence.
   for (const finding of findingRows) {
     const id = clean(finding.resource_id);
     if (!id) continue;
@@ -133,7 +142,15 @@ function findPaths(graph) {
           severity: scoreToSeverity(maxFinding),
           confidence,
           evidenceComplete: allNodeEvidence && allEdgeEvidence,
-          nodes: nodes.map(node => ({ ...node, findingIds: (findingsByResource.get(node.id) || []).map(f => f.id), evidenceIds: evidenceByResource.get(node.id) || [] })),
+          nodes: nodes.map(node => {
+            const findings = findingsByResource.get(node.id) || [];
+            return {
+              ...node,
+              findingIds: findings.map(f => f.id),
+              findings: findings.map(serializeFinding),
+              evidenceIds: evidenceByResource.get(node.id) || []
+            };
+          }),
           edges: traversedEdges,
           title: `Potential exposure path: ${nodes.map(node => node.type).join(' → ')}`,
           summary: `${nodes.map(node => node.label).join(' → ')}. This is an evidence-backed security path candidate, not a claim of compromise.`
@@ -185,7 +202,7 @@ export async function analyzeExecutionExposurePaths({ organizationId, executionI
         const node = path.nodes[index];
         const nodeId = stableId('pathnode', `${pathId}:${index}:${node.id}`);
         nodeIds.push(nodeId);
-        await client.query(`INSERT INTO exposure_path_nodes (id,path_id,position,node_type,resource_id,label,observed,finding_ids,evidence_ids,metadata) VALUES ($1,$2,$3,$4,$5,$6,$7,$8::jsonb,$9::jsonb,$10::jsonb)`, [nodeId, pathId, index, node.type, node.id, node.label, node.evidenceIds.length > 0, JSON.stringify(node.findingIds), JSON.stringify(node.evidenceIds), JSON.stringify({ exposure: (findingsByResource(path, node.id).some(isExposure)), privilege: findingsByResource(path, node.id).some(isPrivilege) })]);
+        await client.query(`INSERT INTO exposure_path_nodes (id,path_id,position,node_type,resource_id,label,observed,finding_ids,evidence_ids,metadata) VALUES ($1,$2,$3,$4,$5,$6,$7,$8::jsonb,$9::jsonb,$10::jsonb)`, [nodeId, pathId, index, node.type, node.id, node.label, node.evidenceIds.length > 0, JSON.stringify(node.findingIds), JSON.stringify(node.evidenceIds), JSON.stringify({ exposure: node.findings.some(f => EXPOSURE_CODES.has(f.code)), privilege: node.findings.some(f => PRIVILEGE_CODES.has(f.code)), findings: node.findings })]);
       }
       for (let index = 0; index < path.edges.length; index += 1) {
         const edge = path.edges[index];
@@ -201,10 +218,6 @@ export async function analyzeExecutionExposurePaths({ organizationId, executionI
     throw error;
   } finally { client.release(); }
   return getExecutionExposurePaths({ organizationId, executionId });
-}
-
-function findingsByResource(path, resourceId) {
-  return path.nodes.find(node => node.id === resourceId)?.findings || [];
 }
 
 export async function getExecutionExposurePaths({ organizationId, executionId, limit = 100 } = {}) {
