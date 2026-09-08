@@ -9,7 +9,7 @@ describe('evidence-grounded AI analyst', () => {
       evidence: [{ id: 'e1', control_id: 'CC6.6', provider: 'aws', resource_id: 'web', source_type: 'ec2', evidence_hash: 'hash', observed_at: '2026-09-08T00:00:00Z', secret: 'must-not-be-forwarded' }]
     });
 
-    expect(context.findings[0]).toEqual({ id: 'f1', code: 'SG_OPEN_HTTP_WORLD', resourceId: 'web', controlId: 'CC6.6', severity: 'HIGH', status: 'FAIL' });
+    expect(context.findings[0]).toEqual({ id: 'f1', code: 'SG_OPEN_HTTP_WORLD', resourceId: 'web', controlId: 'CC6.6', severity: 'HIGH', status: 'FAIL', issue: '' });
     expect(context.paths[0].id).toBe('p1');
     expect(context.paths[0].confidence).toBe(0.75);
     expect(context.evidence[0]).not.toHaveProperty('secret');
