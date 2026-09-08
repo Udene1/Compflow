@@ -40,4 +40,30 @@ describe('Durable execution controls', () => {
     expect(cancelled.status).toBe('CANCELLED');
     expect(again.status).toBe('CANCELLED');
   });
+
+  it('allows only one concurrent cancellation transition to win and preserves one terminal audit event per idempotency key', async () => {
+    const executionId = 'exec_execution_controls_concurrent';
+    await createExecutionRun({ organizationId, executionId });
+    const idempotencyKey = 'cancel-concurrent-001';
+
+    const results = await Promise.all([
+      cancelExecutionRun({ organizationId, executionId, reason: 'first concurrent request', actorId: 'user-a', idempotencyKey }),
+      cancelExecutionRun({ organizationId, executionId, reason: 'second concurrent request', actorId: 'user-b', idempotencyKey })
+    ]);
+
+    expect(results).toHaveLength(2);
+    expect(results[0].status).toBe('CANCELLED');
+    expect(results[1].status).toBe('CANCELLED');
+
+    const run = await getExecutionRun(organizationId, executionId);
+    expect(run.status).toBe('CANCELLED');
+
+    const events = await pool.query(
+      `SELECT id, idempotency_key FROM execution_events
+       WHERE organization_id=$1 AND execution_id=$2 AND event_type='EXECUTION_CANCELLED'`,
+      [organizationId, executionId]
+    );
+    expect(events.rows).toHaveLength(1);
+    expect(events.rows[0].idempotency_key).toBe(idempotencyKey);
+  });
 });
