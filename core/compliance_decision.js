@@ -82,6 +82,11 @@ export async function deriveExecutionDecisions({ organizationId, executionId } =
 
 export async function finalizeExecutionDecision({ organizationId, executionId } = {}) {
   await ensureDecisionSchema();
+  const existingFinal = await pool.query('SELECT * FROM execution_final_decisions WHERE organization_id=$1 AND execution_id=$2', [organizationId, executionId]);
+  // Once a final decision exists it is an immutable artifact. Never re-derive mutable
+  // control rows during a replay, otherwise a later mutation could rewrite history
+  // before the immutable-final check runs.
+  if (existingFinal.rows[0]) return existingFinal.rows[0];
   const graph = await pool.query(`SELECT node_type,status FROM execution_graph_nodes WHERE organization_id=$1 AND execution_id=$2`, [organizationId, executionId]);
   const active = graph.rows.some(node => ['PENDING', 'RUNNING'].includes(node.status) && ['EVIDENCE_COLLECTION','CONTROL_EVALUATION','APPROVAL','REMEDIATION','VERIFICATION'].includes(node.node_type));
   if (active) throw new Error('DECISION_EXECUTION_NOT_TERMINAL');
@@ -94,11 +99,10 @@ export async function finalizeExecutionDecision({ organizationId, executionId } 
   const summary = { controls: result.rows.map(row => ({ controlId: row.control_id, scopeKey: row.scope_key, outcome: row.outcome, evidenceHash: row.evidence_hash, verificationHash: row.verification_hash })), counts: outcomes.reduce((acc, value) => { acc[value] = (acc[value] || 0) + 1; return acc; }, {}) };
   const decisionHash = crypto.createHash('sha256').update(JSON.stringify({ organizationId, executionId, outcome, summary })).digest('hex');
   const id = `final_decision_${crypto.createHash('sha256').update(`${organizationId}:${executionId}`).digest('hex').slice(0, 32)}`;
-  const existing = await pool.query('SELECT * FROM execution_final_decisions WHERE organization_id=$1 AND execution_id=$2', [organizationId, executionId]);
-  if (existing.rows[0]) {
-    if (existing.rows[0].decision_hash !== decisionHash) throw new Error('FINAL_DECISION_IMMUTABLE');
-    return existing.rows[0];
-  }
-  const stored = await pool.query(`INSERT INTO execution_final_decisions (id,organization_id,execution_id,outcome,decision_hash,summary) VALUES ($1,$2,$3,$4,$5,$6::jsonb) RETURNING *`, [id, organizationId, executionId, outcome, decisionHash, JSON.stringify(summary)]);
-  return stored.rows[0];
+  const stored = await pool.query(`INSERT INTO execution_final_decisions (id,organization_id,execution_id,outcome,decision_hash,summary) VALUES ($1,$2,$3,$4,$5,$6::jsonb) ON CONFLICT (organization_id,execution_id) DO NOTHING RETURNING *`, [id, organizationId, executionId, outcome, decisionHash, JSON.stringify(summary)]);
+  if (stored.rows[0]) return stored.rows[0];
+  const raced = await pool.query('SELECT * FROM execution_final_decisions WHERE organization_id=$1 AND execution_id=$2', [organizationId, executionId]);
+  if (!raced.rows[0]) throw new Error('FINAL_DECISION_PERSISTENCE_FAILED');
+  if (raced.rows[0].decision_hash !== decisionHash) throw new Error('FINAL_DECISION_IMMUTABLE');
+  return raced.rows[0];
 }
