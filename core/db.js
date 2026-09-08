@@ -46,9 +46,9 @@ const resilientPool = {
     }
 };
 
-// Auto-initialize jobs, tenants, authentication, and onboarding tables on startup.
-// Database initialization is authoritative: startup must not silently continue with
-// an incomplete schema or an in-memory substitute.
+// All authoritative schema is initialized once at startup. Runtime modules must
+// never perform DDL because DDL can take AccessExclusiveLocks and deadlock with
+// legitimate transactional reads/writes from concurrent workers.
 export async function initDb() {
     const query = `
         CREATE TABLE IF NOT EXISTS jobs (
@@ -227,6 +227,67 @@ export async function initDb() {
         );
         CREATE INDEX IF NOT EXISTS idx_findings_scan ON findings(scan_id);
         CREATE INDEX IF NOT EXISTS idx_findings_org ON findings(organization_id);
+
+        CREATE TABLE IF NOT EXISTS execution_runs (
+            id TEXT PRIMARY KEY, organization_id TEXT NOT NULL, status TEXT NOT NULL DEFAULT 'PENDING',
+            lease_owner TEXT, lease_token TEXT, lease_expires_at TIMESTAMPTZ, heartbeat_at TIMESTAMPTZ,
+            started_at TIMESTAMPTZ, finished_at TIMESTAMPTZ, error_code TEXT, error_message TEXT,
+            metadata JSONB NOT NULL DEFAULT '{}'::jsonb, version BIGINT NOT NULL DEFAULT 0,
+            created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(), updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+            CHECK (status IN ('PENDING','RUNNING','SUCCEEDED','FAILED','CANCELLED'))
+        );
+        CREATE INDEX IF NOT EXISTS execution_runs_org_status_idx ON execution_runs (organization_id, status, updated_at);
+        CREATE INDEX IF NOT EXISTS execution_runs_lease_idx ON execution_runs (organization_id, lease_expires_at) WHERE status = 'RUNNING';
+
+        CREATE TABLE IF NOT EXISTS execution_graph_nodes (
+            id TEXT PRIMARY KEY, organization_id TEXT NOT NULL, execution_id TEXT NOT NULL,
+            node_type TEXT NOT NULL, logical_key TEXT NOT NULL, status TEXT NOT NULL DEFAULT 'PENDING',
+            label TEXT, metadata JSONB NOT NULL DEFAULT '{}'::jsonb, created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(), updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+            UNIQUE (organization_id, execution_id, node_type, logical_key)
+        );
+        CREATE INDEX IF NOT EXISTS execution_graph_nodes_execution_idx ON execution_graph_nodes (organization_id, execution_id);
+
+        CREATE TABLE IF NOT EXISTS execution_graph_edges (
+            id TEXT PRIMARY KEY, organization_id TEXT NOT NULL, execution_id TEXT NOT NULL,
+            from_node_id TEXT NOT NULL REFERENCES execution_graph_nodes(id) ON DELETE CASCADE,
+            to_node_id TEXT NOT NULL REFERENCES execution_graph_nodes(id) ON DELETE CASCADE,
+            edge_type TEXT NOT NULL DEFAULT 'DEPENDS_ON', metadata JSONB NOT NULL DEFAULT '{}'::jsonb,
+            created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(), UNIQUE (execution_id, from_node_id, to_node_id, edge_type)
+        );
+        CREATE INDEX IF NOT EXISTS execution_graph_edges_execution_idx ON execution_graph_edges (organization_id, execution_id);
+
+        CREATE TABLE IF NOT EXISTS execution_attempts (
+            id TEXT PRIMARY KEY, organization_id TEXT NOT NULL, execution_id TEXT NOT NULL,
+            node_id TEXT NOT NULL REFERENCES execution_graph_nodes(id) ON DELETE CASCADE,
+            attempt_number INTEGER NOT NULL, status TEXT NOT NULL DEFAULT 'RUNNING', started_at TIMESTAMPTZ NOT NULL DEFAULT NOW(), finished_at TIMESTAMPTZ,
+            heartbeat_at TIMESTAMPTZ NOT NULL DEFAULT NOW(), error_code TEXT, error_message TEXT, metadata JSONB NOT NULL DEFAULT '{}'::jsonb, UNIQUE (node_id, attempt_number)
+        );
+        CREATE INDEX IF NOT EXISTS execution_attempts_execution_idx ON execution_attempts (organization_id, execution_id, started_at);
+        CREATE INDEX IF NOT EXISTS execution_attempts_running_heartbeat_idx ON execution_attempts (organization_id, status, heartbeat_at) WHERE status = 'RUNNING';
+        CREATE UNIQUE INDEX IF NOT EXISTS execution_attempts_one_running_node_idx ON execution_attempts (node_id) WHERE status = 'RUNNING';
+
+        CREATE TABLE IF NOT EXISTS execution_events (
+            id TEXT PRIMARY KEY,
+            organization_id TEXT NOT NULL,
+            execution_id TEXT NOT NULL,
+            node_id TEXT,
+            attempt_id TEXT,
+            sequence BIGINT GENERATED ALWAYS AS IDENTITY,
+            event_type TEXT NOT NULL,
+            actor_type TEXT NOT NULL DEFAULT 'SYSTEM',
+            actor_id TEXT,
+            result TEXT,
+            payload JSONB NOT NULL DEFAULT '{}'::jsonb,
+            occurred_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+            UNIQUE (organization_id, id)
+        );
+        ALTER TABLE execution_events ADD COLUMN IF NOT EXISTS idempotency_key TEXT;
+        CREATE UNIQUE INDEX IF NOT EXISTS execution_events_idempotency_idx
+          ON execution_events (organization_id, execution_id, event_type, idempotency_key)
+          WHERE idempotency_key IS NOT NULL;
+        CREATE INDEX IF NOT EXISTS execution_events_execution_sequence_idx ON execution_events (organization_id, execution_id, sequence);
+        CREATE INDEX IF NOT EXISTS execution_events_execution_time_idx ON execution_events (organization_id, execution_id, occurred_at, sequence);
+        CREATE INDEX IF NOT EXISTS execution_events_node_idx ON execution_events (organization_id, execution_id, node_id, sequence);
 
         ALTER TABLE users ADD COLUMN IF NOT EXISTS status VARCHAR(16) DEFAULT 'active';
         ALTER TABLE users ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP;
