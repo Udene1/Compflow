@@ -3,7 +3,7 @@ import { startComplianceExecution, finalizeComplianceDecision } from '../core/co
 import { getExecutionGraph } from '../core/execution_engine.js';
 import { getExecutionRun, cancelExecutionRun } from '../core/execution_lifecycle.js';
 import { listExecutionEvents, appendExecutionEvent, getExecutionEventByIdempotencyKey } from '../core/execution_events.js';
-import { approveExecutionNode, dispatchReadyPlanNodes } from '../core/plan_executor.js';
+import { approveExecutionNode, dispatchReadyPlanNodes, startPersistedPlanExecution } from '../core/plan_executor.js';
 import { getDependencyAwareResumePlan } from '../core/execution_resume.js';
 import { enqueueJob } from '../core/queue.js';
 import pool from '../core/db.js';
@@ -76,7 +76,7 @@ router.post('/executions/:executionId/actions', async (req, res, next) => {
     const organizationId = org(req); if (!organizationId) return res.status(403).json({ error: 'ORGANIZATION_CONTEXT_REQUIRED' });
     const id = executionId(req.params.executionId); const action = req.body?.action; const key = idempotency(req);
     if (!['start','resume','retry','approve','cancel','finalize'].includes(action)) return res.status(400).json({ error: 'ACTION_INVALID' });
-    if (action === 'start') return res.status(202).json(await dispatchReadyPlanNodes({ organizationId, executionId: id }));
+    if (action === 'start') return res.status(202).json(await startPersistedPlanExecution({ organizationId, executionId: id }));
     if (action === 'finalize') return res.status(200).json(await finalizeComplianceDecision({ organizationId, executionId: id }));
     if (action === 'approve') return res.status(200).json(await approveExecutionNode({ organizationId, executionId: id, nodeId: req.body?.nodeId, actorId: actor(req) }));
     if (action === 'cancel') return res.status(200).json(await cancelExecutionRun({ organizationId, executionId: id, reason: String(req.body?.reason || 'Cancelled by operator').slice(0,500), actorId: actor(req), idempotencyKey: key ? `v1:cancel:${key}` : null }));
