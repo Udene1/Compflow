@@ -30,6 +30,8 @@ export async function recordEvidence({ organizationId, executionId, nodeId, atte
 
 export async function promoteLegacyExecutionEvidence({ organizationId, executionId } = {}) {
   await ensureEvidenceSchema();
+  const table = await pool.query(`SELECT to_regclass('public.execution_evidence') AS name`);
+  if (!table.rows[0]?.name) return [];
   const legacy = await pool.query('SELECT * FROM execution_evidence WHERE organization_id=$1 AND execution_id=$2 ORDER BY created_at ASC', [organizationId, executionId]);
   const promoted = [];
   for (const row of legacy.rows) {
