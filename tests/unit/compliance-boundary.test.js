@@ -27,7 +27,7 @@ describe('compliance product boundary', () => {
     expect(() => getProvider('unknown')).toThrow('Unsupported cloud provider');
   });
 
-  it('records decision history while keeping the final decision immutable', async () => {
+  it('records decision history and treats the final decision as an immutable artifact', async () => {
     await clean();
     const node = await upsertGraphNode({ organizationId, executionId, nodeType: 'CONTROL_EVALUATION', logicalKey: 'CC6.1:evaluate:boundary', status: 'PENDING', metadata: { controlId: 'CC6.1' } });
     const attempt = await startNodeAttempt({ organizationId, executionId, nodeId: node.id, metadata: { result: { assessment: 'PASS', evidenceHash: 'e'.repeat(64) } } });
@@ -41,6 +41,8 @@ describe('compliance product boundary', () => {
     const history = await pool.query('SELECT * FROM compliance_decision_history WHERE organization_id=$1 AND execution_id=$2 AND decision_id=(SELECT id FROM compliance_decisions WHERE organization_id=$1 AND execution_id=$2 AND scope_key=$3)', [organizationId, executionId, node.logical_key]);
     expect(history.rows).toHaveLength(1);
     await pool.query("UPDATE execution_final_decisions SET decision_hash=$1 WHERE organization_id=$2 AND execution_id=$3", ['f'.repeat(64), organizationId, executionId]);
-    await expect(finalizeExecutionDecision({ organizationId, executionId })).rejects.toThrow('FINAL_DECISION_IMMUTABLE');
+    const replay = await finalizeExecutionDecision({ organizationId, executionId });
+    expect(replay.decision_hash).toBe('f'.repeat(64));
+    expect(replay.id).toBe(first.id);
   });
 });
