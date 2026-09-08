@@ -7,7 +7,7 @@ let queueInitPromise = null;
 let workerConnections = new Set();
 
 function queueJobId(organizationId, jobId) {
-    return `${organizationId}:${jobId}`;
+    return `org-${organizationId}-job-${jobId}`;
 }
 
 async function getQueue() {
