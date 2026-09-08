@@ -15,6 +15,7 @@
     get: (executionId, afterSequence = 0) => request(`/executions/${encodeURIComponent(executionId)}?afterSequence=${encodeURIComponent(afterSequence)}`),
     evidence: (executionId) => request(`/executions/${encodeURIComponent(executionId)}/evidence`),
     decisions: (executionId) => request(`/executions/${encodeURIComponent(executionId)}/decisions`),
+    trace: (executionId, limit = 100) => request(`/executions/${encodeURIComponent(executionId)}/trace?limit=${encodeURIComponent(limit)}`),
     action: (executionId, action, body = {}, idempotencyKey = null) => request(`/executions/${encodeURIComponent(executionId)}/actions`, { method: 'POST', ...(idempotencyKey ? { headers: { 'Idempotency-Key': idempotencyKey } } : {}), body: JSON.stringify({ action, ...body }) }),
     stream: (executionId, handlers = {}) => {
       const source = new EventSource(`${base}/api/v1/executions/${encodeURIComponent(executionId)}/stream`, { withCredentials: true });
