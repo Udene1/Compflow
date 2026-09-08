@@ -9,6 +9,7 @@ import { enqueueJob } from '../core/queue.js';
 import { getEvidenceFreshness, verifyEvidenceIntegrity } from '../core/evidence.js';
 import { getComplianceTrace } from '../core/compliance_trace.js';
 import { analyzeExecutionExposurePaths, getExecutionExposurePaths } from '../core/exposure_paths.js';
+import { analyzeExecutionSecurity, getLatestSecurityAnalysis } from '../core/ai_analyst.js';
 import { hasRole, ROLES } from '../core/auth.js';
 import pool from '../core/db.js';
 import { listProviders } from '../core/provider_registry.js';
@@ -18,7 +19,7 @@ const router = express.Router();
 const ID = /^[A-Za-z0-9._:-]{1,128}$/;
 const KEY = /^[A-Za-z0-9._:-]{1,128}$/;
 const LIMIT = 100;
-const ACTION_ROLES = Object.freeze({ start: [ROLES.ENGINEER], resume: [ROLES.ENGINEER], retry: [ROLES.ENGINEER], approve: [ROLES.ADMIN, ROLES.OWNER], cancel: [ROLES.ADMIN, ROLES.OWNER], finalize: [ROLES.ENGINEER], analyzeExposure: [ROLES.ENGINEER] });
+const ACTION_ROLES = Object.freeze({ start: [ROLES.ENGINEER], resume: [ROLES.ENGINEER], retry: [ROLES.ENGINEER], approve: [ROLES.ADMIN, ROLES.OWNER], cancel: [ROLES.ADMIN, ROLES.OWNER], finalize: [ROLES.ENGINEER], analyzeExposure: [ROLES.ENGINEER], analyzeSecurity: [ROLES.ENGINEER] });
 function org(req) { return req.user?.orgId || req.authContext?.orgId || null; }
 function actor(req) { return req.user?.userId || req.user?.id || req.authContext?.userId || null; }
 function executionId(value) { if (!ID.test(String(value || ''))) throw new Error('EXECUTION_ID_INVALID'); return String(value); }
@@ -37,6 +38,8 @@ router.get('/executions/:executionId/decisions', async (req, res, next) => { try
 router.get('/executions/:executionId/trace', async (req, res, next) => { try { const organizationId = org(req); if (!organizationId) return res.status(403).json({ error: 'ORGANIZATION_CONTEXT_REQUIRED' }); const id = executionId(req.params.executionId); const trace = await getComplianceTrace({ organizationId, executionId: id, limit: page(req.query.limit) }); return res.json({ executionId: id, trace }); } catch (error) { next(error); } });
 router.get('/executions/:executionId/exposure-paths', async (req, res, next) => { try { const organizationId = org(req); if (!organizationId) return res.status(403).json({ error: 'ORGANIZATION_CONTEXT_REQUIRED' }); const id = executionId(req.params.executionId); const paths = await getExecutionExposurePaths({ organizationId, executionId: id, limit: page(req.query.limit) }); return res.json({ executionId: id, paths, detected: paths.length, compromiseConfirmed: false }); } catch (error) { next(error); } });
 router.post('/executions/:executionId/exposure-paths/analyze', async (req, res, next) => { try { const organizationId = org(req); if (!organizationId) return res.status(403).json({ error: 'ORGANIZATION_CONTEXT_REQUIRED' }); authorizeAction(req, 'analyzeExposure'); const id = executionId(req.params.executionId); const result = await analyzeExecutionExposurePaths({ organizationId, executionId: id }); return res.status(200).json({ executionId: id, paths: result, detected: result.length, compromiseConfirmed: false }); } catch (error) { next(error); } });
+router.get('/executions/:executionId/security-analysis', async (req, res, next) => { try { const organizationId = org(req); if (!organizationId) return res.status(403).json({ error: 'ORGANIZATION_CONTEXT_REQUIRED' }); const id = executionId(req.params.executionId); const event = await getLatestSecurityAnalysis({ organizationId, executionId: id }); return res.json({ executionId: id, available: Boolean(event), analysis: event?.payload?.analysis || null, model: event?.payload?.model || null, promptVersion: event?.payload?.promptVersion || null, sourceHash: event?.payload?.sourceHash || null }); } catch (error) { next(error); } });
+router.post('/executions/:executionId/security-analysis', async (req, res, next) => { try { const organizationId = org(req); if (!organizationId) return res.status(403).json({ error: 'ORGANIZATION_CONTEXT_REQUIRED' }); authorizeAction(req, 'analyzeSecurity'); const id = executionId(req.params.executionId); const key = idempotency(req); const replay = key ? await getExecutionEventByIdempotencyKey({ organizationId, executionId: id, eventType: 'SECURITY_ANALYSIS_COMPLETED', idempotencyKey: `security-analysis:${key}` }) : null; if (replay) return res.status(200).json({ executionId: id, eventId: replay.id, ...replay.payload, idempotentReplay: true }); const result = await analyzeExecutionSecurity({ organizationId, executionId: id, actorId: actor(req), idempotencyKey: key }); return res.status(200).json(result); } catch (error) { next(error); } });
 router.post('/executions/:executionId/actions', async (req, res, next) => {
   try {
     const organizationId = org(req); if (!organizationId) return res.status(403).json({ error: 'ORGANIZATION_CONTEXT_REQUIRED' }); const id = executionId(req.params.executionId); const action = req.body?.action; const key = idempotency(req); if (!['start','resume','retry','approve','cancel','finalize'].includes(action)) return res.status(400).json({ error: 'ACTION_INVALID' }); authorizeAction(req, action);
