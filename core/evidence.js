@@ -35,7 +35,8 @@ export async function promoteLegacyExecutionEvidence({ organizationId, execution
   for (const row of legacy.rows) {
     const evidence = row.evidence || {};
     const bounded = { ...evidence, resources: Array.isArray(evidence.resources) ? evidence.resources.slice(0, MAX_PAYLOAD) : [] };
-    const result = await pool.query(`INSERT INTO execution_evidence_records (id,organization_id,execution_id,node_id,attempt_id,control_id,provider,connection_id,resource_id,source_type,source_ref,collected_at,evidence,evidence_hash) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13::jsonb,$14) ON CONFLICT (organization_id,execution_id,node_id,attempt_id) DO NOTHING RETURNING *`, [`legacy_evidence_${row.id}`, row.organization_id, row.execution_id, row.node_id, row.attempt_id, row.control_id, row.provider, row.connection_id, row.resource_id, row.source_type, row.node_id, row.created_at, canonical(bounded), row.evidence_hash || hashEvidence(bounded)]);
+    const normalizedHash = hashEvidence(bounded);
+    const result = await pool.query(`INSERT INTO execution_evidence_records (id,organization_id,execution_id,node_id,attempt_id,control_id,provider,connection_id,resource_id,source_type,source_ref,collected_at,evidence,evidence_hash) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13::jsonb,$14) ON CONFLICT (organization_id,execution_id,node_id,attempt_id) DO NOTHING RETURNING *`, [`legacy_evidence_${row.id}`, row.organization_id, row.execution_id, row.node_id, row.attempt_id, row.control_id, row.provider, row.connection_id, row.resource_id, row.source_type, row.node_id, row.created_at, canonical(bounded), normalizedHash]);
     if (result.rows[0]) promoted.push(result.rows[0]);
   }
   return promoted;
