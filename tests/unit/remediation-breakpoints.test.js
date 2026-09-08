@@ -31,4 +31,29 @@ describe('deterministic remediation breakpoints', () => {
     });
     expect(result).toEqual([]);
   });
+
+  it('retains path identity and exposure status for execution breakpoints', () => {
+    const result = deriveExecutionRemediationBreakpoints({
+      paths: [{
+        id: 'path-1',
+        status: 'VERIFIED',
+        severity: 'CRITICAL',
+        nodes: [{ finding_ids: ['finding-1'] }]
+      }],
+      findings: [{
+        id: 'finding-1',
+        code: 'IAM_WILDCARD_PERMISSION',
+        resource_id: 'role-a',
+        severity: 'CRITICAL'
+      }]
+    });
+    expect(result).toHaveLength(1);
+    expect(result[0]).toMatchObject({
+      pathId: 'path-1',
+      pathStatus: 'VERIFIED',
+      pathSeverity: 'CRITICAL',
+      findingId: 'finding-1',
+      code: 'IAM_WILDCARD_PERMISSION'
+    });
+  });
 });
