@@ -1,7 +1,5 @@
-import { getExecutionGraph, getResumableNodes } from '../core/execution_engine.js';
-import { recoverExpiredExecutionLeases } from '../core/execution_lifecycle.js';
-import { recoverStaleNodeAttempts } from '../core/execution_engine.js';
-import { getExecutionRun } from '../core/execution_lifecycle.js';
+import { getExecutionGraph, getResumableNodes, recoverStaleNodeAttempts } from '../core/execution_engine.js';
+import { recoverExpiredExecutionLeases, getExecutionRun } from '../core/execution_lifecycle.js';
 import { enqueueJob } from '../core/queue.js';
 
 function organizationIdFromRequest(req) {
@@ -18,11 +16,12 @@ export default async function handler(req, res) {
   if (!executionId) return res.status(400).json({ error: 'Missing executionId' });
 
   try {
+    const recoveredExecutions = await recoverExpiredExecutionLeases({ organizationId, executionId });
+    const recoveredAttempts = await recoverStaleNodeAttempts({ organizationId, executionId });
+    const graph = await getExecutionGraph(organizationId, executionId);
+    if (!graph.nodes.length) return res.status(404).json({ error: 'Execution not found' });
+
     if (req.method === 'GET') {
-      const recoveredExecutions = await recoverExpiredExecutionLeases({ organizationId, executionId });
-      const recoveredAttempts = await recoverStaleNodeAttempts({ organizationId, executionId });
-      const graph = await getExecutionGraph(organizationId, executionId);
-      if (!graph.nodes.length) return res.status(404).json({ error: 'Execution not found' });
       const execution = await getExecutionRun(organizationId, executionId);
       const resumableNodeIds = (await getResumableNodes(organizationId, executionId)).map(node => node.id);
       return res.status(200).json({
@@ -37,9 +36,6 @@ export default async function handler(req, res) {
         resumableNodeIds
       });
     }
-
-    const graph = await getExecutionGraph(organizationId, executionId);
-    if (!graph.nodes.length) return res.status(404).json({ error: 'Execution not found' });
 
     const resumable = await getResumableNodes(organizationId, executionId);
     if (!resumable.length) return res.status(409).json({ error: 'No dependency-ready nodes to resume' });
