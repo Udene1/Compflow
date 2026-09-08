@@ -74,9 +74,10 @@ describe('real compliance execution boundary', () => {
       }
       const failed = graph?.nodes.find(node => node.node_type === 'EVIDENCE_COLLECTION');
       expect(failed?.status).toBe('FAILED');
-      expect(failed?.error_code).toBe('EXECUTION_NODE_FAILED');
       const failedAttempt = graph.attempts.find(attempt => attempt.node_id === failed.id);
       expect(failedAttempt?.status).toBe('FAILED');
+      expect(failedAttempt?.error_code).toBe('EXECUTION_NODE_FAILED');
+      expect(failedAttempt?.error_message).not.toMatch(/credential|secret|token|password/i);
       const run = await getExecutionRun(organizationId, workerExecutionId);
       expect(['RUNNING', 'FAILED']).toContain(run.status);
     } finally {
