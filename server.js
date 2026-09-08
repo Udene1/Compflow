@@ -40,7 +40,6 @@ app.use(cors({
     allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With']
 }));
 
-// Security headers without adding a runtime dependency. Do not loosen these per-route.
 app.use((req, res, next) => {
     res.setHeader('X-Content-Type-Options', 'nosniff');
     res.setHeader('X-Frame-Options', 'DENY');
@@ -55,7 +54,7 @@ app.use(express.json({ limit: '10mb' }));
 const generalLimiter = rateLimit({
     windowMs: 15 * 60 * 1000, limit: 300, standardHeaders: 'draft-7', legacyHeaders: false,
     message: { error: 'Too Many Requests', message: 'API rate limit exceeded. Please try again later.' },
-    skip: (req) => req.path === '/health' || req.path === '/api/job-stream'
+    skip: (req) => req.path === '/health' || req.path === '/api/job-stream' || (req.path === '/api/execution-graph' && req.query?.stream === '1')
 });
 const heavyActionLimiter = rateLimit({
     windowMs: 5 * 60 * 1000, limit: 30, standardHeaders: 'draft-7', legacyHeaders: false,
@@ -63,7 +62,7 @@ const heavyActionLimiter = rateLimit({
 });
 const authLimiter = rateLimit({
     windowMs: 15 * 60 * 1000, limit: 50, standardHeaders: 'draft-7', legacyHeaders: false,
-    message: { error: 'Too Many Requests', message: 'Authentication rate limit exceeded. Please wait before retrying.' }
+    message: { error: 'Too Many Requests', message: 'Authentication rate limit exceeded. Please wait before trying again.' }
 });
 app.use('/api/', generalLimiter);
 const PORT = process.env.PORT || 3000;
@@ -132,6 +131,7 @@ async function startApp() {
         console.log('[AUTH] Route protection: ENABLED — all /api/* routes require authentication');
         console.log('[EXECUTION] Durable graph worker: ENABLED');
         console.log('[EXECUTION] Heartbeat + stale recovery: ENABLED');
+        console.log('[EXECUTION] Live graph stream + controls: ENABLED');
         console.log('[RBAC] Role hierarchy: OWNER > ADMIN > ENGINEER > AUDITOR > VIEWER');
     });
 }
