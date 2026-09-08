@@ -8,7 +8,7 @@ const RULES = Object.freeze({
   AZURE_STORAGE_PUBLIC_BLOB: { action: 'Disable anonymous blob access and require authenticated requests.', rationale: 'The finding marks blob storage as anonymously reachable.', breaks: ['PUBLIC_ACCESS'] },
   RDS_PUBLICLY_ACCESSIBLE: { action: 'Disable public database accessibility and restrict inbound network access.', rationale: 'The finding marks the database as publicly reachable.', breaks: ['PUBLIC_ACCESS'] },
   RDS_BACKUP_DISABLED: { action: 'Increase database backup retention to the minimum approved recovery window.', rationale: 'Adequate retention provides recoverability after destructive events.', breaks: ['DATA_RECOVERY'] },
-  AZURE_SQL_PUBLIC_ACCESS: { action: 'Disable public SQL access and restrict the database firewall.', rationale: 'The finding marks the database endpoint as publicly reachable.', breaks: ['PUBLIC_ACCESS'] },
+  AZURE_SQL_PUBLIC_ACCESS: { action: 'Disable public SQL access and restrict the database firewall.', rationale: 'The finding marks the database as publicly reachable.', breaks: ['PUBLIC_ACCESS'] },
   AZURE_APPSERVICE_HTTP_ALLOWED: { action: 'Enforce HTTPS-only traffic for the App Service.', rationale: 'HTTPS-only prevents cleartext application traffic.', breaks: ['CLEAR_TEXT_TRANSPORT'] },
   SG_OPEN_SSH_WORLD: { action: 'Restrict SSH ingress to an approved administrative network.', rationale: 'The finding permits SSH from the public internet.', breaks: ['PUBLIC_INGRESS'] },
   SG_OPEN_RDP_WORLD: { action: 'Restrict RDP ingress to an approved administrative network.', rationale: 'The finding permits RDP from the public internet.', breaks: ['PUBLIC_INGRESS'] },
@@ -26,6 +26,12 @@ const RULES = Object.freeze({
   APIGATEWAY_XRAY_DISABLED: { action: 'Enable tracing for the API Gateway stage.', rationale: 'Tracing improves request-level security observability.', breaks: ['OBSERVABILITY_GAP'] }
 });
 
+export function getRemediationBreakpointDefinition(code) {
+  const normalized = String(code || '').trim().toUpperCase();
+  const rule = RULES[normalized];
+  return rule ? Object.freeze({ code: normalized, ...rule }) : null;
+}
+
 function findingIdsForPath(path) { return new Set((path?.nodes || []).flatMap(node => Array.isArray(node.finding_ids) ? node.finding_ids : Array.isArray(node.findingIds) ? node.findingIds : [])); }
 function normalizeFinding(finding) { return { id: String(finding?.id || '').trim(), code: String(finding?.code || '').trim().toUpperCase(), resourceId: String(finding?.resource_id || finding?.resourceId || '').trim(), severity: String(finding?.severity || 'LOW').trim().toUpperCase() }; }
 
@@ -33,7 +39,8 @@ export function deriveRemediationBreakpoints({ path, findings = [] } = {}) {
   const pathFindingIds = findingIdsForPath(path);
   return findings.map(normalizeFinding).filter(finding => finding.id && pathFindingIds.has(finding.id) && RULES[finding.code] && (() => { try { getRemediationPolicy(finding.code); return true; } catch { return false; } })()).map(finding => {
     const policy = getRemediationPolicy(finding.code);
-    return { id: `breakpoint:${finding.id}`, findingId: finding.id, code: finding.code, resourceId: finding.resourceId, severity: finding.severity, action: RULES[finding.code].action, rationale: RULES[finding.code].rationale, breaks: RULES[finding.code].breaks, authority: policy.authority, reversible: policy.reversible, blastRadius: policy.blastRadius, executed: false, verified: false };
+    const candidate = RULES[finding.code];
+    return { id: `breakpoint:${finding.id}`, findingId: finding.id, code: finding.code, resourceId: finding.resourceId, severity: finding.severity, action: candidate.action, rationale: candidate.rationale, breaks: candidate.breaks, authority: policy.authority, reversible: policy.reversible, blastRadius: policy.blastRadius, executed: false, verified: false };
   });
 }
 
