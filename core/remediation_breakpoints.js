@@ -1,3 +1,5 @@
+import { getRemediationPolicy } from './remediation_policy.js';
+
 const RULES = Object.freeze({
   S3_PUBLIC_ACCESS: { action: 'Remove public bucket access and require authenticated access.', rationale: 'The finding marks the storage resource as publicly exposed.', breaks: ['PUBLIC_ACCESS'] },
   S3_VERSIONING_DISABLED: { action: 'Enable object versioning on the storage bucket.', rationale: 'Versioning improves recovery from accidental or malicious object changes.', breaks: ['DATA_RECOVERY'] },
@@ -24,48 +26,17 @@ const RULES = Object.freeze({
   APIGATEWAY_XRAY_DISABLED: { action: 'Enable tracing for the API Gateway stage.', rationale: 'Tracing improves request-level security observability.', breaks: ['OBSERVABILITY_GAP'] }
 });
 
-function findingIdsForPath(path) {
-  return new Set((path?.nodes || []).flatMap(node => Array.isArray(node.finding_ids)
-    ? node.finding_ids
-    : Array.isArray(node.findingIds) ? node.findingIds : []));
-}
+function findingIdsForPath(path) { return new Set((path?.nodes || []).flatMap(node => Array.isArray(node.finding_ids) ? node.finding_ids : Array.isArray(node.findingIds) ? node.findingIds : [])); }
+function normalizeFinding(finding) { return { id: String(finding?.id || '').trim(), code: String(finding?.code || '').trim().toUpperCase(), resourceId: String(finding?.resource_id || finding?.resourceId || '').trim(), severity: String(finding?.severity || 'LOW').trim().toUpperCase() }; }
 
-function normalizeFinding(finding) {
-  return {
-    id: String(finding?.id || '').trim(),
-    code: String(finding?.code || '').trim().toUpperCase(),
-    resourceId: String(finding?.resource_id || finding?.resourceId || '').trim(),
-    severity: String(finding?.severity || 'LOW').trim().toUpperCase()
-  };
-}
-
-/**
- * Produces conservative remediation candidates for a deterministic path.
- * It never executes a change and never claims that a path is already broken.
- */
 export function deriveRemediationBreakpoints({ path, findings = [] } = {}) {
   const pathFindingIds = findingIdsForPath(path);
-  return findings.map(normalizeFinding)
-    .filter(finding => finding.id && pathFindingIds.has(finding.id) && RULES[finding.code])
-    .map(finding => ({
-      id: `breakpoint:${finding.id}`,
-      findingId: finding.id,
-      code: finding.code,
-      resourceId: finding.resourceId,
-      severity: finding.severity,
-      action: RULES[finding.code].action,
-      rationale: RULES[finding.code].rationale,
-      breaks: RULES[finding.code].breaks,
-      executed: false,
-      verified: false
-    }));
+  return findings.map(normalizeFinding).filter(finding => finding.id && pathFindingIds.has(finding.id) && RULES[finding.code] && (() => { try { getRemediationPolicy(finding.code); return true; } catch { return false; } })()).map(finding => {
+    const policy = getRemediationPolicy(finding.code);
+    return { id: `breakpoint:${finding.id}`, findingId: finding.id, code: finding.code, resourceId: finding.resourceId, severity: finding.severity, action: RULES[finding.code].action, rationale: RULES[finding.code].rationale, breaks: RULES[finding.code].breaks, authority: policy.authority, reversible: policy.reversible, blastRadius: policy.blastRadius, executed: false, verified: false };
+  });
 }
 
 export function deriveExecutionRemediationBreakpoints({ paths = [], findings = [] } = {}) {
-  return paths.flatMap(path => deriveRemediationBreakpoints({ path, findings }).map(breakpoint => ({
-    ...breakpoint,
-    pathId: path.id,
-    pathStatus: path.status,
-    pathSeverity: path.severity
-  })));
+  return paths.flatMap(path => deriveRemediationBreakpoints({ path, findings }).map(breakpoint => ({ ...breakpoint, pathId: path.id, pathStatus: path.status, pathSeverity: path.severity })));
 }
