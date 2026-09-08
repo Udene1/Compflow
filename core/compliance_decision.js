@@ -40,12 +40,15 @@ export async function deriveExecutionDecisions({ organizationId, executionId } =
   for (const row of verificationRows.rows) verificationByKey.set(row.node_id, row);
   const decisions = [];
   for (const node of nodes.rows.filter(row => row.node_type === 'CONTROL_EVALUATION')) {
-    const attempt = latest.get(node.id); if (attempt?.status !== 'SUCCEEDED') continue;
-    const result = attempt.metadata?.result || {};
+    const attempt = latest.get(node.id);
+    const result = attempt?.metadata?.result || {};
     const verificationNode = nodes.rows.find(candidate => candidate.node_type === 'VERIFICATION' && candidate.logical_key.startsWith(node.logical_key.replace(/:evaluate:[^:]+$/, '') + ':verify:'));
     const verification = verificationNode ? verificationByKey.get(verificationNode.id) : null;
-    const outcome = verification?.outcome || (result.assessment === 'PASS' ? 'PASS' : result.assessment === 'FAIL' ? 'FAIL' : 'INSUFFICIENT_EVIDENCE');
-    decisions.push(await recordControlDecision({ organizationId, executionId, controlId: node.metadata?.controlId, scopeKey: node.logical_key, outcome, evidenceHash: result.evidenceHash || null, verificationHash: verification?.verification_hash || null, rationale: { evaluation: result, verification: verification ? { outcome: verification.outcome, id: verification.id } : null, nodeId: node.id } }));
+    let outcome;
+    if (verification?.outcome) outcome = verification.outcome;
+    else if (attempt?.status === 'SUCCEEDED') outcome = result.assessment === 'PASS' ? 'PASS' : result.assessment === 'FAIL' ? 'FAIL' : 'INSUFFICIENT_EVIDENCE';
+    else outcome = 'INSUFFICIENT_EVIDENCE';
+    decisions.push(await recordControlDecision({ organizationId, executionId, controlId: node.metadata?.controlId, scopeKey: node.logical_key, outcome, evidenceHash: result.evidenceHash || null, verificationHash: verification?.verification_hash || null, rationale: { evaluation: result, evaluationAttemptStatus: attempt?.status || 'MISSING', verification: verification ? { outcome: verification.outcome, id: verification.id } : null, nodeId: node.id } }));
   }
   return decisions;
 }
