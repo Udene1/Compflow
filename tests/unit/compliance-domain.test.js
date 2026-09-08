@@ -7,7 +7,6 @@ import { recordControlDecision, finalizeExecutionDecision, ensureDecisionSchema 
 
 const organizationId = 'org_compliance_domain_test';
 const executionId = 'exec_compliance_domain_test';
-
 const intent = {
   id: 'intent_domain_test', version: '1', objective: 'Evaluate cloud compliance and remediate approved failures', mode: 'REMEDIATE', frameworks: ['soc2'],
   rules: [{ id: 'rule-domain-1', controlId: 'CC6.1', action: 'REMEDIATE', requiresApproval: true }],
@@ -17,13 +16,14 @@ const intent = {
 describe('durable compliance domain', () => {
   beforeAll(async () => {
     await ensureIntentSchema(); await ensureEvidenceSchema(); await ensureVerificationSchema(); await ensureDecisionSchema();
+    await pool.query('DELETE FROM compliance_intents WHERE organization_id=$1 AND intent_id IN ($2,$3)', [organizationId, intent.id, 'intent_domain_race']);
     await pool.query('DELETE FROM execution_final_decisions WHERE organization_id=$1 AND execution_id=$2', [organizationId, executionId]);
     await pool.query('DELETE FROM compliance_decisions WHERE organization_id=$1 AND execution_id=$2', [organizationId, executionId]);
     await pool.query('DELETE FROM execution_verifications WHERE organization_id=$1 AND execution_id=$2', [organizationId, executionId]);
     await pool.query('DELETE FROM execution_evidence_records WHERE organization_id=$1 AND execution_id=$2', [organizationId, executionId]);
   });
-
   afterAll(async () => {
+    await pool.query('DELETE FROM compliance_intents WHERE organization_id=$1 AND intent_id IN ($2,$3)', [organizationId, intent.id, 'intent_domain_race']);
     await pool.query('DELETE FROM execution_final_decisions WHERE organization_id=$1 AND execution_id=$2', [organizationId, executionId]);
     await pool.query('DELETE FROM compliance_decisions WHERE organization_id=$1 AND execution_id=$2', [organizationId, executionId]);
     await pool.query('DELETE FROM execution_verifications WHERE organization_id=$1 AND execution_id=$2', [organizationId, executionId]);
@@ -36,6 +36,17 @@ describe('durable compliance domain', () => {
     const stored = await persistIntent({ organizationId, intent: normalized });
     expect(stored.intent_hash).toBe(normalized.intentHash);
     await expect(persistIntent({ organizationId, intent: { ...normalized, objective: 'changed' } })).rejects.toThrow('INTENT_IMMUTABLE');
+  });
+
+  it('collapses concurrent persistence of the same immutable intent', async () => {
+    const raceIntent = normalizeIntent({ organizationId, intent: { ...intent, id: 'intent_domain_race' }, targets: intent.targets });
+    const [first, second] = await Promise.all([
+      persistIntent({ organizationId, intent: raceIntent }),
+      persistIntent({ organizationId, intent: raceIntent })
+    ]);
+    expect(first.id).toBe(second.id);
+    const rows = await pool.query('SELECT * FROM compliance_intents WHERE organization_id=$1 AND intent_id=$2 AND intent_version=$3', [organizationId, raceIntent.id, raceIntent.version]);
+    expect(rows.rows).toHaveLength(1);
   });
 
   it('stores immutable evidence with provenance, lineage and freshness', async () => {
