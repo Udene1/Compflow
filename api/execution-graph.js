@@ -1,33 +1,37 @@
 import crypto from 'crypto';
 import { getExecutionGraph, getResumableNodes, recoverStaleNodeAttempts } from '../core/execution_engine.js';
 import { recoverExpiredExecutionLeases, getExecutionRun, cancelExecutionRun } from '../core/execution_lifecycle.js';
+import { listExecutionEvents } from '../core/execution_events.js';
 import { enqueueJob } from '../core/queue.js';
 
 function organizationIdFromRequest(req) {
   return req.user?.orgId || req.authContext?.orgId || null;
 }
 
-function snapshot(graph, execution, resumableNodeIds, recovery = {}) {
+function snapshot(graph, execution, resumableNodeIds, events, recovery = {}) {
   const body = {
     ...graph,
     execution,
     live: true,
     observedAt: new Date().toISOString(),
     recovery,
-    resumableNodeIds
+    resumableNodeIds,
+    events,
+    eventCursor: events.length ? events[events.length - 1].sequence : '0'
   };
   const stableBody = { ...body, observedAt: undefined };
   return { body, hash: crypto.createHash('sha256').update(JSON.stringify(stableBody)).digest('hex') };
 }
 
-async function readState(organizationId, executionId) {
+async function readState(organizationId, executionId, afterSequence = 0) {
   const recoveredExecutions = await recoverExpiredExecutionLeases({ organizationId, executionId });
   const recoveredAttempts = await recoverStaleNodeAttempts({ organizationId, executionId });
   const execution = await getExecutionRun(organizationId, executionId);
   const graph = await getExecutionGraph(organizationId, executionId);
   if (!execution && !graph.nodes.length) throw new Error('EXECUTION_NOT_FOUND');
   const resumableNodeIds = (await getResumableNodes(organizationId, executionId)).map(node => node.id);
-  return snapshot(graph, execution, resumableNodeIds, {
+  const events = await listExecutionEvents({ organizationId, executionId, afterSequence, limit: 200 });
+  return snapshot(graph, execution, resumableNodeIds, events, {
     executionsRecovered: recoveredExecutions.map(run => run.id),
     attemptsRecovered: recoveredAttempts.map(attempt => attempt.id)
   });
@@ -63,12 +67,14 @@ async function streamExecution(res, organizationId, executionId, req) {
   const tick = async () => {
     if (stopped || res.writableEnded) return;
     try {
-      const state = await readState(organizationId, executionId);
+      const afterSequence = Number(req.headers['last-event-sequence'] || 0);
+      const state = await readState(organizationId, executionId, Number.isFinite(afterSequence) ? afterSequence : 0);
       if (state.hash !== lastHash) {
         lastHash = state.hash;
         writeSse(res, 'execution', state.body, state.hash);
+        for (const event of state.body.events) writeSse(res, 'audit', event, String(event.sequence));
       } else {
-        writeSse(res, 'heartbeat', { observedAt: new Date().toISOString() });
+        writeSse(res, 'heartbeat', { observedAt: new Date().toISOString(), eventCursor: state.body.eventCursor });
       }
       if (['SUCCEEDED', 'CANCELLED'].includes(state.body.execution?.status)) close();
     } catch (error) {
@@ -144,7 +150,8 @@ export default async function handler(req, res) {
       return res.status(400).json({ error: 'Unsupported execution action' });
     }
 
-    const state = await readState(organizationId, executionId);
+    const afterSequence = Number(req.query?.afterSequence || 0);
+    const state = await readState(organizationId, executionId, Number.isFinite(afterSequence) ? afterSequence : 0);
     return res.status(200).json(state.body);
   } catch (error) {
     console.error('[EXECUTION-GRAPH] Request failed:', error?.message || error);
