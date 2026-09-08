@@ -37,7 +37,7 @@ app.use(cors({
     },
     credentials: true,
     methods: ['GET', 'POST', 'PATCH', 'PUT', 'DELETE', 'OPTIONS'],
-    allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With']
+    allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With', 'Idempotency-Key']
 }));
 
 app.use((req, res, next) => {
@@ -49,12 +49,12 @@ app.use((req, res, next) => {
     if (req.secure) res.setHeader('Strict-Transport-Security', 'max-age=31536000; includeSubDomains');
     next();
 });
-app.use(express.json({ limit: '10mb' }));
+app.use(express.json({ limit: process.env.COMPFLOW_JSON_LIMIT || '2mb' }));
 
 const generalLimiter = rateLimit({
     windowMs: 15 * 60 * 1000, limit: 300, standardHeaders: 'draft-7', legacyHeaders: false,
     message: { error: 'Too Many Requests', message: 'API rate limit exceeded. Please try again later.' },
-    skip: (req) => req.path === '/health' || req.path === '/api/job-stream'
+    skip: (req) => req.path === '/health'
 });
 const heavyActionLimiter = rateLimit({
     windowMs: 5 * 60 * 1000, limit: 30, standardHeaders: 'draft-7', legacyHeaders: false,
@@ -93,6 +93,9 @@ app.get('/health/ready', async (req, res) => {
     try {
         const { default: pool } = await import('./core/db.js');
         await pool.query('SELECT 1');
+        const { default: Redis } = await import('ioredis');
+        const redis = new Redis({ host: process.env.REDIS_HOST || 'localhost', port: Number(process.env.REDIS_PORT) || 6379, lazyConnect: true, maxRetriesPerRequest: 1 });
+        try { await redis.connect(); await redis.ping(); } finally { await redis.quit().catch(() => {}); }
         return res.status(200).json({ status: 'READY', timestamp: new Date().toISOString() });
     } catch (error) {
         console.error('[READINESS] check failed:', error?.message || 'unknown error');
@@ -119,14 +122,19 @@ app.all(['/api/remediate', '/api/remediation'], heavyActionLimiter, requireAuth(
 app.all('/api/auditor*', requireAuth([ROLES.AUDITOR]), auditorHandler);
 app.all('/api/*', (req, res) => res.status(404).json({ error: 'Not Found', message: `API endpoint ${req.method} ${req.path} does not exist.` }));
 
+let httpServer;
+let stopRecovery;
+let worker;
+let shuttingDown = false;
+
 async function startApp() {
     await initDb();
-    startExecutionRecovery({
+    stopRecovery = startExecutionRecovery({
         intervalMs: Number(process.env.COMPFLOW_RECOVERY_INTERVAL_MS) || 15000,
         staleAfterSeconds: Number(process.env.COMPFLOW_STALE_ATTEMPT_SECONDS) || 90
     });
-    await listenWorkerQueue(durableWorkerHandler);
-    app.listen(PORT, () => {
+    worker = await listenWorkerQueue(durableWorkerHandler);
+    httpServer = app.listen(PORT, () => {
         console.log(`[HTTP SERVER] ComplianceFlow API server listening on port ${PORT}`);
         console.log('[AUTH] Route protection: ENABLED — all /api/* routes require authentication');
         console.log('[EXECUTION] Durable graph worker: ENABLED');
@@ -135,6 +143,29 @@ async function startApp() {
         console.log('[RBAC] Role hierarchy: OWNER > ADMIN > ENGINEER > AUDITOR > VIEWER');
     });
 }
+
+async function shutdown(signal) {
+    if (shuttingDown) return;
+    shuttingDown = true;
+    console.log(`[SHUTDOWN] Received ${signal}; stopping new work and draining services.`);
+    stopRecovery?.();
+    const forceTimer = setTimeout(() => { console.error('[SHUTDOWN] Graceful shutdown timed out.'); process.exit(1); }, 15000);
+    forceTimer.unref?.();
+    try {
+        if (httpServer) await new Promise(resolve => httpServer.close(resolve));
+        if (worker) await worker.close();
+        const { default: pool } = await import('./core/db.js');
+        await pool.end();
+        clearTimeout(forceTimer);
+        process.exit(0);
+    } catch (error) {
+        clearTimeout(forceTimer);
+        console.error('[SHUTDOWN] Failed:', error?.message || error);
+        process.exit(1);
+    }
+}
+process.once('SIGTERM', () => void shutdown('SIGTERM'));
+process.once('SIGINT', () => void shutdown('SIGINT'));
 
 startApp().catch(err => {
     console.error('Failed to initialize server:', err?.message || err);
