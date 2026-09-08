@@ -19,6 +19,7 @@ import onboardingRouter from './api/onboarding.js';
 import { durableWorkerHandler } from './core/durable_worker.js';
 import { listenWorkerQueue } from './core/queue.js';
 import { initDb } from './core/db.js';
+import { startExecutionRecovery } from './core/execution_recovery.js';
 import { requireAuth } from './core/auth_guard.js';
 import { ROLES } from './core/auth.js';
 
@@ -121,11 +122,16 @@ app.all('/api/*', (req, res) => res.status(404).json({ error: 'Not Found', messa
 
 async function startApp() {
     await initDb();
+    startExecutionRecovery({
+        intervalMs: Number(process.env.COMPFLOW_RECOVERY_INTERVAL_MS) || 15000,
+        staleAfterSeconds: Number(process.env.COMPFLOW_STALE_ATTEMPT_SECONDS) || 90
+    });
     await listenWorkerQueue(durableWorkerHandler);
     app.listen(PORT, () => {
         console.log(`[HTTP SERVER] ComplianceFlow API server listening on port ${PORT}`);
         console.log('[AUTH] Route protection: ENABLED — all /api/* routes require authentication');
         console.log('[EXECUTION] Durable graph worker: ENABLED');
+        console.log('[EXECUTION] Heartbeat + stale recovery: ENABLED');
         console.log('[RBAC] Role hierarchy: OWNER > ADMIN > ENGINEER > AUDITOR > VIEWER');
     });
 }
