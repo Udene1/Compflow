@@ -3,12 +3,13 @@ import { GoogleGenerativeAI } from '@google/generative-ai';
 import pool from './db.js';
 import { appendExecutionEvent } from './execution_events.js';
 import { aggregateSecurityRisk } from './security_risk.js';
+import { deriveExecutionRemediationBreakpoints } from './remediation_breakpoints.js';
 
 const MODEL = process.env.GEMINI_ANALYST_MODEL || process.env.GEMINI_MODEL || 'gemini-1.5-flash';
 const MAX_RETRIES = 3;
 const MAX_FINDINGS = 100;
 const MAX_PATHS = 50;
-const PROMPT_VERSION = 'security-analyst-v2';
+const PROMPT_VERSION = 'security-analyst-v3';
 
 function clean(value, max = 500) { return String(value ?? '').trim().slice(0, max); }
 function sha256(value) { return crypto.createHash('sha256').update(value).digest('hex'); }
@@ -50,7 +51,7 @@ function normalizePath(path) {
   };
 }
 
-export function buildAnalystContext({ findings = [], paths = [], evidence = [], risk = null } = {}) {
+export function buildAnalystContext({ findings = [], paths = [], evidence = [], risk = null, breakpoints = null } = {}) {
   const safeFindings = findings.slice(0, MAX_FINDINGS).map(normalizeFinding);
   const safePaths = paths.slice(0, MAX_PATHS).map(normalizePath);
   const safeEvidence = evidence.slice(0, 200).map(row => ({
@@ -63,6 +64,7 @@ export function buildAnalystContext({ findings = [], paths = [], evidence = [], 
     observedAt: row.observed_at || row.collected_at || null
   }));
   const deterministicRisk = risk || aggregateSecurityRisk({ findings, paths });
+  const deterministicBreakpoints = breakpoints || deriveExecutionRemediationBreakpoints({ paths, findings });
   return {
     findings: safeFindings,
     paths: safePaths,
@@ -82,7 +84,13 @@ export function buildAnalystContext({ findings = [], paths = [], evidence = [], 
         resourceId: clean(item.resourceId, 255), severity: clean(item.severity, 32),
         findingIds: Array.isArray(item.findingIds) ? item.findingIds.slice(0, 50) : []
       })) : []
-    }
+    },
+    remediationBreakpoints: deterministicBreakpoints.slice(0, 200).map(item => ({
+      id: clean(item.id, 128), pathId: clean(item.pathId, 128), findingId: clean(item.findingId, 128),
+      code: clean(item.code, 128), resourceId: clean(item.resourceId, 255), action: clean(item.action, 1000),
+      rationale: clean(item.rationale, 2000), breaks: Array.isArray(item.breaks) ? item.breaks.slice(0, 10) : [],
+      executed: false, verified: false
+    }))
   };
 }
 
@@ -91,6 +99,7 @@ function validateAnalysis(value, context) {
   const allowedFindingIds = new Set(context.findings.map(item => item.id));
   const allowedEvidenceIds = new Set(context.evidence.map(item => item.id));
   const allowedPathIds = new Set(context.paths.map(item => item.id));
+  const allowedBreakpointFindingIds = new Set((context.remediationBreakpoints || []).map(item => item.findingId));
   const evidenceRefs = Array.isArray(value.evidence_refs) ? value.evidence_refs : [];
   const findingRefs = Array.isArray(value.finding_refs) ? value.finding_refs : [];
   const pathRefs = Array.isArray(value.path_refs) ? value.path_refs : [];
@@ -111,7 +120,7 @@ function validateAnalysis(value, context) {
       action: clean(item.action, 1000),
       rationale: clean(item.rationale, 2000),
       expected_effect: clean(item.expected_effect, 1000)
-    })).filter(item => !item.finding_id || allowedFindingIds.has(item.finding_id)) : [],
+    })).filter(item => !item.finding_id || allowedFindingIds.has(item.finding_id) && allowedBreakpointFindingIds.has(item.finding_id)) : [],
     compromise_confirmed: false
   };
 }
@@ -127,7 +136,7 @@ export async function analyzeSecurityContext(context) {
   const sourceHash = sha256(JSON.stringify(safeContext));
   const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
   const model = genAI.getGenerativeModel({ model: MODEL });
-  const prompt = `You are Compflow's security analyst. You explain security/compliance state using ONLY the supplied deterministic facts. The risk section is calculated by deterministic code and is authoritative for prioritization; do not recalculate or override it. Do not invent relationships, findings, resources, evidence, controls, exploits, or compromise. Do not infer compromise from a potential or verified path. Every reference must use an ID present in the input. If evidence is incomplete, say so. Recommended breakpoints must be conservative and describe the smallest likely change that would break an observed relationship; do not claim that the change has been executed or verified.
+  const prompt = `You are Compflow's security analyst. Explain security/compliance state using ONLY supplied deterministic facts. The risk section and remediation breakpoints are calculated by deterministic code and are authoritative; do not recalculate, override, or invent them. Do not invent relationships, findings, resources, evidence, controls, exploits, or compromise. Do not infer compromise from a potential or verified path. Every reference must use an ID present in the input. If evidence is incomplete, say so. Recommended breakpoints may only restate or clarify supplied deterministic remediation candidates; do not create new actions. Do not claim any change has been executed or verified.
 
 Return JSON only with exactly these concepts: summary, why_it_matters, finding_refs, path_refs, evidence_refs, affected_resources, uncertainty, recommended_breakpoints, compromise_confirmed. compromise_confirmed MUST be false.
 
