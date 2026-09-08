@@ -8,6 +8,7 @@ import { getDependencyAwareResumePlan } from '../core/execution_resume.js';
 import { enqueueJob } from '../core/queue.js';
 import pool from '../core/db.js';
 import { listProviders } from '../core/provider_registry.js';
+import { hasRole, ROLES } from '../core/auth.js';
 
 const router = express.Router();
 const ID = /^[A-Za-z0-9._:-]{1,128}$/;
@@ -16,6 +17,8 @@ const LIMIT = 100;
 
 function org(req) { return req.user?.orgId || req.authContext?.orgId || null; }
 function actor(req) { return req.user?.userId || req.user?.id || req.authContext?.userId || null; }
+function role(req) { return req.user?.role || req.authContext?.role || null; }
+function requireMutation(req, res) { if (!hasRole(role(req), [ROLES.ENGINEER, ROLES.ADMIN, ROLES.OWNER])) { res.status(403).json({ error: 'FORBIDDEN' }); return false; } return true; }
 function executionId(value) { if (!ID.test(String(value || ''))) throw new Error('EXECUTION_ID_INVALID'); return String(value); }
 function idempotency(req) { const value = req.get('Idempotency-Key'); if (value == null) return null; if (!KEY.test(value)) throw new Error('IDEMPOTENCY_KEY_INVALID'); return value; }
 function page(value, fallback = 100) { const n = Number(value); return Number.isSafeInteger(n) ? Math.max(1, Math.min(n, LIMIT)) : fallback; }
@@ -24,6 +27,7 @@ router.get('/providers', (req, res) => res.json({ providers: listProviders() }))
 
 router.post('/executions', async (req, res, next) => {
   try {
+    if (!requireMutation(req, res)) return;
     const organizationId = org(req); if (!organizationId) return res.status(403).json({ error: 'ORGANIZATION_CONTEXT_REQUIRED' });
     const key = idempotency(req); const id = executionId(req.body?.executionId);
     if (key) {
@@ -41,7 +45,7 @@ router.get('/executions/:executionId', async (req, res, next) => {
     const organizationId = org(req); if (!organizationId) return res.status(403).json({ error: 'ORGANIZATION_CONTEXT_REQUIRED' });
     const id = executionId(req.params.executionId); const execution = await getExecutionRun(organizationId, id); const graph = await getExecutionGraph(organizationId, id);
     if (!execution && !graph.nodes.length) return res.status(404).json({ error: 'EXECUTION_NOT_FOUND' });
-    const events = await listExecutionEvents({ organizationId, executionId: id, afterSequence: Number(req.query.afterSequence || 0), limit: page(req.query.limit) });
+    const after = Number(req.query.afterSequence || 0); const events = await listExecutionEvents({ organizationId, executionId: id, afterSequence: Number.isSafeInteger(after) && after >= 0 ? after : 0, limit: page(req.query.limit) });
     return res.json({ execution, graph, events, providers: listProviders() });
   } catch (error) { next(error); }
 });
@@ -64,6 +68,7 @@ router.get('/executions/:executionId/decisions', async (req, res, next) => {
 
 router.post('/executions/:executionId/actions', async (req, res, next) => {
   try {
+    if (!requireMutation(req, res)) return;
     const organizationId = org(req); if (!organizationId) return res.status(403).json({ error: 'ORGANIZATION_CONTEXT_REQUIRED' });
     const id = executionId(req.params.executionId); const action = req.body?.action; const key = idempotency(req);
     if (!['start','resume','retry','approve','cancel','finalize'].includes(action)) return res.status(400).json({ error: 'ACTION_INVALID' });
