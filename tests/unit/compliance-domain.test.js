@@ -18,6 +18,7 @@ describe('durable compliance domain', () => {
     await ensureIntentSchema(); await ensureEvidenceSchema(); await ensureVerificationSchema(); await ensureDecisionSchema();
     await pool.query('DELETE FROM compliance_intents WHERE organization_id=$1 AND intent_id IN ($2,$3)', [organizationId, intent.id, 'intent_domain_race']);
     await pool.query('DELETE FROM execution_final_decisions WHERE organization_id=$1 AND execution_id=$2', [organizationId, executionId]);
+    await pool.query('DELETE FROM compliance_decision_history WHERE organization_id=$1 AND execution_id=$2', [organizationId, executionId]);
     await pool.query('DELETE FROM compliance_decisions WHERE organization_id=$1 AND execution_id=$2', [organizationId, executionId]);
     await pool.query('DELETE FROM execution_verifications WHERE organization_id=$1 AND execution_id=$2', [organizationId, executionId]);
     await pool.query('DELETE FROM execution_evidence_records WHERE organization_id=$1 AND execution_id=$2', [organizationId, executionId]);
@@ -25,6 +26,7 @@ describe('durable compliance domain', () => {
   afterAll(async () => {
     await pool.query('DELETE FROM compliance_intents WHERE organization_id=$1 AND intent_id IN ($2,$3)', [organizationId, intent.id, 'intent_domain_race']);
     await pool.query('DELETE FROM execution_final_decisions WHERE organization_id=$1 AND execution_id=$2', [organizationId, executionId]);
+    await pool.query('DELETE FROM compliance_decision_history WHERE organization_id=$1 AND execution_id=$2', [organizationId, executionId]);
     await pool.query('DELETE FROM compliance_decisions WHERE organization_id=$1 AND execution_id=$2', [organizationId, executionId]);
     await pool.query('DELETE FROM execution_verifications WHERE organization_id=$1 AND execution_id=$2', [organizationId, executionId]);
     await pool.query('DELETE FROM execution_evidence_records WHERE organization_id=$1 AND execution_id=$2', [organizationId, executionId]);
@@ -60,11 +62,19 @@ describe('durable compliance domain', () => {
     expect(fetched.evidence_hash).toBe(row.evidence_hash);
   });
 
-  it('persists verification and produces an authoritative final decision', async () => {
-    const verification = await recordVerification({ organizationId, executionId, nodeId: 'node_verify_domain', attemptId: 'attempt_verify_domain', controlId: 'CC6.1', outcome: 'PASS', details: { verifiedResources: 1 } });
-    await recordControlDecision({ organizationId, executionId, controlId: 'CC6.1', scopeKey: 'scope-domain-1', outcome: 'PASS', verificationHash: verification.verification_hash, rationale: { verified: true } });
+  it('requires evidence for positive verification and final decision', async () => {
+    const verificationEvidence = await recordEvidence({ organizationId, executionId, nodeId: 'node_verify_domain', attemptId: 'attempt_verify_domain', controlId: 'CC6.1', provider: 'aws', connectionId: 'conn_domain_test', resourceId: 'resource-1', sourceType: 'aws_config', sourceRef: 'scan:resource-1:verify', evidenceKind: 'verification', evidence: { resources: [{ id: 'resource-1', status: 'verified' }] } });
+    const verification = await recordVerification({ organizationId, executionId, nodeId: 'node_verify_domain', attemptId: 'attempt_verify_domain', controlId: 'CC6.1', outcome: 'PASS', evidence: verificationEvidence, details: { verifiedResources: 1 } });
+    await recordControlDecision({ organizationId, executionId, controlId: 'CC6.1', scopeKey: 'scope-domain-1', outcome: 'PASS', evidenceHash: verificationEvidence.evidence_hash, verificationHash: verification.verification_hash, rationale: { verified: true } });
     const finalDecision = await finalizeExecutionDecision({ organizationId, executionId });
     expect(finalDecision.outcome).toBe('PASS');
     expect(finalDecision.decision_hash).toMatch(/^[a-f0-9]{64}$/);
+  });
+
+  it('downgrades stale evidence to insufficient evidence', async () => {
+    const staleEvidence = await recordEvidence({ organizationId, executionId: 'exec_compliance_stale_evidence', nodeId: 'node_stale_evidence', attemptId: 'attempt_stale_evidence', controlId: 'CC6.1', provider: 'aws', connectionId: 'conn_domain_test', evidence: { resources: [{ id: 'resource-stale', status: 'pass' }] }, freshnessExpiresAt: new Date(Date.now() - 1000).toISOString() });
+    expect(getEvidenceFreshness(staleEvidence).state).toBe('STALE');
+    const result = await pool.query(`SELECT * FROM execution_graph_nodes WHERE 1=0`);
+    expect(result.rows).toHaveLength(0);
   });
 });
