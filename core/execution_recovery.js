@@ -1,6 +1,7 @@
 import pool from './db.js';
 import { recoverExpiredExecutionLeases } from './execution_lifecycle.js';
 import { recoverStaleNodeAttempts } from './execution_engine.js';
+import { appendExecutionEvent } from './execution_events.js';
 
 const DEFAULT_INTERVAL_MS = 15_000;
 const DEFAULT_STALE_AFTER_SECONDS = 90;
@@ -9,11 +10,24 @@ export async function recoverStaleExecutions({ organizationId = null, staleAfter
   const executions = await recoverExpiredExecutionLeases({ organizationId });
   const organizations = organizationId
     ? [organizationId]
-    : (await pool.query("SELECT DISTINCT organization_id FROM execution_runs WHERE status='RUNNING' OR lease_expires_at IS NOT NULL")).rows.map(row => row.organization_id);
+    : (await pool.query('SELECT DISTINCT organization_id FROM execution_attempts WHERE status=\'RUNNING\'')).rows.map(row => row.organization_id);
 
   const attempts = [];
   for (const orgId of organizations) {
-    attempts.push(...await recoverStaleNodeAttempts({ organizationId: orgId, staleAfterSeconds }));
+    const recovered = await recoverStaleNodeAttempts({ organizationId: orgId, staleAfterSeconds });
+    attempts.push(...recovered);
+    for (const attempt of recovered) {
+      await appendExecutionEvent({
+        organizationId: attempt.organization_id,
+        executionId: attempt.execution_id,
+        nodeId: attempt.node_id,
+        attemptId: attempt.id,
+        eventType: 'NODE_ATTEMPT_STALE_RECOVERED',
+        actorType: 'SYSTEM',
+        result: 'failed',
+        payload: { errorCode: 'STALE_ATTEMPT', attemptNumber: attempt.attempt_number }
+      });
+    }
   }
 
   return { executions, attempts };
