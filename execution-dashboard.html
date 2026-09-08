@@ -1,0 +1,41 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Compflow — Execution</title>
+<style>
+:root{color-scheme:dark;font-family:Inter,system-ui,sans-serif;background:#070a12;color:#edf2f7}*{box-sizing:border-box}body{margin:0;background:radial-gradient(circle at top,#111827,#070a12 55%);min-height:100vh}.wrap{max-width:1400px;margin:auto;padding:24px}.head{display:flex;gap:16px;align-items:center;justify-content:space-between;flex-wrap:wrap}.eyebrow{font-size:12px;letter-spacing:.14em;text-transform:uppercase;color:#8b9bb4}.title{font-size:28px;font-weight:750;margin:4px 0}.muted{color:#91a0b7}.pill{display:inline-flex;align-items:center;gap:7px;border:1px solid #263247;border-radius:999px;padding:6px 10px;font-size:12px}.dot{width:7px;height:7px;border-radius:50%;background:#64748b}.live .dot{background:#22c55e;box-shadow:0 0 10px #22c55e}.actions{display:flex;gap:8px;flex-wrap:wrap}.btn{border:1px solid #344158;background:#121a29;color:#fff;border-radius:9px;padding:9px 13px;cursor:pointer}.btn:hover{background:#1a2639}.btn.danger{border-color:#6b2730}.grid{display:grid;grid-template-columns:1.25fr .75fr;gap:16px;margin-top:20px}.card{background:rgba(12,18,30,.82);border:1px solid #202b3d;border-radius:14px;padding:16px;min-width:0}.card h2{font-size:14px;margin:0 0 13px}.stats{display:grid;grid-template-columns:repeat(4,1fr);gap:8px}.stat{background:#0b111d;border:1px solid #1d293b;border-radius:10px;padding:12px}.stat b{display:block;font-size:18px}.stat span{font-size:11px;color:#8190a8}.nodes{display:grid;gap:8px}.node{border:1px solid #253148;border-radius:10px;padding:11px;background:#0a101b}.node-top{display:flex;justify-content:space-between;gap:10px}.status{font-size:10px;border-radius:999px;padding:4px 7px;background:#1b2637}.SUCCEEDED{color:#4ade80}.FAILED,.CANCELLED{color:#fb7185}.RUNNING{color:#60a5fa}.PENDING{color:#fbbf24}.event-list{max-height:600px;overflow:auto;display:grid;gap:7px}.event{border-left:2px solid #334155;padding:7px 10px;background:#0a101b;border-radius:0 8px 8px 0}.event strong{font-size:12px}.event small{display:block;color:#71809a;margin-top:3px}.graph{min-height:150px;display:grid;gap:8px}.edge{font-size:11px;color:#71809a;padding:3px 0}.empty{color:#71809a;font-size:13px;padding:18px 0}.error{color:#fb7185}.ok{color:#4ade80}@media(max-width:900px){.grid{grid-template-columns:1fr}.stats{grid-template-columns:repeat(2,1fr)}}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header class="head">
+    <div><div class="eyebrow">Durable execution</div><div class="title">Execution graph & audit timeline</div><div id="execId" class="muted">No execution selected</div></div>
+    <div class="actions"><span id="live" class="pill"><i class="dot"></i><span>Disconnected</span></span><button class="btn" onclick="control('resume')">Resume</button><button class="btn" onclick="control('retry')">Retry</button><button class="btn danger" onclick="cancelRun()">Cancel</button></div>
+  </header>
+  <section class="card" style="margin-top:16px"><div class="stats"><div class="stat"><b id="runStatus">—</b><span>Execution state</span></div><div class="stat"><b id="nodeCount">0</b><span>Graph nodes</span></div><div class="stat"><b id="attemptCount">0</b><span>Attempts</span></div><div class="stat"><b id="cursor">0</b><span>Audit cursor</span></div></div></section>
+  <main class="grid">
+    <section class="card"><h2>Dependency graph</h2><div id="nodes" class="nodes"></div><h2 style="margin-top:18px">Dependency edges</h2><div id="edges" class="graph"></div></section>
+    <section class="card"><h2>Execution event history</h2><div id="events" class="event-list"></div></section>
+  </main>
+</div>
+<script>
+const params=new URLSearchParams(location.search);const executionId=params.get('executionId');
+const api=(window.COMPLIANCE_API_URL||location.origin).replace(/\/$/,'');let source=null;let lastSequence=Number(params.get('afterSequence')||0);let state=null;
+const $=id=>document.getElementById(id);$('execId').textContent=executionId||'Add ?executionId=... to the URL';
+function esc(v){return String(v??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));}
+function setLive(on,text=on?'Streaming':'Disconnected'){$('live').className='pill'+(on?' live':'');$('live').lastElementChild.textContent=text}
+function render(s){state=s;$('runStatus').textContent=s.execution?.status||'—';$('nodeCount').textContent=(s.nodes||[]).length;$('attemptCount').textContent=(s.attempts||[]).length;$('cursor').textContent=s.eventCursor||0;
+ $('nodes').innerHTML=(s.nodes||[]).map(n=>`<div class="node"><div class="node-top"><strong>${esc(n.name||n.node_type||n.id)}</strong><span class="status ${esc(n.status)}">${esc(n.status)}</span></div><small class="muted">${esc(n.id)}${n.error_code?' · '+esc(n.error_code):''}</small></div>`).join('')||'<div class="empty">No graph nodes persisted yet.</div>';
+ $('edges').innerHTML=(s.edges||s.dependencyEdges||[]).map(e=>`<div class="edge">${esc(e.dependency_node_id||e.from_node_id||e.source)} → ${esc(e.dependent_node_id||e.to_node_id||e.target)}</div>`).join('')||'<div class="empty">No dependency edges.</div>';
+ if((s.events||[]).length){$('events').insertAdjacentHTML('beforeend',(s.events||[]).map(e=>`<div class="event"><strong>${esc(e.event_type)}</strong><small>#${esc(e.sequence)} · ${esc(e.actor_type)}${e.actor_id?' · '+esc(e.actor_id):''} · ${esc(e.occurred_at)}</small></div>`).join(''));lastSequence=Math.max(lastSequence,...s.events.map(e=>Number(e.sequence)||0));$('events').scrollTop=$('events').scrollHeight}else if(!$('events').children.length)$('events').innerHTML='<div class="empty">Waiting for execution events…</div>';
+}
+async function refresh(){if(!executionId)return;const r=await fetch(`${api}/api/execution-graph?executionId=${encodeURIComponent(executionId)}&afterSequence=${lastSequence}`,{credentials:'include'});if(!r.ok)throw new Error((await r.json().catch(()=>({}))).error||'Execution refresh failed');render(await r.json());}
+function connect(){if(!executionId)return;source=new EventSource(`${api}/api/execution-graph?executionId=${encodeURIComponent(executionId)}&stream=1&afterSequence=${lastSequence}`,{withCredentials:true});source.addEventListener('ready',()=>setLive(true,'Streaming'));source.addEventListener('execution',e=>{render(JSON.parse(e.data));setLive(true,'Streaming')});source.addEventListener('audit',e=>{const x=JSON.parse(e.data);lastSequence=Math.max(lastSequence,Number(x.sequence)||0)});source.addEventListener('heartbeat',()=>setLive(true,'Live'));source.addEventListener('error',()=>{setLive(false,'Reconnecting');source?.close();setTimeout(connect,2500)});}
+async function control(action){if(!executionId)return;try{const r=await fetch(`${api}/api/execution-graph`,{method:'POST',credentials:'include',headers:{'content-type':'application/json'},body:JSON.stringify({action,executionId})});const data=await r.json();if(!r.ok)throw new Error(data.error||'Control failed');await refresh()}catch(e){alert(e.message)}}
+async function cancelRun(){if(!executionId||!confirm('Cancel this durable execution?'))return;try{const r=await fetch(`${api}/api/execution-graph`,{method:'POST',credentials:'include',headers:{'content-type':'application/json'},body:JSON.stringify({action:'cancel',executionId,reason:'Cancelled from execution dashboard'})});const data=await r.json();if(!r.ok)throw new Error(data.error||'Cancellation failed');await refresh()}catch(e){alert(e.message)}}
+if(executionId){refresh().catch(e=>{$('events').innerHTML=`<div class="error">${esc(e.message)}</div>`}).finally(connect)}
+</script>
+</body>
+</html>
