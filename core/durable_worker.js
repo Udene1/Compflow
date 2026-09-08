@@ -11,6 +11,15 @@ function heartbeatIntervalMs() { const seconds = Math.max(5, Math.min(Number(pro
 export async function durableWorkerHandler(payload) {
   let data = payload;
   if (payload?.Records?.[0]?.body) data = typeof payload.Records[0].body === 'string' ? JSON.parse(payload.Records[0].body) : payload.Records[0].body;
+
+  // Persisted policy-plan nodes are dispatched as their own durable BullMQ jobs.
+  // They do not create a second execution-level lease; the node attempt is the
+  // concurrency authority for the work item.
+  if (data?.executionNodeType) {
+    const { executePersistedPlanNode } = await import('./plan_executor.js');
+    return executePersistedPlanNode(data);
+  }
+
   const jobId = data?.jobId || `exec-${Date.now()}`;
   const executionId = data?.executionId || jobId;
   const organizationId = data?.organizationId || data?.orgId || 'org_default';
@@ -30,24 +39,17 @@ export async function durableWorkerHandler(payload) {
   }
 
   return withExecutionContext({ organizationId, executionId, provider, resumeNodeIds, executionNodeId: execution.node.id, executionAttemptId: execution.attempt.id }, async () => {
-    let heartbeatTimer;
-    let heartbeatFailure = null;
-    let heartbeatInFlight = false;
-    let leaseLost = false;
+    let heartbeatTimer; let heartbeatFailure = null; let heartbeatInFlight = false; let leaseLost = false;
     const heartbeat = async () => {
       if (heartbeatInFlight || heartbeatFailure || leaseLost) return;
       heartbeatInFlight = true;
       try {
         await heartbeatExecutionLease({ organizationId, executionId, workerId: owner, leaseToken: lease.lease_token });
         await heartbeatNodeAttempt({ attemptId: execution.attempt.id });
-      } catch (error) {
-        heartbeatFailure = error;
-        leaseLost = true;
-        console.error('[EXECUTION-HEARTBEAT] Lease heartbeat failed:', error?.message || error);
-      } finally { heartbeatInFlight = false; }
+      } catch (error) { heartbeatFailure = error; leaseLost = true; console.error('[EXECUTION-HEARTBEAT] Lease heartbeat failed:', error?.message || error); }
+      finally { heartbeatInFlight = false; }
     };
-    heartbeatTimer = setInterval(() => { void heartbeat(); }, heartbeatIntervalMs());
-    heartbeatTimer.unref?.();
+    heartbeatTimer = setInterval(() => { void heartbeat(); }, heartbeatIntervalMs()); heartbeatTimer.unref?.();
     try {
       const result = await workerHandler(payload);
       await heartbeat();
@@ -56,12 +58,7 @@ export async function durableWorkerHandler(payload) {
       await finishExecutionFenced({ organizationId, executionId, attemptId: execution.attempt.id, workerId: owner, leaseToken: lease.lease_token, status: terminalStatus, errorCode: terminalStatus === 'SUCCEEDED' ? null : 'EXECUTION_FAILED' });
       return result;
     } catch (error) {
-      if (!leaseLost && !heartbeatFailure) {
-        await finishExecutionFenced({ organizationId, executionId, attemptId: execution.attempt.id, workerId: owner, leaseToken: lease.lease_token, status: 'FAILED', errorCode: 'EXECUTION_FAILED', errorMessage: 'Execution failed' }).catch(() => {});
-      }
-      // Do not issue a second terminal mutation here. The fenced terminal path
-      // is the sole owner of attempt + execution terminal state; recovery owns
-      // the state after fencing is lost.
+      if (!leaseLost && !heartbeatFailure) await finishExecutionFenced({ organizationId, executionId, attemptId: execution.attempt.id, workerId: owner, leaseToken: lease.lease_token, status: 'FAILED', errorCode: 'EXECUTION_FAILED', errorMessage: 'Execution failed' }).catch(() => {});
       throw error;
     } finally { clearInterval(heartbeatTimer); }
   });
