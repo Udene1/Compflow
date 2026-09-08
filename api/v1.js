@@ -2,7 +2,7 @@ import express from 'express';
 import { startComplianceExecution, finalizeComplianceDecision } from '../core/compliance_pipeline.js';
 import { getExecutionGraph } from '../core/execution_engine.js';
 import { getExecutionRun, cancelExecutionRun } from '../core/execution_lifecycle.js';
-import { listExecutionEvents } from '../core/execution_events.js';
+import { listExecutionEvents, appendExecutionEvent, getExecutionEventByIdempotencyKey } from '../core/execution_events.js';
 import { approveExecutionNode, dispatchReadyPlanNodes } from '../core/plan_executor.js';
 import { getDependencyAwareResumePlan } from '../core/execution_resume.js';
 import { enqueueJob } from '../core/queue.js';
@@ -27,23 +27,22 @@ router.post('/executions', async (req, res, next) => {
   try {
     const organizationId = org(req); if (!organizationId) return res.status(403).json({ error: 'ORGANIZATION_CONTEXT_REQUIRED' });
     const key = idempotency(req); const id = executionId(req.body?.executionId);
-    if (key) {
-      const existing = await pool.query("SELECT * FROM execution_runs WHERE id=$1 AND organization_id=$2", [id, organizationId]);
-      if (existing.rows[0]) return res.status(200).json({ execution: existing.rows[0], idempotentReplay: true });
-    }
     if (!req.body?.intent || typeof req.body.intent !== 'object' || Array.isArray(req.body.intent)) return res.status(400).json({ error: 'INTENT_REQUIRED' });
+    if (key) {
+      const existingEvent = await getExecutionEventByIdempotencyKey({ organizationId, executionId: id, eventType: 'EXECUTION_CREATED', idempotencyKey: `create:${key}` });
+      if (existingEvent) return res.status(200).json({ ...(existingEvent.payload?.result || {}), idempotencyKey: key, idempotentReplay: true });
+    }
+    const existing = await pool.query('SELECT * FROM execution_runs WHERE id=$1 AND organization_id=$2', [id, organizationId]);
+    if (existing.rows[0]) { if (key) throw new Error('EXECUTION_ID_CONFLICT'); return res.status(200).json({ execution: existing.rows[0], idempotentReplay: true }); }
     const result = await startComplianceExecution({ organizationId, executionId: id, intent: req.body.intent });
+    if (key) await appendExecutionEvent({ organizationId, executionId: id, eventType: 'EXECUTION_CREATED', actorType: 'USER', actorId: actor(req), result: 'created', payload: { result: { intent: result.intent, plan: result.plan, execution: result.execution } }, idempotencyKey: `create:${key}` });
     return res.status(202).json({ ...result, idempotencyKey: key });
   } catch (error) { next(error); }
 });
 
 router.get('/executions/:executionId/stream', async (req, res, next) => {
-  try {
-    const id = executionId(req.params.executionId);
-    req.query.executionId = id;
-    req.query.stream = '1';
-    return executionGraphHandler(req, res);
-  } catch (error) { next(error); }
+  try { const id = executionId(req.params.executionId); req.query.executionId = id; req.query.stream = '1'; return executionGraphHandler(req, res); }
+  catch (error) { next(error); }
 });
 
 router.get('/executions/:executionId', async (req, res, next) => {
@@ -81,7 +80,9 @@ router.post('/executions/:executionId/actions', async (req, res, next) => {
     if (action === 'finalize') return res.status(200).json(await finalizeComplianceDecision({ organizationId, executionId: id }));
     if (action === 'approve') return res.status(200).json(await approveExecutionNode({ organizationId, executionId: id, nodeId: req.body?.nodeId, actorId: actor(req) }));
     if (action === 'cancel') return res.status(200).json(await cancelExecutionRun({ organizationId, executionId: id, reason: String(req.body?.reason || 'Cancelled by operator').slice(0,500), actorId: actor(req), idempotencyKey: key ? `v1:cancel:${key}` : null }));
-    const plan = await getDependencyAwareResumePlan(organizationId, id); const requested = Array.isArray(req.body?.nodeIds) ? req.body.nodeIds : plan.nodes.map(node => node.id); if (requested.length > LIMIT || requested.some(nodeId => !ID.test(nodeId))) throw new Error('NODE_IDS_INVALID'); const execution = plan.execution; const graph = await getExecutionGraph(organizationId, id); const executionNode = graph.nodes.find(node => node.node_type === 'EXECUTION'); const metadata = executionNode?.metadata || execution.metadata || {}; if (!metadata.connectionId || !metadata.scanId || !metadata.provider) throw new Error('EXECUTION_MISSING_CONNECTION_METADATA'); const jobId = `v1-${id}-${action}-${key || Date.now()}`; await enqueueJob({ jobId, scanId: metadata.scanId, executionId:id, organizationId, connectionId:metadata.connectionId, provider:metadata.provider, scanType:'resume', resumeNodeIds:requested, enqueuedAt:new Date().toISOString(), normalMetadata:JSON.stringify({ control:action, idempotencyKey:key }) }); return res.status(202).json({ success:true,status:'queued',executionId:id,action,jobId,resumableNodeIds:requested,idempotencyKey:key });
+    const eventKey = key ? `control:${action}:${key}` : null;
+    if (eventKey) { const existingEvent = await getExecutionEventByIdempotencyKey({ organizationId, executionId: id, eventType: 'EXECUTION_CONTROL_QUEUED', idempotencyKey: eventKey }); if (existingEvent) return res.status(202).json({ success:true,status:'queued',executionId:id,action,jobId:existingEvent.payload?.jobId||null,resumableNodeIds:existingEvent.payload?.nodeIds||[],idempotencyKey:key,idempotentReplay:true }); }
+    const plan = await getDependencyAwareResumePlan(organizationId, id); const requested = Array.isArray(req.body?.nodeIds) ? req.body.nodeIds : plan.nodes.map(node => node.id); if (requested.length > LIMIT || requested.some(nodeId => !ID.test(nodeId))) throw new Error('NODE_IDS_INVALID'); const execution = plan.execution; const graph = await getExecutionGraph(organizationId, id); const executionNode = graph.nodes.find(node => node.node_type === 'EXECUTION'); const metadata = executionNode?.metadata || execution.metadata || {}; if (!metadata.connectionId || !metadata.scanId || !metadata.provider) throw new Error('EXECUTION_MISSING_CONNECTION_METADATA'); const jobId = `v1-${id}-${action}-${key || Date.now()}`; await enqueueJob({ jobId, scanId: metadata.scanId, executionId:id, organizationId, connectionId:metadata.connectionId, provider:metadata.provider, scanType:'resume', resumeNodeIds:requested, enqueuedAt:new Date().toISOString(), normalMetadata:JSON.stringify({ control:action, idempotencyKey:key }) }); await appendExecutionEvent({ organizationId, executionId:id, eventType:'EXECUTION_CONTROL_QUEUED', actorType:'USER', actorId:actor(req), result:'success', payload:{action,jobId,nodeIds:requested}, idempotencyKey:eventKey }); return res.status(202).json({ success:true,status:'queued',executionId:id,action,jobId,resumableNodeIds:requested,idempotencyKey:key });
   } catch (error) { next(error); }
 });
 
