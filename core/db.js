@@ -11,12 +11,30 @@ const pool = new Pool({
     connectionTimeoutMillis: 1000
 });
 
+const SCHEMA_LOCK_KEY = "'compflow:schema'";
+function isSchemaDdl(sql) { return typeof sql === 'string' && /^\s*(CREATE|ALTER|DROP)\s+/i.test(sql); }
+
 const resilientPool = {
     async query(sql, params = []) {
+        if (!isSchemaDdl(sql)) {
+            try {
+                return await pool.query(sql, params);
+            } catch (err) {
+                throw new Error(`[DB] PostgreSQL query failed: ${err.message}`);
+            }
+        }
+        const client = await pool.connect();
         try {
-            return await pool.query(sql, params);
+            await client.query('BEGIN');
+            await client.query(`SELECT pg_advisory_xact_lock(hashtextextended(${SCHEMA_LOCK_KEY},0))`);
+            const result = await client.query(sql, params);
+            await client.query('COMMIT');
+            return result;
         } catch (err) {
-            throw new Error(`[DB] PostgreSQL query failed: ${err.message}`);
+            await client.query('ROLLBACK').catch(() => {});
+            throw new Error(`[DB] PostgreSQL schema query failed: ${err.message}`);
+        } finally {
+            client.release();
         }
     },
     async connect() {
