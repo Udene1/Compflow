@@ -48,7 +48,7 @@ async function ensureSchema() {
 function cleanError(value) {
   if (!value) return null;
   return String(value)
-    .replace(/(authorization|token|secret|password|client_secret|api[_-]?key)\s*[:=]\s[^\s,;]+/gi, '$1=[REDACTED]')
+    .replace(/(authorization|token|secret|password|client_secret|api[_-]?key)\s*[:=]\s*[^\s,;]+/gi, '$1=[REDACTED]')
     .slice(0, 500);
 }
 
@@ -56,9 +56,7 @@ function assertTransition(current, next) {
   if (!LEGAL[current]?.has(next)) throw new Error(`EXECUTION_TRANSITION_INVALID:${current}->${next}`);
 }
 
-function leaseToken() {
-  return `lease_${crypto.randomUUID()}`;
-}
+function leaseToken() { return `lease_${crypto.randomUUID()}`; }
 
 export async function ensureExecutionLifecycleSchema() { await ensureSchema(); }
 
