@@ -19,13 +19,10 @@ describe('Dependency-aware execution resume', () => {
     const source = await upsertGraphNode({ organizationId, executionId, nodeType: 'SOURCE', logicalKey: 'source', status: 'PENDING' });
     const dependent = await upsertGraphNode({ organizationId, executionId, nodeType: 'DEPENDENT', logicalKey: 'dependent', status: 'FAILED' });
     await addDependencyEdge({ organizationId, executionId, fromNodeId: source.id, toNodeId: dependent.id });
-
     let plan = await getDependencyAwareResumePlan(organizationId, executionId);
     expect(plan.resumableNodeIds).not.toContain(dependent.id);
-
     const attempt = await startNodeAttempt({ organizationId, executionId, nodeId: source.id });
     await finishNodeAttempt({ attemptId: attempt.id, status: 'SUCCEEDED' });
-
     plan = await getDependencyAwareResumePlan(organizationId, executionId);
     expect(plan.resumableNodeIds).toContain(dependent.id);
   });
@@ -34,11 +31,9 @@ describe('Dependency-aware execution resume', () => {
     const risk = await upsertGraphNode({ organizationId, executionId, nodeType: 'RISK', logicalKey: 'risk', status: 'SUCCEEDED' });
     const remediation = await upsertGraphNode({ organizationId, executionId, nodeType: 'REMEDIATION', logicalKey: 'remediation', status: 'FAILED', metadata: { requiresApproval: true } });
     await addDependencyEdge({ organizationId, executionId, fromNodeId: risk.id, toNodeId: remediation.id });
-
     let plan = await getDependencyAwareResumePlan(organizationId, executionId);
     expect(plan.resumableNodeIds).not.toContain(remediation.id);
     expect(plan.blockedNodeIds).toContain(remediation.id);
-
     const approval = await upsertGraphNode({ organizationId, executionId, nodeType: 'APPROVAL', logicalKey: `approval:${remediation.id}`, status: 'SUCCEEDED', metadata: { forNodeId: remediation.id } });
     expect(approval.status).toBe('SUCCEEDED');
     plan = await getDependencyAwareResumePlan(organizationId, executionId);
@@ -46,12 +41,12 @@ describe('Dependency-aware execution resume', () => {
   });
 
   it('claims a dependency-ready node under a durable execution lease', async () => {
-    const node = await upsertGraphNode({ organizationId, executionId, nodeType: 'RESUME', logicalKey: 'claimable', status: 'FAILED' });
-    const lease = await acquireExecutionLease({ organizationId, executionId, workerId: 'resume-worker' });
-    await finishExecutionRun({ organizationId, executionId, workerId: 'resume-worker', leaseToken: lease.lease_token, status: 'FAILED' });
-
-    await createExecutionRun({ organizationId, executionId: 'exec_engine_resume_claim' });
-    const claim = await claimDependencyAwareResume({ organizationId, executionId: 'exec_engine_resume_claim', nodeId: node.id, workerId: 'resume-worker' }).catch(error => error);
-    expect(claim).toBeTruthy();
+    const claimExecutionId = 'exec_engine_resume_claim';
+    await createExecutionRun({ organizationId, executionId: claimExecutionId });
+    const node = await upsertGraphNode({ organizationId, executionId: claimExecutionId, nodeType: 'RESUME', logicalKey: 'claimable', status: 'FAILED' });
+    const claim = await claimDependencyAwareResume({ organizationId, executionId: claimExecutionId, nodeId: node.id, workerId: 'resume-worker' });
+    expect(claim.attempt.status).toBe('RUNNING');
+    expect(claim.lease.lease_owner).toBe('resume-worker');
+    await finishExecutionRun({ organizationId, executionId: claimExecutionId, workerId: 'resume-worker', leaseToken: claim.lease.lease_token, status: 'FAILED' });
   });
 });
