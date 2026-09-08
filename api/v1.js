@@ -40,7 +40,8 @@ router.post('/executions', async (req, res, next) => {
 router.get('/executions/:executionId/stream', async (req, res, next) => {
   try {
     const id = executionId(req.params.executionId);
-    req.query = { ...(req.query || {}), executionId: id, stream: '1' };
+    req.query.executionId = id;
+    req.query.stream = '1';
     return executionGraphHandler(req, res);
   } catch (error) { next(error); }
 });
