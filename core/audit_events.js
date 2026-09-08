@@ -2,39 +2,62 @@ import crypto from 'crypto';
 import pool from './db.js';
 import { log } from './logger.js';
 
-// Sensitive keys that must NEVER appear in audit event metadata
+// Sensitive keys that must NEVER appear in audit event metadata.
 const SENSITIVE_KEY_PATTERNS = [
     /secret/i,
     /password/i,
     /token/i,
     /credential/i,
-    /key/i,
+    /private[_-]?key/i,
+    /api[_-]?key/i,
     /verifier/i,
-    /auth/i,
+    /authorization/i,
     /signature/i
 ];
 
+const MAX_STRING_LENGTH = 500;
+const MAX_DEPTH = 5;
+
+function isSensitiveKey(key) {
+    return SENSITIVE_KEY_PATTERNS.some(pattern => pattern.test(key));
+}
+
 /**
- * Strips any potential secret keys or huge payloads from audit metadata
+ * Recursively sanitizes audit metadata before it is persisted.
+ * Audit records must remain useful without becoming a secret-storage channel.
  */
-function sanitizeMetadata(metadata = {}) {
-    if (!metadata || typeof metadata !== 'object') return {};
-    const clean = {};
-    for (const [k, v] of Object.entries(metadata)) {
-        if (SENSITIVE_KEY_PATTERNS.some(pattern => pattern.test(k))) {
-            continue; // Omit sensitive keys entirely
-        }
-        if (typeof v === 'string' && v.length > 500) {
-            clean[k] = v.substring(0, 500) + '...[truncated]';
-        } else if (typeof v === 'object' && v !== null) {
-            // Shallow stringification or omit large nested objects
-            const str = JSON.stringify(v);
-            clean[k] = str.length > 500 ? '[complex_object]' : v;
-        } else {
-            clean[k] = v;
-        }
+function sanitizeValue(value, depth = 0) {
+    if (depth > MAX_DEPTH) return '[max_depth]';
+
+    if (typeof value === 'string') {
+        return value.length > MAX_STRING_LENGTH
+            ? `${value.substring(0, MAX_STRING_LENGTH)}...[truncated]`
+            : value;
     }
-    return clean;
+
+    if (value === null || typeof value === 'number' || typeof value === 'boolean') {
+        return value;
+    }
+
+    if (Array.isArray(value)) {
+        return value.slice(0, 100).map(item => sanitizeValue(item, depth + 1));
+    }
+
+    if (typeof value === 'object') {
+        const clean = {};
+        for (const [key, nestedValue] of Object.entries(value)) {
+            if (isSensitiveKey(key)) continue;
+            clean[key] = sanitizeValue(nestedValue, depth + 1);
+        }
+        return clean;
+    }
+
+    return undefined;
+}
+
+function sanitizeMetadata(metadata = {}) {
+    if (!metadata || typeof metadata !== 'object' || Array.isArray(metadata)) return {};
+    return sanitizeValue(metadata);
 }
 
 /**
@@ -62,7 +85,7 @@ export async function recordAuditEvent(orgId, actorUserId, eventType, resourceTy
 
     const query = `
         INSERT INTO audit_events (
-            id, organization_id, actor_user_id, event_type, 
+            id, organization_id, actor_user_id, event_type,
             resource_type, resource_id, metadata, ip_address, user_agent, created_at
         )
         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, CURRENT_TIMESTAMP)
@@ -84,11 +107,10 @@ export async function recordAuditEvent(orgId, actorUserId, eventType, resourceTy
         log.info(`[AUDIT] ${eventType} by ${actorUserId || 'system'} on ${resourceType || 'system'}:${resourceId || 'global'}`);
         return result.rows?.[0] || { id, event_type: eventType };
     } catch (err) {
+        // Audit persistence is security-relevant. Never turn a failed durable write
+        // into a successful-looking operation, regardless of environment.
         log.error(`[AUDIT] Failed to record audit event ${eventType}:`, err.message);
-        if (process.env.NODE_ENV === 'production') {
-            throw err; // Fail-closed in production
-        }
-        return null;
+        throw err;
     }
 }
 
@@ -97,9 +119,9 @@ export async function recordAuditEvent(orgId, actorUserId, eventType, resourceTy
  */
 export async function getAuditEvents(orgId, limit = 50) {
     const query = `
-        SELECT * FROM audit_events 
-        WHERE organization_id = $1 
-        ORDER BY created_at DESC 
+        SELECT * FROM audit_events
+        WHERE organization_id = $1
+        ORDER BY created_at DESC
         LIMIT $2;
     `;
     const res = await pool.query(query, [orgId, limit]);
