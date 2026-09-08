@@ -30,8 +30,8 @@ describe('compliance product boundary', () => {
   it('records decision history while keeping the final decision immutable', async () => {
     await clean();
     const node = await upsertGraphNode({ organizationId, executionId, nodeType: 'CONTROL_EVALUATION', logicalKey: 'CC6.1:evaluate:boundary', status: 'PENDING', metadata: { controlId: 'CC6.1' } });
-    const attempt = await startNodeAttempt({ organizationId, executionId, nodeId: node.id, metadata: { result: { assessment: 'PASS', evidenceHash: 'e'.repeat(64) } });
-    await finishNodeAttempt({ attemptId: attempt.id, status: 'SUCCEEDED', metadata: { result: { assessment: 'PASS', evidenceHash: 'e'.repeat(64) } });
+    const attempt = await startNodeAttempt({ organizationId, executionId, nodeId: node.id, metadata: { result: { assessment: 'PASS', evidenceHash: 'e'.repeat(64) } } });
+    await finishNodeAttempt({ attemptId: attempt.id, status: 'SUCCEEDED', metadata: { result: { assessment: 'PASS', evidenceHash: 'e'.repeat(64) } } });
     await recordControlDecision({ organizationId, executionId, controlId: 'CC6.1', scopeKey: node.logical_key, outcome: 'PASS', evidenceHash: 'e'.repeat(64), verificationHash: null, rationale: { verified: false } });
     const first = await finalizeExecutionDecision({ organizationId, executionId });
     expect(first.outcome).toBe('PASS');
