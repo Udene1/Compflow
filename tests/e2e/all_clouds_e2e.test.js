@@ -1,9 +1,10 @@
 import { describe, it, expect } from 'vitest';
 import { runRemediation } from '../../core/remediator.js';
+import { getRemediationBreakpointDefinition } from '../../core/remediation_breakpoints.js';
 
 const supported = [
-  ['aws', 'S3 Bucket', 'public-data', 'Public access enabled', 'S3_PUBLIC_ACCESS'],
-  ['azure', 'Azure App Service', 'app-portal', 'App Service does not enforce HTTPS-only traffic', 'AZURE_APPSERVICE_HTTP_ALLOWED']
+  ['aws', 'S3 Bucket', 'public-data', 'S3_PUBLIC_ACCESS'],
+  ['azure', 'Azure App Service', 'app-portal', 'AZURE_APPSERVICE_HTTP_ALLOWED']
 ];
 
 const unsupported = [
@@ -13,8 +14,9 @@ const unsupported = [
 ];
 
 describe('Multi-cloud remediation execution boundary', () => {
-  it.each(supported)('%s refuses execution without real credentials', async (provider, resourceType, resourceName, issue, findingCode) => {
-    const result = await runRemediation(provider, {}, resourceType, resourceName, issue, false, { findingCode });
+  it.each(supported)('%s refuses execution without real credentials', async (provider, resourceType, resourceName, findingCode) => {
+    const candidate = getRemediationBreakpointDefinition(findingCode);
+    const result = await runRemediation(provider, {}, resourceType, resourceName, candidate.action, false, { findingCode });
     expect(result.success).toBe(false);
     expect(String(result.error || '')).toMatch(/credential/i);
   });
