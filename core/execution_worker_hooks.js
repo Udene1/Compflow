@@ -6,6 +6,7 @@ import {
   startNodeAttempt,
   finishNodeAttempt
 } from './execution_engine.js';
+import { appendExecutionEvent } from './execution_events.js';
 
 function safeSeverity(resource) {
   const value = String(resource?.severity || resource?.status || '').toLowerCase();
@@ -15,11 +16,10 @@ function safeSeverity(resource) {
 async function recordAttempt({ organizationId, executionId, node, metadata, failed, errorCode }) {
   if (['SUCCEEDED', 'SKIPPED'].includes(node.status)) return null;
   const attempt = await startNodeAttempt({ organizationId, executionId, nodeId: node.id, metadata });
-  await finishNodeAttempt({
-    attemptId: attempt.id,
-    status: failed ? 'FAILED' : 'SUCCEEDED',
-    errorCode: failed ? errorCode : null
-  });
+  await appendExecutionEvent({ organizationId, executionId, nodeId: node.id, attemptId: attempt.id, eventType: 'NODE_ATTEMPT_STARTED', actorType: 'WORKER', result: 'started', payload: { nodeType: node.node_type, attemptNumber: attempt.attempt_number } });
+  const status = failed ? 'FAILED' : 'SUCCEEDED';
+  await finishNodeAttempt({ attemptId: attempt.id, status, errorCode: failed ? errorCode : null });
+  await appendExecutionEvent({ organizationId, executionId, nodeId: node.id, attemptId: attempt.id, eventType: 'NODE_ATTEMPT_FINISHED', actorType: 'WORKER', result: failed ? 'failed' : 'success', payload: { nodeType: node.node_type, status, errorCode: failed ? errorCode : null } });
   return attempt;
 }
 
@@ -34,6 +34,7 @@ export async function beginExecution({ organizationId, executionId, provider, cl
     organizationId, executionId, nodeId: node.id,
     metadata: { provider, clientId, jobId: jobId || null, connectionId, scanId }
   });
+  await appendExecutionEvent({ organizationId, executionId, nodeId: node.id, attemptId: attempt.id, eventType: 'NODE_ATTEMPT_STARTED', actorType: 'WORKER', result: 'started', payload: { nodeType: 'EXECUTION', attemptNumber: attempt.attempt_number, provider } });
   const audit = await upsertGraphNode({
     organizationId, executionId, nodeType: 'AUDIT', logicalKey: `execution:${executionId}`,
     status: 'PENDING', label: 'Execution audit trail', metadata: { provider, executionId }
@@ -61,14 +62,7 @@ export async function persistScanGraph({ organizationId, executionId, provider, 
       }
     });
     await addDependencyEdge({ organizationId, executionId, fromNodeId: executionNodeId, toNodeId: observation.id, edgeType: 'DEPENDS_ON' });
-    await recordAttempt({
-      organizationId,
-      executionId,
-      node: observation,
-      metadata: { provider },
-      failed: observationFailed,
-      errorCode: 'OBSERVATION_ERROR'
-    });
+    await recordAttempt({ organizationId, executionId, node: observation, metadata: { provider }, failed: observationFailed, errorCode: 'OBSERVATION_ERROR' });
 
     const controls = resource.controls || {};
     for (const [frameworkId, controlIds] of Object.entries(controls)) {
@@ -81,14 +75,7 @@ export async function persistScanGraph({ organizationId, executionId, provider, 
           metadata: { frameworkId, controlId, observationId: observation.id, assessment: controlFailed ? 'FAIL' : 'PASS' }
         });
         await addDependencyEdge({ organizationId, executionId, fromNodeId: observation.id, toNodeId: control.id, edgeType: 'DEPENDS_ON' });
-        await recordAttempt({
-          organizationId,
-          executionId,
-          node: control,
-          metadata: { frameworkId, controlId, observationId: observation.id },
-          failed: controlFailed,
-          errorCode: 'CONTROL_ASSESSMENT_FAILED'
-        });
+        await recordAttempt({ organizationId, executionId, node: control, metadata: { frameworkId, controlId, observationId: observation.id }, failed: controlFailed, errorCode: 'CONTROL_ASSESSMENT_FAILED' });
 
         const evidence = await upsertGraphNode({
           organizationId, executionId, nodeType: 'EVIDENCE', logicalKey: `${frameworkId}:${controlId}:${observation.id}`,
@@ -96,16 +83,7 @@ export async function persistScanGraph({ organizationId, executionId, provider, 
           metadata: { frameworkId, controlId, observationId: observation.id, source: 'cloud_scan', collectionStatus: controlFailed ? 'BLOCKED_BY_CONTROL' : 'PENDING' }
         });
         await addDependencyEdge({ organizationId, executionId, fromNodeId: control.id, toNodeId: evidence.id, edgeType: 'DEPENDS_ON' });
-        if (!controlFailed) {
-          await recordAttempt({
-            organizationId,
-            executionId,
-            node: evidence,
-            metadata: { frameworkId, controlId, observationId: observation.id, source: 'cloud_scan' },
-            failed: false,
-            errorCode: null
-          });
-        }
+        if (!controlFailed) await recordAttempt({ organizationId, executionId, node: evidence, metadata: { frameworkId, controlId, observationId: observation.id, source: 'cloud_scan' }, failed: false, errorCode: null });
 
         if (controlFailed) {
           const risk = await upsertGraphNode({
@@ -127,5 +105,7 @@ export async function persistScanGraph({ organizationId, executionId, provider, 
 }
 
 export async function finishExecution(attemptId, status, errorCode = null, errorMessage = null) {
-  return finishNodeAttempt({ attemptId, status, errorCode, errorMessage });
+  const attempt = await finishNodeAttempt({ attemptId, status, errorCode, errorMessage });
+  await appendExecutionEvent({ organizationId: attempt.organization_id, executionId: attempt.execution_id, nodeId: attempt.node_id, attemptId, eventType: 'NODE_ATTEMPT_FINISHED', actorType: 'WORKER', result: status === 'SUCCEEDED' ? 'success' : status === 'SKIPPED' ? 'skipped' : 'failed', payload: { nodeType: 'EXECUTION', status, errorCode } });
+  return attempt;
 }
