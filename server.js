@@ -121,6 +121,14 @@ app.post('/api/chat', heavyActionLimiter, requireAuth([ROLES.ENGINEER]), lambdaA
 app.all(['/api/remediate', '/api/remediation'], heavyActionLimiter, requireAuth([ROLES.ENGINEER]), remediateHandler);
 app.all('/api/auditor*', requireAuth([ROLES.AUDITOR]), auditorHandler);
 app.all('/api/*', (req, res) => res.status(404).json({ error: 'Not Found', message: `API endpoint ${req.method} ${req.path} does not exist.` }));
+app.use((error, req, res, next) => {
+    if (res.headersSent) return next(error);
+    if (error?.type === 'entity.too.large' || error?.status === 413) return res.status(413).json({ error: 'REQUEST_TOO_LARGE', message: 'Request body exceeds the permitted limit.' });
+    if (error?.type === 'entity.parse.failed' || error instanceof SyntaxError) return res.status(400).json({ error: 'INVALID_JSON', message: 'Request body must contain valid JSON.' });
+    if (error?.message === 'CORS origin blocked') return res.status(403).json({ error: 'CORS_ORIGIN_BLOCKED' });
+    console.error('[HTTP] Unhandled request error:', error?.message || error);
+    return res.status(500).json({ error: 'Internal Server Error' });
+});
 
 let httpServer;
 let stopRecovery;
