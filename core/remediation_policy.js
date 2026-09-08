@@ -36,3 +36,16 @@ export function getRemediationPolicy(code) {
 export function listRemediationPolicies() {
   return Object.entries(POLICIES).map(([code, policy]) => ({ code, ...policy }));
 }
+
+/**
+ * Approval is a security boundary. High-impact mutations require an admin/owner
+ * approval; ordinary remediation may be approved by an engineer or above.
+ */
+export function canApproveRemediation({ code, role } = {}) {
+  const policy = getRemediationPolicy(code);
+  const normalizedRole = String(role || '').trim().toUpperCase();
+  if (policy.authority === REMEDIATION_AUTHORITY.HIGH_IMPACT_APPROVAL) {
+    return normalizedRole === 'ADMIN' || normalizedRole === 'OWNER';
+  }
+  return normalizedRole === 'ENGINEER' || normalizedRole === 'ADMIN' || normalizedRole === 'OWNER';
+}
