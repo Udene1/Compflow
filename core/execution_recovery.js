@@ -7,16 +7,32 @@ const DEFAULT_INTERVAL_MS = 15_000;
 const DEFAULT_STALE_AFTER_SECONDS = 90;
 
 export async function recoverStaleExecutions({ organizationId = null, staleAfterSeconds = DEFAULT_STALE_AFTER_SECONDS } = {}) {
-  const executions = await recoverExpiredExecutionLeases({ organizationId });
+  const recoveredExecutions = await recoverExpiredExecutionLeases({ organizationId });
+  const attempts = recoveredExecutions.flatMap(run => run.recoveredAttempts || []);
+  const recoveredExecutionIds = new Set(recoveredExecutions.map(run => run.id));
   const organizations = organizationId
     ? [organizationId]
     : (await pool.query('SELECT DISTINCT organization_id FROM execution_attempts WHERE status=\'RUNNING\'')).rows.map(row => row.organization_id);
 
-  const attempts = [];
+  for (const attempt of attempts) {
+    await appendExecutionEvent({
+      organizationId: attempt.organization_id,
+      executionId: attempt.execution_id,
+      nodeId: attempt.node_id,
+      attemptId: attempt.id,
+      eventType: 'NODE_ATTEMPT_STALE_RECOVERED',
+      actorType: 'SYSTEM',
+      result: 'failed',
+      payload: { errorCode: 'STALE_EXECUTION_LEASE', attemptNumber: attempt.attempt_number }
+    });
+  }
+
+  const staleAttempts = [];
   for (const orgId of organizations) {
     const recovered = await recoverStaleNodeAttempts({ organizationId: orgId, staleAfterSeconds });
-    attempts.push(...recovered);
     for (const attempt of recovered) {
+      if (recoveredExecutionIds.has(attempt.execution_id)) continue;
+      staleAttempts.push(attempt);
       await appendExecutionEvent({
         organizationId: attempt.organization_id,
         executionId: attempt.execution_id,
@@ -30,7 +46,7 @@ export async function recoverStaleExecutions({ organizationId = null, staleAfter
     }
   }
 
-  return { executions, attempts };
+  return { executions: recoveredExecutions, attempts: [...attempts, ...staleAttempts] };
 }
 
 export function startExecutionRecovery({
