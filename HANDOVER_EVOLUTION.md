@@ -1,784 +1,389 @@
 # ComplianceFlow AI — Engineering Evolution & Current Direction
 
-> This document is the living continuation of `HANDOVER.md`. It explains not only **what** was integrated, but **why the architecture changed**, what failures taught us, and what engineering principle each integration is protecting. It is intentionally written for the next engineer who needs to understand how the system evolved rather than merely copy its current file map.
+> This is the single living engineering handover for Compflow. It records architectural evolution, reliability/security decisions, failures that changed the design, and the current verification discipline. Add future iterations as dated sections here; do not create a new handover Markdown file for each iteration.
 >
-> **Security note:** This document contains no production credentials, access tokens, private keys, database passwords, session tokens, or real secret values. Examples use placeholders only. Never put live credentials in Markdown, source control, CI logs, fixtures, or screenshots.
+> **Security rule:** no production credentials, access tokens, private keys, database passwords, session tokens, or real secret values belong here. Examples use placeholders only.
 
 ---
 
-## 1. Why The Architecture Changed
+## 1. Architectural Evolution
 
-ComplianceFlow started as a cloud-compliance application whose central concern was scanning infrastructure, mapping findings to compliance controls, using AI to reason about remediation, and producing audit evidence.
+Compflow began as a cloud-compliance application focused on scanning infrastructure, mapping findings to compliance controls, AI-assisted remediation reasoning, evidence, and audit reporting.
 
-That foundation is still important, but the engineering problem became larger as we moved toward a system that can perform long-running, asynchronous, dependency-aware work safely.
-
-A scan is no longer just:
+The architecture evolved from a simple:
 
 ```text
 request → scan → result
 ```
 
-The system increasingly needs to behave like:
+toward a durable control plane:
 
 ```text
 request
   → durable execution
   → dependency graph
   → node attempts
-  → background worker
-  → leases + heartbeats
-  → recovery after crashes
-  → human approval where required
+  → BullMQ worker dispatch
+  → execution leases + heartbeats
+  → fencing
+  → crash recovery
+  → approvals
   → resumable execution
-  → durable audit events
-  → live execution timeline
+  → durable events/audit
+  → live graph/timeline
 ```
 
-That change is deliberate. A system that can eventually orchestrate real infrastructure cannot rely on process memory, optimistic state, fake infrastructure, or an assumption that a worker will always finish what it started.
+The central engineering rule is:
 
-### The engineering rule that emerged
-
-**PostgreSQL is authoritative for durable execution state. Redis/BullMQ is infrastructure for dispatch, not the source of truth. Workers are leased, fenced, recoverable, and never trusted merely because they are still running.**
-
-This is why recent work has concentrated on lifecycle correctness and failure semantics rather than adding superficial UI features.
+**PostgreSQL is authoritative for durable execution state. Redis/BullMQ is dispatch infrastructure, not the source of truth. Workers are leased, fenced, recoverable, and never trusted merely because they are still running.**
 
 ---
 
-## 2. The No-Mocks Discipline
+## 2. No-Mocks Discipline
 
-One of the most important changes in the project's development discipline was the decision to stop treating mocked infrastructure as evidence that the production architecture works.
+Real infrastructure is part of the correctness boundary. CI starts PostgreSQL 16 and Redis 7, runs the tracked Vitest suite and recorded suite, and builds the production Docker image.
 
-### Before
+We do not use process-memory persistence or fake queues as a production fallback. If PostgreSQL or Redis is required and unavailable, the operation must fail clearly.
 
-Tests could pass while PostgreSQL or Redis was absent because fallback implementations could simulate the database or queue.
+This discipline exists because mocks cannot prove row locking, foreign keys, transaction rollback, database timestamps, unique constraints, BullMQ behavior, Redis connectivity, or actual failure semantics.
 
-That is useful for a prototype, but dangerous for a system whose correctness depends on transactions, locks, leases, queue semantics, and persistence.
-
-### Now
-
-The integration test path deliberately starts real infrastructure:
-
-```text
-GitHub Actions
-   │
-   ├── PostgreSQL 16
-   ├── Redis 7
-   │
-   └── Vitest + recorded suite
-           │
-           └── real SQL + real queue infrastructure
-```
-
-The CI workflow also builds the production Docker image. This gives us a stronger statement than “the JavaScript tests passed”: the application can initialize against the infrastructure it actually depends on.
-
-### Why this matters
-
-A mocked PostgreSQL connection cannot prove:
-
-- row locking behaves correctly;
-- foreign keys reject invalid state;
-- concurrent transactions serialize correctly;
-- transaction rollback really restores state;
-- database timestamps behave correctly;
-- unique constraints prevent duplicate active attempts.
-
-Likewise, a fake Redis client cannot prove BullMQ integration or real queue connectivity.
-
-**Tests are therefore part of the architecture, not a separate simulation of it.**
+**When real infrastructure rejects an assumption, fix the system or fixture—not the reality.**
 
 ---
 
-## 3. Durable Execution State Became The Core Primitive
+## 3. Durable Execution And Graph
 
-The project introduced durable execution records and graph persistence because long-running compliance work needs an identity that survives process death.
-
-The important entities are now conceptually:
+Durable execution records survive process death. The core model is:
 
 ```text
 Organization
-   │
-   └── Execution Run
-          │
-          ├── Execution lease
-          ├── Node
-          │    └── Node attempts
-          │
-          └── Execution events
+  └── Execution Run
+       ├── execution lease
+       ├── graph nodes
+       │    └── node attempts
+       └── execution events
 ```
 
-An execution has a stable identity. Nodes have stable usage identities. Attempts represent actual work rather than merely a UI status.
+Nodes have stable usage identities. Dependency edges use the direction `dependency → dependent`. A node becomes resumable only when its dependency requirements are satisfied.
 
-This separation lets the dashboard answer questions that a simple “job status” record cannot answer:
+A node and an attempt are intentionally different concepts: an attempt represents one concrete worker execution. PostgreSQL prevents multiple simultaneous RUNNING attempts for the same node.
 
-- What was supposed to run?
-- Which dependency blocked this node?
-- Which worker claimed the attempt?
-- Did the attempt finish or become stale?
-- Was the execution recovered after a worker disappeared?
-- Can this node be safely resumed?
-- What happened, and in what durable order?
+The graph therefore supports dependency-aware resume, execution timelines, recovery, auditing, and safe retry rather than simply rerunning failed rows.
 
 ---
 
-## 4. Stable Usage IDs And Dependency Edges
+## 4. Execution Leases And Fencing
 
-The execution graph introduced stable usage/node identifiers and stable dependency-edge identifiers.
+A worker receives an execution lease containing owner, token, expiry, and heartbeat information. The owner identifies the worker; the token identifies the specific lease instance.
 
-This was done because generated random IDs are poor identities for a workflow that can be retried, resumed, displayed live, and audited.
-
-The graph direction is intentionally:
-
-```text
-dependency → dependent
-```
-
-For example:
-
-```text
-Discover AWS account
-        │
-        ▼
-Scan S3
-        │
-        ▼
-Evaluate S3 finding
-        │
-        ▼
-Remediate
-```
-
-A dependent node can only become runnable when its required dependencies have reached the appropriate terminal-success state.
-
-This prevents the engine from “resuming everything that failed” without understanding the workflow it is resuming.
-
----
-
-## 5. Real Node Attempts And Recovery
-
-A node is not the same thing as an attempt.
-
-A node describes work that should exist in the execution graph. An attempt describes one concrete worker execution of that node.
-
-This distinction became necessary for crash recovery.
-
-### Example
-
-```text
-Node: scan-s3
-
-Attempt #1
-  worker-A
-  RUNNING
-  worker disappears
-
-Recovery
-  ↓
-Attempt #1 → FAILED / STALE_ATTEMPT
-Node       → resumable
-
-Resume
-  ↓
-Attempt #2
-  worker-B
-  RUNNING
-```
-
-PostgreSQL enforces the important invariant that a node cannot have multiple simultaneously RUNNING attempts.
-
-This is not a cosmetic status rule. It is protection against two workers performing the same real-world action concurrently.
-
----
-
-## 6. Execution Leases And Why They Exist
-
-The next architectural step was a durable execution lease.
-
-A worker does not get permanent authority over an execution. It receives a lease containing ownership information and an expiry.
-
-Conceptually:
-
-```text
-execution_runs
-  lease_owner
-  lease_token
-  lease_expires_at
-  heartbeat_at
-```
-
-A worker must heartbeat while it owns the execution.
-
-If it disappears, its lease eventually expires and recovery can take over.
-
-### Why both owner and token?
-
-The worker identity answers **who** claims the lease.
-
-The lease token answers **which specific lease instance** is authorized.
-
-This prevents an old worker from accidentally becoming authoritative again after a newer worker has acquired a later lease.
-
----
-
-## 7. The Important Lease Race We Found
-
-A subtle race appeared when terminal execution state was committed after the lease had expired.
-
-The first instinct was to check whether the lease was valid using a transaction timestamp. PostgreSQL's `NOW()` / `current_timestamp` is tied to the transaction start time, so a long transaction can observe an earlier time even though real wall-clock time has moved past the lease expiry.
-
-For a fencing decision, that is unsafe.
-
-The terminal writer therefore uses PostgreSQL `clock_timestamp()` when checking lease expiry.
-
-The terminal commit now requires all of these at the point of locking/updating:
+Terminal execution writes are fenced atomically in PostgreSQL. The terminal writer verifies:
 
 ```text
 execution is RUNNING
-AND organization matches
-AND lease owner matches
-AND lease token matches
-AND lease has not expired according to wall-clock time
+organization matches
+lease owner matches
+lease token matches
+lease has not expired by wall-clock time
 ```
 
-### Why this matters
+`clock_timestamp()` is used for fencing decisions because PostgreSQL `NOW()`/`current_timestamp` is transaction-start time and can become stale during a long transaction.
 
-Suppose:
+The terminal transition updates the attempt, graph node, execution state, and durable events in one transaction. If fencing is lost, the transaction rolls back instead of leaving a partial terminal state.
 
-```text
-T0   worker A owns lease
-T1   worker A starts terminal transaction
-T2   lease expires
-T3   worker A tries to commit
-```
-
-The correct result is that worker A no longer has authority merely because its transaction started at T1.
-
-This is one of the reasons the terminal transition is now fenced atomically inside PostgreSQL.
+The worker is therefore an actor, not the authority. The database decides whether the worker still has authority.
 
 ---
 
-## 8. Atomic Terminal Fencing
+## 5. Lease/Concurrency Races
 
-The terminal execution transition was hardened so that the worker cannot independently update an attempt, graph node, and execution record and hope all three remain valid.
+The system explicitly protects against:
 
-`finishExecutionFenced(...)` performs the terminal transition inside one database transaction.
+- terminal completion versus lease expiry;
+- cancellation versus completion;
+- recovery versus lease reacquisition;
+- resume/retry versus recovery;
+- duplicate control requests;
+- duplicate queue delivery;
+- multiple active node attempts;
+- stale workers attempting terminal writes.
 
-The transaction:
+Cancellation is transactional and idempotent. Only one transaction can win the terminal transition. A stale worker cannot resurrect a cancelled or recovered execution.
 
-1. Locks the authoritative execution row.
-2. Re-validates organization and lease ownership.
-3. Re-validates wall-clock lease expiry.
-4. Updates the running attempt.
-5. Updates the graph node.
-6. Records the durable `NODE_ATTEMPT_FINISHED` event.
-7. Updates the execution to `SUCCEEDED` or `FAILED`.
-8. Records `EXECUTION_FINISHED`.
-9. Commits all state together.
-
-If the final execution update fails because fencing has been lost, the transaction rolls back the preceding attempt/node/audit changes.
-
-### Why we chose this design
-
-A partial terminal transition is worse than a failed transition.
-
-For example, this state must never survive:
-
-```text
-attempt = SUCCEEDED
-node    = SUCCEEDED
-execution = RUNNING
-```
-
-The database transaction makes the terminal state an atomic decision.
+An important invariant is now enforced even for the same worker identity: an active lease cannot be silently replaced by another lease acquisition. Replacing the lease token while the old lease is live would create two possible authorities behind one worker identity.
 
 ---
 
-## 9. Cancellation Vs Completion
+## 6. Crash Recovery
 
-Another race we explicitly hardened is cancellation against a worker that is finishing at the same time.
+Recovery scans for RUNNING executions whose lease has expired according to `clock_timestamp()`.
 
-The desired invariant is:
-
-```text
-CANCELLED wins → stale worker cannot resurrect execution
-
-valid fenced completion wins → cancellation cannot overwrite it
-```
-
-The worker therefore cannot finish an execution merely because its handler returned successfully. It must still possess a valid execution lease at terminal commit time.
-
-Cancellation also updates the relevant active attempts and non-terminal graph nodes transactionally.
-
-This is important for a real control plane: “Cancel” must mean cancellation of the durable execution, not merely a browser button that asks a worker to stop.
-
----
-
-## 10. Crash Recovery Became A First-Class Integration
-
-Recovery was added because workers can disappear for reasons outside application control:
-
-- container restart;
-- VM failure;
-- process crash;
-- network partition;
-- deployment;
-- worker termination;
-- infrastructure outage.
-
-Recovery scans for expired execution leases and reconciles the durable state rather than relying on the dead worker to report failure.
-
-The authoritative recovery result is:
+Recovery atomically reconciles:
 
 ```text
-RUNNING execution with expired lease
+RUNNING execution + expired lease
         ↓
-FAILED
-error_code = STALE_EXECUTION_LEASE
+FAILED / STALE_EXECUTION_LEASE
+        ↓
 lease cleared
-running attempts reconciled
-running graph nodes reconciled
+active attempts failed
+running graph nodes failed
 EXECUTION_LEASE_EXPIRED event appended
 ```
 
-Recovery is transactional so the execution cannot be marked failed while its active attempt remains indefinitely RUNNING.
+Recovery is idempotent: a second recovery pass cannot create another recovery transition for an execution already reconciled.
 
-The design intentionally fails closed: uncertainty about who owns an execution must not become permission for another worker to assume success.
+The execution-level error `STALE_EXECUTION_LEASE` is authoritative because the key fact is loss of worker authority. Lower-level diagnostic information can remain in event metadata.
 
 ---
 
-## 11. Why `STALE_EXECUTION_LEASE` Became The Authoritative Recovery Error
+## 7. Resume And Control Idempotency
 
-Earlier layers had their own stale-attempt concept, which remains useful when recovering an individual node attempt.
+Resume is dependency-aware. The engine calculates eligible nodes, requires successful dependencies and approvals where applicable, acquires the durable execution lease, claims nodes without competing RUNNING attempts, and queues real worker work.
 
-But once an execution lease expires, the execution-level fact is more important: **the worker no longer has authoritative execution ownership**.
+Execution controls use durable idempotency keys. Repeated cancel/resume/retry operations must resolve to the same logical operation rather than creating duplicate state transitions or queue jobs.
 
-Therefore execution-lease recovery records:
+Execution events persist explicit idempotency keys in PostgreSQL and return the existing event on a duplicate write.
+
+---
+
+## 8. BullMQ/Redis Queue Boundary
+
+Redis/BullMQ is deliberately a dispatch mechanism rather than an authority for execution state.
+
+Queue jobs are sanitized and bounded. Job identity is tenant-scoped using a BullMQ-safe delimiter rather than `:` because BullMQ rejects invalid job IDs containing that character.
+
+The original producer `jobId` remains in the durable payload while the BullMQ identity includes the organization namespace. This prevents cross-organization collisions while preserving application-level identity.
+
+Queue failures surface as queue failures; they do not silently become successful scans.
+
+Queue connections and workers have explicit shutdown handling, and the server drains the worker before closing queue connections and PostgreSQL.
+
+---
+
+## 9. Durable Events And Audit
+
+Execution events provide deterministic history alongside current state. Events include lifecycle, lease, node, recovery, cancellation, and terminal transitions and expose ordered cursors for live consumers.
+
+The durable audit path is PostgreSQL-backed and fail-closed. Audit payloads are recursively sanitized for sensitive keys and bounded in depth, array size, and string length.
+
+Security-critical audit persistence must not be silently swallowed. Authentication/session operations now revoke newly created sessions when their success audit cannot be durably persisted. Logout revokes the session first and then records the audit event; if the audit write fails, the user remains logged out and the response reports audit unavailability.
+
+The older legacy audit helper is not the authoritative execution timeline.
+
+---
+
+## 10. Database Authority
+
+PostgreSQL is the only persistence implementation exposed by `core/db.js`.
+
+The former `MemoryFallbackPool` and non-production persistence fallback were removed. Query failures surface as database failures. Transactional connections require PostgreSQL. Database initialization fails closed rather than allowing the application to continue against an incomplete schema.
+
+This closes the architectural loophole where tests or development could accidentally make an unhealthy application appear healthy.
+
+---
+
+## 11. Authentication And Session Security
+
+Authentication is server-authoritative. Organization and role claims are not trusted from the browser.
+
+Current guarantees include:
+
+- database-authoritative session existence and revocation;
+- cryptographic token verification;
+- role hierarchy enforcement;
+- session rotation;
+- OAuth state validation and single-use state clearing;
+- Google PKCE;
+- GitHub OAuth state protection;
+- production-disabled developer login;
+- HttpOnly, Secure, SameSite=Lax session cookies;
+- bounded authentication rate limiting;
+- sanitized authentication errors;
+- no session token in JSON responses.
+
+A successful authentication response is not allowed to reach the browser if the corresponding durable success audit cannot be persisted.
+
+---
+
+## 12. HTTP/SSE Hardening
+
+The HTTP boundary includes strict CORS allowlisting, security headers, HSTS when secure, bounded JSON request bodies, general/heavy/auth rate limiting, sanitized JSON/body-size errors, and readiness checks for PostgreSQL and Redis.
+
+The live execution graph surface uses bounded SSE connections, cleanup on disconnect, and non-overlapping stream ticks. Execution IDs, node IDs, idempotency keys, cursors, and control reasons are bounded and validated before expensive work.
+
+The dashboard is a projection of durable state. It is not an execution authority.
+
+---
+
+## 13. Graceful Shutdown And Readiness
+
+Startup requires database initialization and the execution recovery loop before the application begins serving work.
+
+Shutdown stops recovery, closes the HTTP server, closes the durable worker, closes BullMQ/Redis resources, and ends the PostgreSQL pool. A bounded forced-shutdown timer prevents an unhealthy dependency from keeping the process alive indefinitely.
+
+`/health` is liveness-oriented. `/health/ready` verifies PostgreSQL and Redis and returns `503` when the application is not ready to perform its required work.
+
+---
+
+## 14. Recorded Tests And Real Verification
+
+Recorded tests are tracked source code rather than untracked local scripts.
+
+The CI safety boundary is:
 
 ```text
-STALE_EXECUTION_LEASE
-```
-
-for the affected execution and its active attempts.
-
-This gives operators a coherent explanation instead of contradictory errors such as an execution saying “lease expired” while its active attempt says it merely “timed out”.
-
-Lower-level diagnostic detail can still be preserved in event metadata where useful.
-
----
-
-## 12. Resume Became Dependency-Aware
-
-A resume operation is not “rerun every failed row”.
-
-The engine now determines which nodes are actually resumable based on dependency state.
-
-A node is eligible only when:
-
-- it is in an allowed resumable state;
-- all required dependencies have reached terminal success;
-- approval-gated remediation has the required successful approval node;
-- the node can be claimed without creating a competing active attempt.
-
-The resume path also acquires the durable execution lease before claiming work.
-
-This creates a safer chain:
-
-```text
-recover
-  ↓
-calculate dependency-aware plan
-  ↓
-acquire execution lease
-  ↓
-claim resumable nodes
-  ↓
-queue real worker execution
-```
-
----
-
-## 13. Durable Execution Events And Timeline
-
-The execution event store was introduced so the system can explain how it reached its current state.
-
-Events have a global monotonic sequence and are scoped to the organization/execution.
-
-Examples include:
-
-```text
-EXECUTION_CREATED
-EXECUTION_LEASE_ACQUIRED
-NODE_ATTEMPT_FINISHED
-EXECUTION_LEASE_EXPIRED
-EXECUTION_CANCELLED
-EXECUTION_FINISHED
-```
-
-The sequence is especially important for the live dashboard because a timestamp alone is not enough to establish a deterministic ordering when multiple workers act concurrently.
-
-The API exposes event history with an `afterSequence` cursor so clients can incrementally consume changes.
-
-### Why events are separate from current state
-
-Current state answers:
-
-> “What is true now?”
-
-Events answer:
-
-> “How did we get here?”
-
-A production compliance/control system needs both.
-
----
-
-## 14. Live Graph, Timeline And Refresh Controls
-
-The execution graph API evolved from a static status endpoint into a live execution surface.
-
-It can expose:
-
-- graph nodes;
-- dependency edges;
-- node attempts;
-- execution lifecycle;
-- recovery information;
-- resumable node IDs;
-- ordered event history;
-- an incremental event cursor;
-- live SSE updates;
-- cancellation;
-- resume;
-- retry.
-
-The browser can therefore observe the same durable state that workers are modifying rather than maintaining an independent fake execution model.
-
-### Design principle
-
-**The dashboard is a projection of durable execution state. It is not the execution engine.**
-
-That distinction is important as the UI becomes richer.
-
----
-
-## 15. Worker Hardening: The Worker Is Not The Authority
-
-The worker was changed so that terminal state is written only through the fenced terminal transition.
-
-After executing its handler, the worker:
-
-1. refreshes/heartbeats the execution lease;
-2. determines terminal status;
-3. calls the fenced terminal writer;
-4. does not perform a second unfenced terminal write if fencing fails.
-
-If fencing has been lost, recovery owns the durable state transition.
-
-This prevents an old worker from “cleaning up” after it has already lost authority.
-
-### Why this is important
-
-A worker is an actor in the system, not the system's source of truth.
-
-The database decides whether that actor is still authorized to mutate terminal execution state.
-
----
-
-## 16. Server Hardening
-
-As the backend became a real control plane, the HTTP server was hardened around the same fail-closed philosophy.
-
-Current hardening includes:
-
-- strict CORS allowlisting;
-- security response headers;
-- HSTS when operating securely;
-- bounded JSON request bodies;
-- general API rate limiting;
-- heavier limits for expensive operations;
-- authentication endpoint throttling;
-- sanitized malformed JSON/body-size errors;
-- readiness checks for PostgreSQL and Redis;
-- graceful shutdown on process termination;
-- bounded forced shutdown so a dead dependency cannot keep the process alive indefinitely.
-
-The goal is not simply to make requests fail. The goal is to make failure explicit, bounded, and operationally understandable.
-
----
-
-## 17. Authentication And Session Security Direction
-
-Authentication evolved from UI-level login behavior toward server-enforced authorization.
-
-The backend is responsible for:
-
-- validating authenticated identity;
-- enforcing organization scope;
-- enforcing role hierarchy;
-- validating session state;
-- rejecting revoked sessions;
-- restricting sensitive routes;
-- keeping development login disabled in production unless explicitly enabled.
-
-The browser must never be treated as the authority for organization or role claims.
-
-### Security documentation rule
-
-OAuth client secrets, HMAC secrets, database passwords, API tokens, session tokens, private keys, and signed bearer tokens must never appear in this handover.
-
-Use placeholders such as:
-
-```bash
-AUTH_SECRET=<set-in-secret-manager>
-POSTGRES_PASSWORD=<set-in-secret-manager>
-GOOGLE_CLIENT_SECRET=<set-in-secret-manager>
-GITHUB_CLIENT_SECRET=<set-in-secret-manager>
-AUDITOR_SIGNING_SECRET=<set-in-secret-manager>
-```
-
-If a credential has ever been accidentally committed, sanitizing the documentation is not enough: the credential must be rotated at its provider.
-
----
-
-## 18. CI Became A Product Safety Boundary
-
-CI is now intentionally stricter than a developer's local convenience workflow.
-
-The main validation path is designed to prove:
-
-```text
-real PostgreSQL
-      +
-real Redis
-      +
-real Vitest suite
-      +
+PostgreSQL 16
+    +
+Redis 7
+    +
+tracked Vitest suite
+    +
 complete recorded suite
-      +
+    +
 production Docker build
 ```
 
-The repository has repeatedly used CI failures to expose assumptions that ordinary unit tests did not catch.
+The repository has used real CI failures to correct fixture state, database authority, queue semantics, lease fencing, recovery, and authentication behavior rather than weakening infrastructure requirements.
 
-One example was a real PostgreSQL foreign-key failure caused by incomplete test fixture state. The fix was to seed the required organization summary rather than weaken the database constraint.
-
-That is the intended pattern:
-
-> **When real infrastructure rejects our assumptions, fix the system or fixture—not the reality.**
+The current baseline has included real PostgreSQL tests for session authority, event idempotency, lifecycle races, terminal fencing, recovery idempotency, and concurrent controls, plus real Redis/BullMQ tests for tenant-safe queue identity and deduplication.
 
 ---
 
-## 19. Recorded Tests Became Reproducible
+## 15. Security And Dependency Hygiene
 
-The old approach of local/untracked test scripts made historical test claims difficult to reproduce.
+Dependency vulnerabilities must be reviewed deliberately. We do not use `npm audit fix --force` blindly because forceful major upgrades can destabilize the control plane.
 
-The recorded test suites were brought under version control so CI executes the same tracked test logic every time.
+The repository now has grouped weekly Dependabot security updates configured for npm. Current CI has reported a dependency exposure of 31 vulnerabilities (22 moderate, 7 high, 2 critical); this is treated as an active supply-chain work item rather than ignored or hidden.
 
-This matters because an audit/security platform should be able to answer:
+Direct dependency upgrades must be performed with their lockfile changes and then validated against the real integration suite. In particular, the existing Express 4.19.x baseline is behind the maintained 4.x line, so it must be upgraded through a controlled dependency update rather than a speculative manifest-only edit.
 
-- What was tested?
-- Which code was tested?
-- Was the test logic itself committed?
-- Did it run against real infrastructure?
-- Did the production image build?
-
-A timestamped result without reproducible test code is weak evidence.
+Secret-leakage review also checks the repository for private-key and common GitHub-token patterns. Documentation is sanitized separately from credential rotation: if a historical value was ever live, it must be revoked/rotated at its provider.
 
 ---
 
-## 20. What We Are Building Now — And Why
+## 16. Documentation Hygiene
 
-The current engineering focus is **reliability and security hardening around durable execution**.
+This file is the single living handover. Future iterations should append dated sections here rather than creating `HANDOVER_EVOLUTION_<date>.md` files.
 
-The work is not being driven by a desire to add more endpoints. It is driven by the question:
-
-> **Can Compflow safely continue an important compliance/infrastructure workflow when multiple actors race, workers disappear, infrastructure fails, requests are duplicated, or a user asks for control at exactly the wrong moment?**
-
-The current priority areas are:
-
-### A. Lease/concurrency races
-Finish hardening cancellation, terminal completion, retry/resume, and recovery so only one authoritative transition wins.
-
-### B. Recovery consistency
-Ensure expired executions, attempts, nodes, and events are reconciled atomically and idempotently.
-
-### C. Control idempotency
-Repeated cancel/resume/retry requests must not accidentally create multiple logical operations or multiple queue jobs.
-
-### D. SSE resource safety
-Live execution streams need bounded connection counts, deterministic cleanup, and protection against overlapping polling work.
-
-### E. Strict input validation
-Execution IDs, node IDs, action names, reasons, cursors, and idempotency keys must be bounded and validated before expensive work begins.
-
-### F. Audit durability
-The event log needs stronger append-only and retention semantics so historical execution evidence cannot silently be rewritten.
-
-### G. Shutdown/readiness correctness
-A process restart must stop accepting new work, stop recovery loops, close workers/queues, and drain database resources predictably.
-
-### H. Dependency/security hygiene
-Third-party dependency vulnerabilities must be reviewed deliberately. We do not blindly use forceful dependency upgrades that could destabilize the control plane.
-
-### I. Production verification
-The final gate remains real integration testing plus a production Docker build. A green unit suite alone is not considered sufficient.
-
----
-
-## 21. Why We Are Not Adding Features Randomly
-
-The long-term product direction is bigger than a conventional compliance dashboard. The system is being shaped toward a platform that can understand an organization's desired state, inspect real infrastructure, reason about risk, perform controlled actions, and continuously prove what happened.
-
-That future requires foundations first.
-
-For example, an eventual automated domain/infrastructure provisioning capability would need to know:
+Historical credential-shaped examples have been replaced with placeholders such as:
 
 ```text
-who requested the action
-        ↓
-what organization owns it
-        ↓
-what was approved
-        ↓
-what external resource was changed
-        ↓
-which worker performed it
-        ↓
-whether the worker still had authority
-        ↓
-what actually happened
-        ↓
-whether the operation can be resumed safely
-        ↓
-what evidence proves the result
+<REDACTED_AUDITOR_TOKEN>
+<REDACTED_API_KEY>
+<REDACTED_CLIENT_SECRET>
+<REDACTED_DATABASE_PASSWORD>
+<REDACTED_PRIVATE_KEY>
+<REDACTED_SIGNING_SECRET>
 ```
 
-Building that on ephemeral memory, fake queues, or unfenced workers would create a system that looks autonomous but cannot be trusted.
-
-The current reliability work is therefore foundational to the larger vision, not a detour from it.
+Removing a credential from Git does not make a previously live credential safe; live credentials must be rotated at their provider.
 
 ---
 
-## 22. Integration Principles Going Forward
-
-Every new integration should answer four questions before implementation:
-
-### 1. What real problem does this solve?
-Do not add an integration merely because a technology is popular.
-
-### 2. What becomes authoritative?
-The source of truth must be explicit. For durable execution, PostgreSQL is authoritative.
-
-### 3. What happens when the dependency disappears?
-Every external dependency needs a defined failure mode. For critical execution state, failure must not silently become success.
-
-### 4. Can the behavior be proven against real infrastructure?
-If correctness depends on PostgreSQL, Redis, a cloud API, or another external system, the important integration path should eventually be tested against the real dependency.
-
----
-
-## 23. Things We Explicitly Do Not Want
+## 17. Current Engineering Rules
 
 ### No production mocks
-Mocks belong in narrowly scoped tests where they do not conceal infrastructure semantics. They must not become a production fallback for authoritative systems.
+Mocks may exist only where they cannot conceal infrastructure semantics. They are not an alternative to real PostgreSQL, Redis, or durable execution behavior.
 
-### No silent in-memory replacement for durable state
-If PostgreSQL is required for a durable operation and PostgreSQL is unavailable, the operation should fail clearly.
+### No in-memory authoritative state
+If PostgreSQL is unavailable for a durable operation, fail clearly.
 
 ### No fake queue success
-If BullMQ/Redis cannot accept a durable background job, the API must not tell the user that work has definitely been queued.
+If BullMQ/Redis cannot accept work, do not report durable queue success.
 
 ### No unfenced worker writes
-A worker that lost its lease must not be able to mutate authoritative terminal state.
+A worker that lost its lease cannot mutate authoritative terminal state.
 
 ### No UI-only security
-Hiding an action in the dashboard is not authorization. The server must enforce it.
+Authorization is enforced server-side.
 
 ### No secrets in documentation
-The handover is source-controlled documentation. It is not a secret store.
+The handover is not a secret store.
 
 ### No knowingly impossible architecture
-We can design toward ambitious future capabilities, but we must not implement fake abstractions that pretend an unavailable external capability already exists.
+Ambitious integrations must model real external capabilities and explicit failure modes rather than pretending unavailable capabilities already exist.
 
 ---
 
-## 24. Current Verification Baseline
+## 18. API Evolution Boundary
 
-The repository has reached a meaningful reliability baseline when CI demonstrates all of the following together:
+API versioning is intentionally deferred until the reliability/security boundary is stable.
 
-- real PostgreSQL starts;
-- real Redis starts;
+The next API contract milestone should establish:
+
+- request/response schemas;
+- authentication semantics;
+- durable idempotency behavior;
+- stable error codes;
+- pagination and event cursors;
+- compatibility/deprecation rules;
+- organization isolation guarantees.
+
+At that point, a clean `/api/v1` public boundary can be introduced while internal execution APIs remain free to evolve behind it.
+
+Versioning should be a compatibility contract, not decoration.
+
+---
+
+## 19. Current Verification Baseline
+
+A reliability milestone is not complete merely because a local test command passes. The accepted gate is:
+
+- PostgreSQL starts;
+- Redis starts;
 - schema initialization succeeds;
-- deterministic test principal/fixture setup succeeds;
-- the tracked Vitest suite passes;
-- the complete recorded test suite passes;
-- the production Docker image builds;
+- deterministic test fixtures seed successfully;
+- tracked Vitest suite passes;
+- complete recorded suite passes;
+- production Docker image builds;
 - infrastructure cleanup completes.
 
-Recent lifecycle work specifically added coverage around:
-
-- lease ownership;
-- lease expiry;
-- stale execution recovery;
-- fenced terminal completion;
-- worker lease loss;
-- cancellation versus stale completion;
-- dependency-aware resume;
-- durable execution events;
-- graph persistence.
-
-The baseline is considered a floor, not the finish line.
+The most recent verified queue-namespacing CI run completed all of those steps successfully on commit `f56e11a9d2ce3bd3c8f8549068eae3a8f1c3bc68`.
 
 ---
 
-## 25. Handover For The Next Engineer
+## 20. 2026-09-08 Reliability/Security Milestone
 
-If you are continuing this project, do not start by asking “what feature should I add?”
+The 2026-09-08 hardening cycle consolidated the following changes:
 
-Start by asking:
+- PostgreSQL-only durable persistence;
+- fail-closed database initialization;
+- fail-closed durable audit writes and recursive audit sanitization;
+- authoritative database session state and removal of non-authoritative session fallback;
+- atomic terminal fencing with wall-clock lease checks;
+- lifecycle recovery and recovery idempotency;
+- cancellation concurrency coverage;
+- recovery versus lease reacquisition race coverage;
+- same-identity active lease replacement prevention;
+- BullMQ-safe tenant namespacing and real Redis queue dedupe coverage;
+- explicit worker/queue shutdown;
+- SSE resource caps and cleanup;
+- strict execution-control input validation;
+- durable control idempotency;
+- authentication audit fail-closed behavior;
+- grouped npm security-update automation;
+- repository secret-pattern checks;
+- consolidation of this document into the single living handover.
 
-```text
-What is authoritative?
-What can race?
-What can crash?
-What can be retried?
-What happens if the worker dies here?
-What happens if the lease expires here?
-Can the same request arrive twice?
-Can two workers claim this work?
-Can the UI show something the database does not agree with?
-Can CI prove this with real infrastructure?
-```
+### Verification rule
 
-Then make the smallest architectural change that preserves those invariants.
-
-When a test fails because PostgreSQL, Redis, a constraint, a lease, or a real integration disagrees with the implementation, treat that failure as information about the system—not as an inconvenience to mock away.
-
-That is the engineering discipline behind the current evolution of Compflow.
+No milestone is considered complete until the changed behavior is exercised against real infrastructure and the production image still builds. Mocked infrastructure is not accepted as evidence for these boundaries.
 
 ---
 
-## 26. Documentation Hygiene / Secret Sanitization
+## 21. What Comes After The Reliability Boundary
 
-The original handover contained examples that were too close to real credential material, including a bearer-token-shaped auditor response and concrete infrastructure credential values.
+Once the current reliability/security work is fully green and the dependency findings have been individually triaged, the next architectural work should proceed in this order:
 
-Those examples have no value that requires preserving the sensitive-looking material.
+1. lock the stable execution/API behavioral contracts;
+2. introduce the public `/api/v1` boundary;
+3. integrate the execution graph/timeline into the existing dashboard rather than maintaining a disconnected UI layer;
+4. add production-oriented live refresh and control UX on top of durable state;
+5. perform final production verification and operational review.
 
-Going forward:
-
-- bearer tokens → `<REDACTED_AUDITOR_TOKEN>`;
-- API keys → `<REDACTED_API_KEY>`;
-- client secrets → `<REDACTED_CLIENT_SECRET>`;
-- database passwords → `<REDACTED_DATABASE_PASSWORD>`;
-- private keys → `<REDACTED_PRIVATE_KEY>`;
-- access keys → `<REDACTED_ACCESS_KEY_ID>` / `<REDACTED_SECRET_ACCESS_KEY>`;
-- session cookies → `<REDACTED_SESSION>`;
-- signing secrets → `<REDACTED_SIGNING_SECRET>`.
-
-Real production values belong in the deployment secret manager/environment, never in this repository's Markdown.
-
-**Important:** If any value previously committed to Git was actually live rather than an example, rotate/revoke it even after sanitization. Removing it from the latest file does not make the historical credential safe.
+Features should be added only when they preserve the authority, fencing, recovery, audit, idempotency, and tenant-isolation invariants established here.
 
 ---
 
 *Last updated: September 8, 2026*
-*Purpose: preserve the architectural history, reasoning, reliability discipline, and current engineering direction of ComplianceFlow/Compflow.*
+*Purpose: preserve the architectural history, reliability discipline, security decisions, and current engineering direction of Compflow.*
