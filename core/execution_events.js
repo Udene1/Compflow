@@ -1,37 +1,9 @@
 import crypto from 'crypto';
 import pool from './db.js';
 
-const SCHEMA_SQL = `
-CREATE TABLE IF NOT EXISTS execution_events (
-  id TEXT PRIMARY KEY,
-  organization_id TEXT NOT NULL,
-  execution_id TEXT NOT NULL,
-  node_id TEXT,
-  attempt_id TEXT,
-  sequence BIGINT GENERATED ALWAYS AS IDENTITY,
-  event_type TEXT NOT NULL,
-  actor_type TEXT NOT NULL DEFAULT 'SYSTEM',
-  actor_id TEXT,
-  result TEXT,
-  payload JSONB NOT NULL DEFAULT '{}'::jsonb,
-  occurred_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-  UNIQUE (organization_id, id)
-);
-ALTER TABLE execution_events ADD COLUMN IF NOT EXISTS idempotency_key TEXT;
-CREATE UNIQUE INDEX IF NOT EXISTS execution_events_idempotency_idx
-  ON execution_events (organization_id, execution_id, event_type, idempotency_key)
-  WHERE idempotency_key IS NOT NULL;
-CREATE INDEX IF NOT EXISTS execution_events_execution_sequence_idx ON execution_events (organization_id, execution_id, sequence);
-CREATE INDEX IF NOT EXISTS execution_events_execution_time_idx ON execution_events (organization_id, execution_id, occurred_at, sequence);
-CREATE INDEX IF NOT EXISTS execution_events_node_idx ON execution_events (organization_id, execution_id, node_id, sequence);
-`;
-
-let schemaPromise;
-
-async function ensureSchema() {
-  if (!schemaPromise) schemaPromise = pool.query(SCHEMA_SQL).catch(error => { schemaPromise = null; throw error; });
-  return schemaPromise;
-}
+// Schema ownership is centralized in core/db.js and initialized before the
+// application serves work. Event operations only verify the authoritative table.
+async function ensureSchema() { await pool.query('SELECT 1 FROM execution_events LIMIT 0'); }
 
 function sanitize(value) {
   if (Array.isArray(value)) return value.slice(0, 100).map(sanitize);
