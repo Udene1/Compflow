@@ -1,5 +1,6 @@
 (() => {
   const base = String(window.COMPLIANCE_API_URL || '').replace(/\/$/, '');
+  const esc = value => String(value ?? '').replace(/[&<>\"]/g, c => ({ '&':'&amp;', '<':'&lt;', '>':'&gt;', '\"':'&quot;' }[c]));
   async function request(path, options = {}) {
     const response = await fetch(`${base}/api/v1${path}`, {
       credentials: 'include', headers: { 'Content-Type': 'application/json', ...(options.headers || {}) }, ...options
@@ -9,8 +10,10 @@
     return body;
   }
   function key() { if (window.crypto?.randomUUID) return `ui-${window.crypto.randomUUID()}`; return `ui-${Date.now()}-${Math.random().toString(16).slice(2)}`; }
-  window.CompflowExecution = Object.freeze({
+  const api = {
     providers: () => request('/providers'),
+    tenants: () => request('/tenants').catch(error => { if (error.status === 404) return { tenants: [] }; throw error; }),
+    list: ({ status, limit = 25 } = {}) => request(`/executions?limit=${encodeURIComponent(limit)}${status ? `&status=${encodeURIComponent(status)}` : ''}`),
     create: (executionId, intent, idempotencyKey = key()) => request('/executions', { method: 'POST', headers: { 'Idempotency-Key': idempotencyKey }, body: JSON.stringify({ executionId, intent }) }),
     get: (executionId, afterSequence = 0) => request(`/executions/${encodeURIComponent(executionId)}?afterSequence=${encodeURIComponent(afterSequence)}`),
     evidence: (executionId) => request(`/executions/${encodeURIComponent(executionId)}/evidence`),
@@ -24,5 +27,117 @@
       });
       return source;
     }
-  });
+  };
+  window.CompflowExecution = Object.freeze(api);
+
+  function makeId(prefix) { return `${prefix}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`; }
+  function toast(message) { if (window.showToast) window.showToast(message); else console.info(`[Compflow] ${message}`); }
+  function statusClass(value) { return ['SUCCEEDED','FAILED','RUNNING','PENDING','CANCELLED'].includes(value) ? value : 'PENDING'; }
+
+  async function mountWorkspace() {
+    const panel = document.getElementById('execution-product-panel');
+    if (!panel || document.getElementById('execution-workspace')) return;
+    const anchor = panel.querySelector('.card.execution-section');
+    if (!anchor) return;
+    const workspace = document.createElement('div');
+    workspace.id = 'execution-workspace';
+    workspace.className = 'card execution-section';
+    workspace.style.marginBottom = '1rem';
+    workspace.innerHTML = `
+      <div style="display:flex;justify-content:space-between;gap:1rem;align-items:center;flex-wrap:wrap">
+        <div><h3 style="margin:0">Compliance Operations</h3><p style="margin:.35rem 0 0;color:var(--text-muted);font-size:.82rem">Run a real audit, follow it live, and return to any durable execution.</p></div>
+        <div class="execution-toolbar"><select id="execution-status-filter" aria-label="Execution status"><option value="">All runs</option><option>RUNNING</option><option>PENDING</option><option>SUCCEEDED</option><option>FAILED</option><option>CANCELLED</option></select><button class="btn btn-primary btn-sm" id="execution-new-run">+ New compliance run</button></div>
+      </div>
+      <div id="execution-run-list" class="execution-list" style="margin-top:.8rem;max-height:300px"></div>
+    `;
+    panel.insertBefore(workspace, anchor);
+    document.getElementById('execution-status-filter').addEventListener('change', refreshRuns);
+    document.getElementById('execution-new-run').addEventListener('click', openRunDialog);
+    await refreshRuns();
+  }
+
+  async function refreshRuns() {
+    const list = document.getElementById('execution-run-list');
+    if (!list) return;
+    list.innerHTML = '<div class="execution-empty">Loading durable executions…</div>';
+    try {
+      const status = document.getElementById('execution-status-filter')?.value || '';
+      const data = await api.list({ status, limit: 25 });
+      const executions = data.executions || [];
+      list.innerHTML = executions.length ? executions.map(run => `
+        <button type="button" class="execution-row" data-execution-id="${esc(run.id)}" style="width:100%;text-align:left;background:transparent;color:inherit;cursor:pointer">
+          <span class="execution-dot execution-status ${statusClass(run.status)}"></span>
+          <div><strong>${esc(run.metadata?.objective || run.id)}</strong><small>${esc(run.id)} · ${esc(run.created_at || '')}</small></div>
+          <span class="execution-status ${statusClass(run.status)}">${esc(run.status)}</span>
+        </button>`).join('') : '<div class="execution-empty">No compliance runs yet. Start the first real audit.</div>';
+      list.querySelectorAll('[data-execution-id]').forEach(button => button.addEventListener('click', () => selectExecution(button.dataset.executionId)));
+    } catch (error) {
+      list.innerHTML = `<div class="execution-empty">Unable to load executions: ${esc(error.message)}</div>`;
+    }
+  }
+
+  async function selectExecution(id) {
+    const input = document.getElementById('execution-id-input');
+    if (input) input.value = id;
+    await window.CompflowExecutionUI?.refresh?.();
+    toast(`Execution ${id} loaded`);
+  }
+
+  async function openRunDialog() {
+    if (document.getElementById('execution-run-dialog')) return;
+    const dialog = document.createElement('dialog');
+    dialog.id = 'execution-run-dialog';
+    dialog.style.cssText = 'max-width:720px;width:calc(100% - 2rem);border:1px solid rgba(255,255,255,.12);border-radius:12px;background:#111;color:inherit;padding:0;box-shadow:0 24px 80px rgba(0,0,0,.45)';
+    dialog.innerHTML = `
+      <form method="dialog" id="execution-run-form" style="padding:1.2rem">
+        <div style="display:flex;justify-content:space-between;align-items:center"><div><h3 style="margin:0">Start compliance run</h3><p style="margin:.35rem 0;color:var(--text-muted);font-size:.8rem">This creates a durable intent and immediately dispatches the real execution graph.</p></div><button class="btn btn-secondary btn-sm" value="cancel">Close</button></div>
+        <div style="display:grid;gap:.8rem;margin-top:1rem">
+          <label>Cloud environment<select id="run-tenant" required style="width:100%;margin-top:.3rem"></select></label>
+          <label>Framework<select id="run-framework" style="width:100%;margin-top:.3rem"><option value="soc2">SOC2</option><option value="iso27001">ISO 27001</option><option value="gdpr">GDPR</option><option value="hipaa">HIPAA</option><option value="pci-dss">PCI-DSS</option></select></label>
+          <label>Objective<input id="run-objective" required maxlength="256" value="Audit cloud infrastructure for compliance drift" style="width:100%;margin-top:.3rem"></label>
+          <label>Mode<select id="run-mode" style="width:100%;margin-top:.3rem"><option value="AUDIT">Audit only</option><option value="REMEDIATE">Audit + remediation</option></select></label>
+          <div id="run-error" style="display:none;padding:.7rem;border:1px solid rgba(255,90,90,.4);border-radius:8px;color:#ff9b9b;font-size:.8rem"></div>
+          <button class="btn btn-primary" id="run-submit" value="default">Start real compliance run</button>
+        </div>
+      </form>`;
+    document.body.appendChild(dialog);
+    const tenantSelect = dialog.querySelector('#run-tenant');
+    try {
+      const data = await api.tenants();
+      const tenants = data.tenants || [];
+      tenantSelect.innerHTML = tenants.length ? tenants.map(t => `<option value="${esc(t.id)}" data-provider="${esc(t.provider)}">${esc(t.name || t.provider)} · ${esc(t.provider)}</option>`).join('') : '<option value="">No connected cloud environment</option>';
+      if (!tenants.length) dialog.querySelector('#run-submit').disabled = true;
+    } catch (error) {
+      tenantSelect.innerHTML = '<option value="">Unable to load environments</option>';
+      dialog.querySelector('#run-submit').disabled = true;
+    }
+    dialog.querySelector('#execution-run-form').addEventListener('submit', async event => {
+      event.preventDefault();
+      const selected = tenantSelect.selectedOptions[0];
+      const connectionId = selected?.value;
+      const provider = selected?.dataset.provider;
+      const errorEl = dialog.querySelector('#run-error');
+      const submit = dialog.querySelector('#run-submit');
+      if (!connectionId || !provider) { errorEl.textContent = 'Connect a cloud environment before starting an execution.'; errorEl.style.display = 'block'; return; }
+      submit.disabled = true; submit.textContent = 'Creating durable execution…'; errorEl.style.display = 'none';
+      try {
+        const executionId = makeId('exec');
+        const intent = { id: makeId('intent'), version: '1', objective: dialog.querySelector('#run-objective').value.trim(), mode: dialog.querySelector('#run-mode').value, frameworks: [dialog.querySelector('#run-framework').value], rules: [], constraints: {}, targets: [{ connectionId, provider, resourceId: null }] };
+        await api.create(executionId, intent);
+        dialog.close();
+        dialog.remove();
+        await refreshRuns();
+        await selectExecution(executionId);
+        toast('Compliance run started. Execution is durable and can be resumed.');
+      } catch (error) {
+        errorEl.textContent = error.message; errorEl.style.display = 'block';
+        submit.disabled = false; submit.textContent = 'Start real compliance run';
+      }
+    });
+    dialog.addEventListener('close', () => dialog.remove(), { once: true });
+    dialog.showModal();
+  }
+
+  if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', mountWorkspace, { once: true });
+  else mountWorkspace();
 })();
