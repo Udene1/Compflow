@@ -14,7 +14,7 @@ async function riskSnapshot({ organizationId, executionId, paths }) {
   const execution = await pool.query('SELECT metadata FROM execution_runs WHERE organization_id=$1 AND id=$2', [organizationId, executionId]);
   const metadata = execution.rows[0]?.metadata || {}; const scanId = metadata.scanId || metadata.scan_id || null;
   if (!scanId) return null;
-  const findings = await pool.query('SELECT id,code,severity,resource_id,control_id,issue,title,description FROM findings WHERE organization_id=$1 AND scan_id=$2 ORDER BY created_at ASC LIMIT 1000', [organizationId, scanId]);
+  const findings = await pool.query('SELECT id,code,severity,resource_id,control_id,status FROM findings WHERE organization_id=$1 AND scan_id=$2 ORDER BY created_at ASC LIMIT 1000', [organizationId, scanId]);
   return aggregateSecurityRisk({ findings: findings.rows, paths });
 }
 /** Rebuilds the durable exposure graph from persisted provider evidence and records an auditable after snapshot. */
