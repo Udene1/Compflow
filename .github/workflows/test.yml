@@ -92,6 +92,7 @@ jobs:
             ['usr_csrf_test','csrf@example.test'],
             ['usr_empty','empty@example.test'],
             ['usr_summary_lead','summarylead@example.test'],
+            ['usr_summary_hardening_101','summary-hardening@example.test'],
             ['usr_cross_instance','crossinstance@example.test'],
             ['usr_rotate','rotate@example.test']
           ];
