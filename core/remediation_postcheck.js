@@ -2,6 +2,8 @@ import { S3Client, GetPublicAccessBlockCommand, GetBucketVersioningCommand, GetB
 import { EC2Client, DescribeSecurityGroupsCommand } from '@aws-sdk/client-ec2';
 import { RDSClient, DescribeDBInstancesCommand } from '@aws-sdk/client-rds';
 import { IAMClient, GetRoleCommand } from '@aws-sdk/client-iam';
+import pool from './db.js';
+import { defaultSecretStore } from './secret_store.js';
 import { getProvider } from './provider_registry.js';
 import { recordEvidence } from './evidence.js';
 import { appendExecutionEvent } from './execution_events.js';
@@ -36,8 +38,7 @@ async function collectAws(code, credentials, resourceId) {
     const client = new RDSClient(config); const value = await client.send(new DescribeDBInstancesCommand({ DBInstanceIdentifier: resourceId })); const db = value.DBInstances?.[0]; if (!db) throw new Error('POSTCHECK_RESOURCE_NOT_OBSERVED');
     return { resource: resourceId, publiclyAccessible: db.PubliclyAccessible === true, backupRetentionPeriod: Number(db.BackupRetentionPeriod || 0), multiAZ: db.MultiAZ === true };
   }
-  const client = new IAMClient(config); const value = await client.send(new GetRoleCommand({ RoleName: resourceId }));
-  const policy = value.Role?.AssumeRolePolicyDocument || ''; const decoded = decodeURIComponent(String(policy));
+  const client = new IAMClient(config); const value = await client.send(new GetRoleCommand({ RoleName: resourceId })); const policy = value.Role?.AssumeRolePolicyDocument || ''; const decoded = decodeURIComponent(String(policy));
   return { resource: resourceId, wildcardPrincipal: /["']Principal["']\s*:\s*\{?[^}]*["']AWS["']\s*:\s*["']?\*/i.test(decoded) };
 }
 
@@ -60,4 +61,20 @@ export async function collectRemediationPostcheck({ organizationId, executionId,
     await appendExecutionEvent({ organizationId, executionId, nodeId: node.id, attemptId: attempt.id, eventType: 'REMEDIATION_POSTCHECK_FINISHED', actorType: 'SYSTEM', result: 'failed', payload: { remediationId, findingCode: normalizedCode, resourceId, errorCode: clean(error.code || 'POSTCHECK_FAILED') } }).catch(() => {});
     throw error;
   }
+}
+
+/** Resolves the same org-scoped connection/secret used for remediation and performs a fresh targeted check. */
+export async function runRemediationPostcheck({ organizationId, executionId, remediationId, actorId, req = null }) {
+  const result = await pool.query(`SELECT r.payload FROM execution_events r WHERE r.organization_id=$1 AND r.execution_id=$2 AND r.event_type='REMEDIATION_PROPOSED' AND r.payload->'remediation'->>'id'=$3 ORDER BY r.occurred_at ASC LIMIT 1`, [organizationId, executionId, remediationId]);
+  const remediation = result.rows[0]?.payload?.remediation;
+  if (!remediation) throw new Error('REMEDIATION_NOT_FOUND');
+  const execution = await pool.query('SELECT metadata FROM execution_runs WHERE organization_id=$1 AND id=$2', [organizationId, executionId]);
+  const scanId = execution.rows[0]?.metadata?.scanId || execution.rows[0]?.metadata?.scan_id || null;
+  if (!scanId) throw new Error('REMEDIATION_CONNECTION_UNAVAILABLE');
+  const scan = await pool.query(`SELECT c.id,c.provider,c.region FROM scans s JOIN cloud_connections c ON c.id=s.connection_id WHERE s.organization_id=$1 AND s.id=$2`, [organizationId, scanId]);
+  if (!scan.rows[0]) throw new Error('REMEDIATION_CONNECTION_UNAVAILABLE');
+  const connection = scan.rows[0];
+  const credentials = await defaultSecretStore.getSecret(organizationId, connection.id, 'remediation', actorId, req);
+  if (!credentials) throw new Error('REMEDIATION_CREDENTIALS_UNAVAILABLE');
+  return collectRemediationPostcheck({ organizationId, executionId, remediationId, provider: connection.provider, credentials: { ...credentials, ...(connection.region ? { region: credentials.region || connection.region } : {}) }, connectionId: connection.id, resourceId: remediation.resourceId, code: remediation.code });
 }
