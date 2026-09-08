@@ -2,6 +2,7 @@ import { handler as workerHandler } from '../worker.js';
 import { beginExecution, finishExecution } from './execution_worker_hooks.js';
 import { withExecutionContext } from './execution_context.js';
 import { heartbeatNodeAttempt } from './execution_engine.js';
+import { assertExecutionLease } from './execution_fencing.js';
 import {
   createExecutionRun,
   acquireExecutionLease,
@@ -94,7 +95,12 @@ export async function durableWorkerHandler(payload) {
 
     try {
       const result = await workerHandler(payload);
+
+      // Fence the terminal commit: a worker that lost its lease cannot publish a
+      // successful execution merely because its provider work returned normally.
+      await heartbeat();
       if (heartbeatFailure) throw heartbeatFailure;
+      await assertExecutionLease({ organizationId, executionId, workerId: owner, leaseToken: lease.lease_token });
 
       const terminalStatus = result?.status === 'completed' || result?.status === 'partial' ? 'SUCCEEDED' : 'FAILED';
       await finishExecution(execution.attempt.id, terminalStatus, terminalStatus === 'SUCCEEDED' ? null : 'EXECUTION_FAILED');
