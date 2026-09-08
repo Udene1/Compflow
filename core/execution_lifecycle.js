@@ -48,7 +48,7 @@ async function ensureSchema() {
 function cleanError(value) {
   if (!value) return null;
   return String(value)
-    .replace(/(authorization|token|secret|password|client_secret|api[_-]?key)\s*[:=]\s*[^\s,;]+/gi, '$1=[REDACTED]')
+    .replace(/(authorization|token|secret|password|client_secret|api[_-]?key)\s*[:=]\s[^\s,;]+/gi, '$1=[REDACTED]')
     .slice(0, 500);
 }
 
@@ -56,7 +56,9 @@ function assertTransition(current, next) {
   if (!LEGAL[current]?.has(next)) throw new Error(`EXECUTION_TRANSITION_INVALID:${current}->${next}`);
 }
 
-function leaseToken() { return `lease_${crypto.randomUUID()}`; }
+function leaseToken() {
+  return `lease_${crypto.randomUUID()}`;
+}
 
 export async function ensureExecutionLifecycleSchema() { await ensureSchema(); }
 
@@ -128,6 +130,21 @@ export async function finishExecutionRun({ organizationId, executionId, workerId
     await client.query('ROLLBACK').catch(() => {});
     throw error;
   } finally { client.release(); }
+}
+
+export async function cancelExecutionRun({ organizationId, executionId, reason = 'Cancelled by operator' } = {}) {
+  await ensureSchema();
+  if (!organizationId || !executionId) throw new Error('EXECUTION_CANCEL_INPUT_INVALID');
+  const result = await pool.query(`UPDATE execution_runs SET status='CANCELLED', finished_at=NOW(), heartbeat_at=NOW(), lease_expires_at=NULL, lease_owner=NULL, lease_token=NULL, error_code='EXECUTION_CANCELLED', error_message=$3, version=version+1, updated_at=NOW() WHERE id=$1 AND organization_id=$2 AND status IN ('PENDING','RUNNING','FAILED') RETURNING *`, [executionId, organizationId, cleanError(reason)]);
+  if (!result.rows[0]) {
+    const current = await getExecutionRun(organizationId, executionId);
+    if (!current) throw new Error('EXECUTION_NOT_FOUND');
+    if (current.status === 'CANCELLED') return current;
+    if (current.status === 'SUCCEEDED') throw new Error('EXECUTION_ALREADY_TERMINAL');
+    throw new Error('EXECUTION_CANCEL_CONFLICT');
+  }
+  await pool.query(`UPDATE execution_graph_nodes SET status='CANCELLED', updated_at=NOW() WHERE organization_id=$1 AND execution_id=$2 AND status IN ('PENDING','RUNNING','FAILED')`, [organizationId, executionId]);
+  return result.rows[0];
 }
 
 export async function recoverExpiredExecutionLeases({ organizationId = null, executionId = null } = {}) {
