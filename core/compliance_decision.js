@@ -37,7 +37,7 @@ export async function recordControlDecision({ organizationId, executionId, contr
     let current;
     if (existing.rows[0]) {
       const row = existing.rows[0];
-      if (row.outcome === outcome && row.evidence_hash === evidenceHash && row.verification_hash === verificationHash && JSON.stringify(row.rationale) === JSON.stringify(rationale)) {
+      if (row.outcome === outcome && row.evidence_hash === evidenceHash && row.verification_hash === verificationHash) {
         await client.query('COMMIT'); return row;
       }
       current = (await client.query(`UPDATE compliance_decisions SET outcome=$1,evidence_hash=$2,verification_hash=$3,rationale=$4::jsonb,decided_at=clock_timestamp() WHERE id=$5 RETURNING *`, [outcome,evidenceHash,verificationHash,JSON.stringify(rationale),row.id])).rows[0];
@@ -68,7 +68,14 @@ export async function deriveExecutionDecisions({ organizationId, executionId } =
     if (verification?.outcome) outcome = verification.outcome;
     else if (attempt?.status === 'SUCCEEDED') outcome = result.assessment === 'PASS' ? 'PASS' : result.assessment === 'FAIL' ? 'FAIL' : 'INSUFFICIENT_EVIDENCE';
     else outcome = 'INSUFFICIENT_EVIDENCE';
-    decisions.push(await recordControlDecision({ organizationId, executionId, controlId: node.metadata?.controlId, scopeKey: node.logical_key, outcome, evidenceHash: result.evidenceHash || null, verificationHash: verification?.verification_hash || null, rationale: { evaluation: result, evaluationAttemptStatus: attempt?.status || 'MISSING', verification: verification ? { outcome: verification.outcome, id: verification.id } : null, nodeId: node.id } }));
+    const evidenceHash = result.evidenceHash || null;
+    const verificationHash = verification?.verification_hash || null;
+    const existing = await pool.query('SELECT * FROM compliance_decisions WHERE organization_id=$1 AND execution_id=$2 AND scope_key=$3', [organizationId, executionId, node.logical_key]);
+    if (existing.rows[0] && existing.rows[0].outcome === outcome && existing.rows[0].evidence_hash === evidenceHash && existing.rows[0].verification_hash === verificationHash) {
+      decisions.push(existing.rows[0]);
+      continue;
+    }
+    decisions.push(await recordControlDecision({ organizationId, executionId, controlId: node.metadata?.controlId, scopeKey: node.logical_key, outcome, evidenceHash, verificationHash, rationale: { evaluation: result, evaluationAttemptStatus: attempt?.status || 'MISSING', verification: verification ? { outcome: verification.outcome, id: verification.id } : null, nodeId: node.id } }));
   }
   return decisions;
 }
