@@ -52,56 +52,32 @@ app.use((req, res, next) => {
 });
 app.use(express.json({ limit: process.env.COMPFLOW_JSON_LIMIT || '2mb' }));
 
-const generalLimiter = rateLimit({
-    windowMs: 15 * 60 * 1000, limit: 300, standardHeaders: 'draft-7', legacyHeaders: false,
-    message: { error: 'Too Many Requests', message: 'API rate limit exceeded. Please try again later.' },
-    skip: (req) => req.path === '/health'
-});
-const heavyActionLimiter = rateLimit({
-    windowMs: 5 * 60 * 1000, limit: 30, standardHeaders: 'draft-7', legacyHeaders: false,
-    message: { error: 'Too Many Requests', message: 'Heavy operation rate limit exceeded. Please wait 5 minutes before retrying.' }
-});
-const authLimiter = rateLimit({
-    windowMs: 15 * 60 * 1000, limit: 50, standardHeaders: 'draft-7', legacyHeaders: false,
-    message: { error: 'Too Many Requests', message: 'Authentication rate limit exceeded. Please wait before trying again.' }
-});
+const generalLimiter = rateLimit({ windowMs: 15 * 60 * 1000, limit: 300, standardHeaders: 'draft-7', legacyHeaders: false, message: { error: 'Too Many Requests', message: 'API rate limit exceeded. Please try again later.' }, skip: (req) => req.path === '/health' });
+const heavyActionLimiter = rateLimit({ windowMs: 5 * 60 * 1000, limit: 30, standardHeaders: 'draft-7', legacyHeaders: false, message: { error: 'Too Many Requests', message: 'Heavy operation rate limit exceeded. Please wait 5 minutes before retrying.' } });
+const authLimiter = rateLimit({ windowMs: 15 * 60 * 1000, limit: 50, standardHeaders: 'draft-7', legacyHeaders: false, message: { error: 'Too Many Requests', message: 'Authentication rate limit exceeded. Please wait before trying again.' } });
 app.use('/api/', generalLimiter);
 const PORT = process.env.PORT || 3000;
 
 function lambdaAdapter(handler) {
     return async (req, res) => {
         try {
-            const event = {
-                httpMethod: req.method, path: req.path, headers: req.headers,
-                queryStringParameters: req.query || null, body: JSON.stringify(req.body || {}),
-                requestContext: {}, authContext: req.user || null
-            };
+            const event = { httpMethod: req.method, path: req.path, headers: req.headers, queryStringParameters: req.query || null, body: JSON.stringify(req.body || {}), requestContext: {}, authContext: req.user || null };
             const result = await handler(event);
             if (result.headers) for (const [key, val] of Object.entries(result.headers)) res.setHeader(key, val);
             res.status(result.statusCode || 200);
-            if (typeof result.body === 'string') {
-                try { res.json(JSON.parse(result.body)); } catch { res.send(result.body); }
-            } else if (result.body) res.json(result.body); else res.end();
-        } catch (err) {
-            console.error('Adapter crash:', err?.message || 'unknown error');
-            res.status(500).json({ error: 'Internal Server Error' });
-        }
+            if (typeof result.body === 'string') { try { res.json(JSON.parse(result.body)); } catch { res.send(result.body); } } else if (result.body) res.json(result.body); else res.end();
+        } catch (err) { console.error('Adapter crash:', err?.message || 'unknown error'); res.status(500).json({ error: 'Internal Server Error' }); }
     };
 }
 
 app.get('/health', (req, res) => res.json({ status: 'OK', timestamp: new Date().toISOString() }));
 app.get('/health/ready', async (req, res) => {
     try {
-        const { default: pool } = await import('./core/db.js');
-        await pool.query('SELECT 1');
-        const { default: Redis } = await import('ioredis');
-        const redis = new Redis({ host: process.env.REDIS_HOST || 'localhost', port: Number(process.env.REDIS_PORT) || 6379, lazyConnect: true, maxRetriesPerRequest: 1 });
+        const { default: pool } = await import('./core/db.js'); await pool.query('SELECT 1');
+        const { default: Redis } = await import('ioredis'); const redis = new Redis({ host: process.env.REDIS_HOST || 'localhost', port: Number(process.env.REDIS_PORT) || 6379, lazyConnect: true, maxRetriesPerRequest: 1 });
         try { await redis.connect(); await redis.ping(); } finally { await redis.quit().catch(() => {}); }
         return res.status(200).json({ status: 'READY', timestamp: new Date().toISOString() });
-    } catch (error) {
-        console.error('[READINESS] check failed:', error?.message || 'unknown error');
-        return res.status(503).json({ status: 'NOT_READY' });
-    }
+    } catch (error) { console.error('[READINESS] check failed:', error?.message || 'unknown error'); return res.status(503).json({ status: 'NOT_READY' }); }
 });
 app.use('/api/auth', authLimiter, authRouter);
 app.use('/api/v1', generalLimiter, requireAuth([ROLES.VIEWER]), v1Router);
@@ -129,64 +105,26 @@ app.use((error, req, res, next) => {
     if (error?.type === 'entity.parse.failed' || error instanceof SyntaxError) return res.status(400).json({ error: 'INVALID_JSON', message: 'Request body must contain valid JSON.' });
     if (error?.message === 'CORS origin blocked') return res.status(403).json({ error: 'CORS_ORIGIN_BLOCKED' });
     const known = new Map([
-        ['EXECUTION_NOT_FOUND', 404], ['EXECUTION_PLAN_NOT_FOUND', 404], ['EXECUTION_ID_INVALID', 400],
-        ['EXECUTION_ID_CONFLICT', 409], ['INTENT_REQUIRED', 400], ['INTENT_IMMUTABLE', 409], ['IDEMPOTENCY_KEY_INVALID', 400],
-        ['ACTION_INVALID', 400], ['NODE_IDS_INVALID', 400], ['EXECUTION_ALREADY_LEASED', 409],
-        ['EXECUTION_ALREADY_TERMINAL', 409], ['DECISION_EXECUTION_NOT_TERMINAL', 409],
-        ['EXECUTION_MISSING_CONNECTION_METADATA', 409], ['QUEUE_UNAVAILABLE', 503]
+        ['EXECUTION_NOT_FOUND', 404], ['EXECUTION_PLAN_NOT_FOUND', 404], ['EXECUTION_ID_INVALID', 400], ['EXECUTION_ID_CONFLICT', 409], ['INTENT_REQUIRED', 400], ['INTENT_IMMUTABLE', 409], ['IDEMPOTENCY_KEY_INVALID', 400],
+        ['ACTION_INVALID', 400], ['NODE_IDS_INVALID', 400], ['EXECUTION_ALREADY_LEASED', 409], ['EXECUTION_ALREADY_TERMINAL', 409], ['DECISION_EXECUTION_NOT_TERMINAL', 409], ['EXECUTION_MISSING_CONNECTION_METADATA', 409], ['QUEUE_UNAVAILABLE', 503], ['FORBIDDEN_ACTION', 403], ['EXECUTION_STATUS_INVALID', 400]
     ]);
-    const status = known.get(error?.message) || 500;
+    const status = error?.status || known.get(error?.message) || 500;
     console.error('[HTTP] Unhandled request error:', error?.message || error);
-    return res.status(status).json({ error: known.has(error?.message) ? error.message : 'INTERNAL_SERVER_ERROR' });
+    return res.status(status).json({ error: known.has(error?.message) ? error.message : error?.message === 'FORBIDDEN_ACTION' ? 'FORBIDDEN_ACTION' : 'INTERNAL_SERVER_ERROR' });
 });
 
-let httpServer;
-let stopRecovery;
-let worker;
-let shuttingDown = false;
-
+let httpServer; let stopRecovery; let worker; let shuttingDown = false;
 async function startApp() {
     await initDb();
-    stopRecovery = startExecutionRecovery({
-        intervalMs: Number(process.env.COMPFLOW_RECOVERY_INTERVAL_MS) || 15000,
-        staleAfterSeconds: Number(process.env.COMPFLOW_STALE_ATTEMPT_SECONDS) || 90
-    });
+    stopRecovery = startExecutionRecovery({ intervalMs: Number(process.env.COMPFLOW_RECOVERY_INTERVAL_MS) || 15000, staleAfterSeconds: Number(process.env.COMPFLOW_STALE_ATTEMPT_SECONDS) || 90 });
     worker = await listenWorkerQueue(durableWorkerHandler);
-    httpServer = app.listen(PORT, () => {
-        console.log(`[HTTP SERVER] ComplianceFlow API server listening on port ${PORT}`);
-        console.log('[AUTH] Route protection: ENABLED — all /api/* routes require authentication');
-        console.log('[EXECUTION] Durable graph worker: ENABLED');
-        console.log('[EXECUTION] Heartbeat + stale recovery: ENABLED');
-        console.log('[EXECUTION] Live graph stream + controls: ENABLED');
-        console.log('[RBAC] Role hierarchy: OWNER > ADMIN > ENGINEER > AUDITOR > VIEWER');
-    });
+    httpServer = app.listen(PORT, () => { console.log(`[HTTP SERVER] ComplianceFlow API server listening on port ${PORT}`); console.log('[AUTH] Route protection: ENABLED — all /api/* routes require authentication'); console.log('[EXECUTION] Durable graph worker: ENABLED'); console.log('[EXECUTION] Heartbeat + stale recovery: ENABLED'); console.log('[EXECUTION] Live graph stream + controls: ENABLED'); console.log('[RBAC] Role hierarchy: OWNER > ADMIN > ENGINEER > AUDITOR > VIEWER'); });
 }
-
 async function shutdown(signal) {
-    if (shuttingDown) return;
-    shuttingDown = true;
-    console.log(`[SHUTDOWN] Received ${signal}; stopping new work and draining services.`);
-    stopRecovery?.();
-    const forceTimer = setTimeout(() => { console.error('[SHUTDOWN] Graceful shutdown timed out.'); process.exit(1); }, 15000);
-    forceTimer.unref?.();
-    try {
-        if (httpServer) await new Promise(resolve => httpServer.close(resolve));
-        if (worker) await worker.close();
-        await closeQueue();
-        const { default: pool } = await import('./core/db.js');
-        await pool.end();
-        clearTimeout(forceTimer);
-        process.exit(0);
-    } catch (error) {
-        clearTimeout(forceTimer);
-        console.error('[SHUTDOWN] Failed:', error?.message || error);
-        process.exit(1);
-    }
+    if (shuttingDown) return; shuttingDown = true; console.log(`[SHUTDOWN] Received ${signal}; stopping new work and draining services.`); stopRecovery?.();
+    const forceTimer = setTimeout(() => { console.error('[SHUTDOWN] Graceful shutdown timed out.'); process.exit(1); }, 15000); forceTimer.unref?.();
+    try { if (httpServer) await new Promise(resolve => httpServer.close(resolve)); if (worker) await worker.close(); await closeQueue(); const { default: pool } = await import('./core/db.js'); await pool.end(); clearTimeout(forceTimer); process.exit(0); }
+    catch (error) { clearTimeout(forceTimer); console.error('[SHUTDOWN] Failed:', error?.message || error); process.exit(1); }
 }
-process.once('SIGTERM', () => void shutdown('SIGTERM'));
-process.once('SIGINT', () => void shutdown('SIGINT'));
-
-startApp().catch(err => {
-    console.error('Failed to initialize server:', err?.message || err);
-    process.exit(1);
-});
+process.once('SIGTERM', () => void shutdown('SIGTERM')); process.once('SIGINT', () => void shutdown('SIGINT'));
+startApp().catch(err => { console.error('Failed to initialize server:', err?.message || err); process.exit(1); });
