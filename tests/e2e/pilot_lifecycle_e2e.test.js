@@ -96,18 +96,18 @@ describe('Pilot customer lifecycle — real HTTP + PostgreSQL', () => {
 
         const first = await pilotLogin(created.code, email, 'Real Pilot User');
         expect(first.response.status).toBe(200);
-        expect(first.body.firstActivation).toBe(true);
-        expect(first.body.org.name).toBe(companyName);
-        expect(first.body.role).toBe(ROLES.OWNER);
+        expect(first.body.pilot.firstActivation).toBe(true);
+        expect(first.body.organization.name).toBe(companyName);
+        expect(first.body.user.role).toBe(ROLES.OWNER);
 
         const serviceBefore = await fetch(`${BASE_URL}/api/tenants`, { headers: { cookie: first.cookie } });
         expect(serviceBefore.status).toBe(200);
 
         const second = await pilotLogin(created.code, email, 'Ignored On Repeat Login');
         expect(second.response.status).toBe(200);
-        expect(second.body.firstActivation).toBe(false);
-        expect(second.body.user.id).toBe(first.body.user.id);
-        expect(second.body.org.id).toBe(first.body.org.id);
+        expect(second.body.pilot.firstActivation).toBe(false);
+        expect(second.body.user.userId).toBe(first.body.user.userId);
+        expect(second.body.organization.id).toBe(first.body.organization.id);
 
         await db("UPDATE pilot_invitations SET expires_at=CURRENT_TIMESTAMP - INTERVAL '1 second' WHERE id=$1", [created.invitation.id]);
         const expired = await pilotLogin(created.code, email, 'Real Pilot User');
