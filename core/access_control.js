@@ -16,14 +16,31 @@ export const PLAN = Object.freeze({
 });
 
 const ACTIVE_STATUSES = new Set([ENTITLEMENT_STATUS.ACTIVE, ENTITLEMENT_STATUS.TRIAL, ENTITLEMENT_STATUS.PILOT]);
+const KNOWN_PLANS = new Set(Object.values(PLAN));
 
 export function evaluateEntitlement(entitlement, now = new Date()) {
     if (!entitlement) return Object.freeze({ allowed: false, reason: 'SERVICE_ENTITLEMENT_REQUIRED', entitlement: null });
+
     const status = String(entitlement.status || '').toUpperCase();
+    const plan = String(entitlement.plan || '').toLowerCase();
+    if (!KNOWN_PLANS.has(plan)) return Object.freeze({ allowed: false, reason: 'SERVICE_ENTITLEMENT_INVALID_PLAN', entitlement });
     if (!ACTIVE_STATUSES.has(status)) return Object.freeze({ allowed: false, reason: `SERVICE_ENTITLEMENT_${status || 'INVALID'}`, entitlement });
-    if (entitlement.expires_at && new Date(entitlement.expires_at).getTime() <= now.getTime()) {
-        return Object.freeze({ allowed: false, reason: 'SERVICE_ENTITLEMENT_EXPIRED', entitlement });
+
+    const currentTime = now instanceof Date ? now.getTime() : new Date(now).getTime();
+    if (!Number.isFinite(currentTime)) return Object.freeze({ allowed: false, reason: 'SERVICE_ENTITLEMENT_CLOCK_INVALID', entitlement });
+
+    if (entitlement.starts_at) {
+        const startsAt = new Date(entitlement.starts_at).getTime();
+        if (!Number.isFinite(startsAt)) return Object.freeze({ allowed: false, reason: 'SERVICE_ENTITLEMENT_INVALID_START', entitlement });
+        if (startsAt > currentTime) return Object.freeze({ allowed: false, reason: 'SERVICE_ENTITLEMENT_NOT_STARTED', entitlement });
     }
+
+    if (entitlement.expires_at) {
+        const expiresAt = new Date(entitlement.expires_at).getTime();
+        if (!Number.isFinite(expiresAt)) return Object.freeze({ allowed: false, reason: 'SERVICE_ENTITLEMENT_INVALID_EXPIRY', entitlement });
+        if (expiresAt <= currentTime) return Object.freeze({ allowed: false, reason: 'SERVICE_ENTITLEMENT_EXPIRED', entitlement });
+    }
+
     return Object.freeze({ allowed: true, reason: null, entitlement });
 }
 
@@ -34,9 +51,6 @@ function pilotExpiry() {
 }
 
 async function recoverPilotEntitlement(organizationId) {
-    // Pilot authentication is the explicit product-access grant. The audit event is
-    // durable and written during pilot-login, so a missing entitlement row can be
-    // reconstructed without trusting a browser flag or session metadata.
     const provider = await pool.query(
         `SELECT metadata->>'provider' AS provider
          FROM audit_events
@@ -104,8 +118,7 @@ export function requireServiceEntitlement() {
             }
             req.serviceEntitlement = entitlement;
             return next();
-        } catch (error) {
-            // Entitlement authority is PostgreSQL. Never allow service use when it cannot be checked.
+        } catch {
             return res.status(503).json({ error: 'SERVICE_ENTITLEMENT_AUTHORITY_UNAVAILABLE' });
         }
     };
