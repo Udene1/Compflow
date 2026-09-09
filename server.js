@@ -42,6 +42,8 @@ app.use('/api/', generalLimiter);
 const PORT = process.env.PORT || 3000;
 app.get('/health', (req, res) => res.json({ status: 'OK', timestamp: new Date().toISOString() }));
 app.get('/health/ready', async (req, res) => { try { const { default: pool } = await import('./core/db.js'); await pool.query('SELECT 1'); const { default: Redis } = await import('ioredis'); const redis = new Redis({ host: process.env.REDIS_HOST || 'localhost', port: Number(process.env.REDIS_PORT) || 6379, lazyConnect: true, maxRetriesPerRequest: 1 }); try { await redis.connect(); await redis.ping(); } finally { await redis.quit().catch(() => {}); } return res.status(200).json({ status: 'READY', timestamp: new Date().toISOString() }); } catch (error) { console.error('[READINESS] check failed:', error?.message || 'unknown error'); return res.status(503).json({ status: 'NOT_READY' }); } });
+// The legacy global pilot-code endpoint is intentionally inert. Pilot access is issued only through a unique invitation.
+app.post('/api/auth/pilot-login', authLimiter, (req, res) => res.status(410).json({ error: 'LEGACY_PILOT_CODE_DISABLED', message: 'Global pilot codes have been retired. Use your unique pilot invitation link or code.' }));
 app.use('/api/auth', authLimiter, authRouter);
 app.use('/api/pilot', pilotRedeemLimiter, pilotRouter);
 app.use('/api/admin/pilots', adminPilotsRouter);
