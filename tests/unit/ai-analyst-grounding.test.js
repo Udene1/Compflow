@@ -13,4 +13,19 @@ describe('AI analyst deterministic grounding', () => {
     expect(context.remediationProofs[0].claimSafe).toBe(true);
     expect(context.risk.compromiseConfirmed).toBe(false);
   });
+
+  it('rejects a proof that tries to reuse one evidence row as both verification stages', () => {
+    const context = buildAnalystContext({
+      remediationProofs: [{ remediationId: 'r1', findingId: 'f1', baselineScanId: 'scan-old', freshScanId: 'scan-new', controlEvidenceId: 'e1', controlEvidenceHash: 'hash', reanalysisEvidenceId: 'e1', reanalysisEvidenceHash: 'hash', afterComplete: true, claimSafe: true }]
+    });
+    expect(context.remediationProofs[0].claimSafe).toBe(false);
+  });
+
+  it('does not promote legacy alias fields into independent control evidence', () => {
+    const context = buildAnalystContext({
+      remediationProofs: [{ remediationId: 'r1', findingId: 'f1', baselineScanId: 'scan-old', freshScanId: 'scan-new', evidenceId: 'e1', evidenceHash: 'hash', reanalysisEvidenceId: 'e1', reanalysisEvidenceHash: 'hash', afterComplete: true, claimSafe: true }]
+    });
+    expect(context.remediationProofs[0].controlEvidenceId).toBe('');
+    expect(context.remediationProofs[0].claimSafe).toBe(false);
+  });
 });
