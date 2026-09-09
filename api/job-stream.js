@@ -1,10 +1,8 @@
-import pool from '../core/db.js';
-import { jobEvents } from '../core/jobs.js';
+import { getJob, jobEvents } from '../core/jobs.js';
 
 /**
- * SSE Job Stream Endpoint.
- * The stream is opened only after the job's organization ownership is proven
- * from durable PostgreSQL state.
+ * SSE job stream. Authorization is established before opening the stream and
+ * every initial snapshot is read from the organization-scoped durable store.
  */
 export default async function jobStreamHandler(req, res) {
     const jobId = req.query.jobId || req.query.job_id;
@@ -13,24 +11,7 @@ export default async function jobStreamHandler(req, res) {
     if (!organizationId) return res.status(403).json({ error: 'Organization context required' });
     if (!jobId) return res.status(400).json({ error: 'Missing jobId parameter' });
 
-    let job;
-    try {
-        const result = await pool.query(`
-            SELECT j.*
-            FROM jobs j
-            WHERE j.job_id = $1
-              AND EXISTS (
-                  SELECT 1 FROM scans s
-                  WHERE s.job_id = j.job_id AND s.organization_id = $2
-              )
-            LIMIT 1
-        `, [jobId, organizationId]);
-        job = result.rows[0] || null;
-    } catch (error) {
-        console.error('[JOB-STREAM] Ownership lookup failed:', error?.message || error);
-        return res.status(500).json({ error: 'Internal Server Error' });
-    }
-
+    const job = await getJob(jobId, organizationId);
     if (!job) return res.status(404).json({ error: 'Job not found' });
 
     res.writeHead(200, {
@@ -44,18 +25,7 @@ export default async function jobStreamHandler(req, res) {
     const sendSSE = (eventName, data) => {
         if (!res.writableEnded) res.write(`event: ${eventName}\ndata: ${JSON.stringify(data)}\n\n`);
     };
-
-    sendSSE('initial', {
-        jobId: job.job_id,
-        status: job.status,
-        progress: job.progress,
-        logs: job.logs || [],
-        resources: job.resources || [],
-        errorMessage: job.error_message || null,
-        createdAt: job.created_at,
-        updatedAt: job.updated_at,
-        completedAt: job.completed_at || null
-    });
+    sendSSE('initial', job);
 
     const onJobUpdate = (targetJobId, updateData) => {
         if (targetJobId !== jobId || res.writableEnded) return;
