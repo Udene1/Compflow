@@ -44,8 +44,9 @@ export async function beginExecution({ organizationId, executionId, provider, cl
   return { node, attempt, audit };
 }
 
-export async function persistScanGraph({ organizationId, executionId, provider, resources = [] }) {
+export async function persistScanGraph({ organizationId, executionId, provider, connectionId = null, resources = [] }) {
   const executionNodeId = stableUsageId(organizationId, executionId, 'EXECUTION', executionId);
+  if (!connectionId) throw new Error('SCAN_CONNECTION_REQUIRED');
 
   for (const resource of resources) {
     const severity = safeSeverity(resource);
@@ -76,34 +77,18 @@ export async function persistScanGraph({ organizationId, executionId, provider, 
           metadata: { frameworkId, controlId, observationId: observation.id, assessment: controlFailed ? 'FAIL' : 'PASS' }
         });
         await addDependencyEdge({ organizationId, executionId, fromNodeId: observation.id, toNodeId: control.id, edgeType: 'DEPENDS_ON' });
-        const controlAttempt = await recordAttempt({ organizationId, executionId, node: control, metadata: { frameworkId, controlId, observationId: observation.id }, failed: controlFailed, errorCode: 'CONTROL_ASSESSMENT_FAILED' });
+        await recordAttempt({ organizationId, executionId, node: control, metadata: { frameworkId, controlId, observationId: observation.id }, failed: controlFailed, errorCode: 'CONTROL_ASSESSMENT_FAILED' });
 
         const evidence = await upsertGraphNode({
           organizationId, executionId, nodeType: 'EVIDENCE', logicalKey: `${frameworkId}:${controlId}:${observation.id}`,
           status: 'PENDING', label: `Evidence — ${String(frameworkId).toUpperCase()} ${controlId}`,
-          metadata: { frameworkId, controlId, observationId: observation.id, source: 'cloud_scan', collectionStatus: controlFailed ? 'BLOCKED_BY_CONTROL' : 'PENDING' }
+          metadata: { frameworkId, controlId, observationId: observation.id, source: 'cloud_scan', collectionStatus: 'PENDING' }
         });
         await addDependencyEdge({ organizationId, executionId, fromNodeId: control.id, toNodeId: evidence.id, edgeType: 'DEPENDS_ON' });
-        if (!controlFailed) await recordAttempt({ organizationId, executionId, node: evidence, metadata: { frameworkId, controlId, observationId: observation.id, source: 'cloud_scan' }, failed: false, errorCode: null });
 
-        if (controlFailed) {
-          const risk = await upsertGraphNode({
-            organizationId, executionId, nodeType: 'RISK', logicalKey: `${frameworkId}:${controlId}:${observation.id}`,
-            status: 'PENDING', label: resource.issue || `Risk — ${String(frameworkId).toUpperCase()} ${controlId}`,
-            metadata: { frameworkId, controlId, observationId: observation.id, severity: resource.severity || 'unknown', issue: resource.issue || null }
-          });
-          await addDependencyEdge({ organizationId, executionId, fromNodeId: control.id, toNodeId: risk.id, edgeType: 'DEPENDS_ON' });
-          const remediation = await upsertGraphNode({
-            organizationId, executionId, nodeType: 'REMEDIATION', logicalKey: `${frameworkId}:${controlId}:${observation.id}`,
-            status: 'PENDING', label: `Remediation — ${resource.name || controlId}`,
-            metadata: { frameworkId, controlId, observationId: observation.id, issue: resource.issue || null, requiresApproval: true }
-          });
-          await addDependencyEdge({ organizationId, executionId, fromNodeId: risk.id, toNodeId: remediation.id, edgeType: 'DEPENDS_ON' });
-        }
-
-        // Evidence is an authoritative record, not merely an execution-graph node.
-        // Record it from the real provider observation even when the control failed:
-        // a failed assessment still needs its underlying cloud evidence persisted.
+        // A failed control still has provider evidence. Evidence collection is not
+        // the same thing as passing the control, so persist the real observation
+        // for both PASS and FAIL assessments.
         const evidenceAttempt = await recordAttempt({
           organizationId,
           executionId,
@@ -120,7 +105,7 @@ export async function persistScanGraph({ organizationId, executionId, provider, 
             attemptId: evidenceAttempt.id,
             controlId,
             provider,
-            connectionId: null,
+            connectionId,
             resourceId: resource.id || resource.name || null,
             sourceType: 'cloud_scan',
             sourceRef: executionId,
@@ -140,6 +125,21 @@ export async function persistScanGraph({ organizationId, executionId, provider, 
               }
             }
           });
+        }
+
+        if (controlFailed) {
+          const risk = await upsertGraphNode({
+            organizationId, executionId, nodeType: 'RISK', logicalKey: `${frameworkId}:${controlId}:${observation.id}`,
+            status: 'PENDING', label: resource.issue || `Risk — ${String(frameworkId).toUpperCase()} ${controlId}`,
+            metadata: { frameworkId, controlId, observationId: observation.id, severity: resource.severity || 'unknown', issue: resource.issue || null }
+          });
+          await addDependencyEdge({ organizationId, executionId, fromNodeId: control.id, toNodeId: risk.id, edgeType: 'DEPENDS_ON' });
+          const remediation = await upsertGraphNode({
+            organizationId, executionId, nodeType: 'REMEDIATION', logicalKey: `${frameworkId}:${controlId}:${observation.id}`,
+            status: 'PENDING', label: `Remediation — ${resource.name || controlId}`,
+            metadata: { frameworkId, controlId, observationId: observation.id, issue: resource.issue || null, requiresApproval: true }
+          });
+          await addDependencyEdge({ organizationId, executionId, fromNodeId: risk.id, toNodeId: remediation.id, edgeType: 'DEPENDS_ON' });
         }
       }
     }
