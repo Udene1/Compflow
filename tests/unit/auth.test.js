@@ -32,7 +32,6 @@ describe('Auth Engine — Session & Token Management', () => {
         expect(session.payload.role).toBe(ROLES.ADMIN);
         expect(session.payload.orgId).toBe('org_acme');
 
-        // Validation test
         const result = await validateSessionToken(session.token);
         expect(result.valid).toBe(true);
         expect(result.user.email).toBe('alice@acme-corp.com');
@@ -41,8 +40,6 @@ describe('Auth Engine — Session & Token Management', () => {
 
     it('rejects tampered or forged session tokens', async () => {
         const session = await createSessionToken(mockUser, mockOrg, ROLES.ENGINEER, 7);
-        
-        // Tamper with payload by changing role to OWNER without updating signature
         const decoded = JSON.parse(Buffer.from(session.token, 'base64url').toString('utf8'));
         decoded.payload.role = ROLES.OWNER;
         const tamperedToken = Buffer.from(JSON.stringify(decoded)).toString('base64url');
@@ -53,7 +50,6 @@ describe('Auth Engine — Session & Token Management', () => {
     });
 
     it('rejects expired session tokens', async () => {
-        // Create an expired session (0 days)
         const session = await createSessionToken(mockUser, mockOrg, ROLES.ENGINEER, -1);
         const result = await validateSessionToken(session.token);
 
@@ -64,28 +60,19 @@ describe('Auth Engine — Session & Token Management', () => {
 
 describe('Auth Engine — Role-Based Access Control (RBAC)', () => {
     it('enforces role hierarchy correctly', () => {
-        // OWNER satisfies all roles
         expect(hasRole(ROLES.OWNER, [ROLES.OWNER])).toBe(true);
         expect(hasRole(ROLES.OWNER, [ROLES.ADMIN])).toBe(true);
         expect(hasRole(ROLES.OWNER, [ROLES.ENGINEER])).toBe(true);
         expect(hasRole(ROLES.OWNER, [ROLES.AUDITOR])).toBe(true);
         expect(hasRole(ROLES.OWNER, [ROLES.VIEWER])).toBe(true);
-
-        // ADMIN satisfies ENGINEER and VIEWER
         expect(hasRole(ROLES.ADMIN, [ROLES.ADMIN])).toBe(true);
         expect(hasRole(ROLES.ADMIN, [ROLES.ENGINEER])).toBe(true);
         expect(hasRole(ROLES.ADMIN, [ROLES.VIEWER])).toBe(true);
         expect(hasRole(ROLES.ADMIN, [ROLES.OWNER])).toBe(false);
-
-        // ENGINEER cannot access ADMIN-only routes
         expect(hasRole(ROLES.ENGINEER, [ROLES.ENGINEER])).toBe(true);
         expect(hasRole(ROLES.ENGINEER, [ROLES.ADMIN])).toBe(false);
-
-        // AUDITOR can access AUDITOR and VIEWER
         expect(hasRole(ROLES.AUDITOR, [ROLES.AUDITOR])).toBe(true);
         expect(hasRole(ROLES.AUDITOR, [ROLES.ENGINEER])).toBe(false);
-
-        // VIEWER cannot perform ENGINEER or ADMIN actions
         expect(hasRole(ROLES.VIEWER, [ROLES.VIEWER])).toBe(true);
         expect(hasRole(ROLES.VIEWER, [ROLES.ENGINEER])).toBe(false);
         expect(hasRole(ROLES.VIEWER, [ROLES.ADMIN])).toBe(false);
@@ -106,7 +93,7 @@ describe('Auth Engine — User Provisioning & Identity Model', () => {
         expect(result.user.email).toBe('bob@enterprise-fintech.io');
         expect(result.user.name).toBe('Bob Jenkins');
         expect(result.org.domain).toBe('enterprise-fintech.io');
-        expect(result.role).toBe(ROLES.OWNER); // first user is OWNER
+        expect(result.role).toBe(ROLES.OWNER);
     });
 
     it('recognizes existing identity on subsequent login preserving user ID (Amendment 4)', async () => {
@@ -141,24 +128,21 @@ describe('Auth Guard Middleware', () => {
 
     it('allows requests with valid session cookie and sufficient role', async () => {
         const session = await createSessionToken(mockUser, mockOrg, ROLES.ADMIN, 7);
-        const middleware = requireAuth([ROLES.ENGINEER]); // ADMIN >= ENGINEER
+        const middleware = requireAuth([ROLES.ENGINEER]);
 
         const req = {
             headers: { cookie: `cf_session=${session.token}` }
         };
         let nextCalled = false;
-        const res = {
-            status: () => ({ json: () => {} })
-        };
-        const next = () => { nextCalled = true; };
+        const res = { status: () => ({ json: () => {} }) };
+        await middleware(req, res, () => { nextCalled = true; });
 
-        await middleware(req, res, next);
         expect(nextCalled).toBe(true);
         expect(req.user).toBeDefined();
         expect(req.user.email).toBe('secops@org.com');
     });
 
-    it('blocks unauthenticated requests with 401', async () => {
+    it('returns a stable authentication error code for unauthenticated requests', async () => {
         const middleware = requireAuth([ROLES.ENGINEER]);
         const req = { headers: {} };
         let statusCode = 0;
@@ -173,12 +157,13 @@ describe('Auth Guard Middleware', () => {
 
         await middleware(req, res, () => {});
         expect(statusCode).toBe(401);
-        expect(responseJson.error).toBe('Unauthorized');
+        expect(responseJson.error).toBe('AUTHENTICATION_REQUIRED');
+        expect(responseJson.message).toContain('Authentication required');
     });
 
-    it('blocks insufficient roles with 403 Forbidden', async () => {
+    it('returns a stable authorization error code for insufficient roles', async () => {
         const session = await createSessionToken(mockUser, mockOrg, ROLES.VIEWER, 7);
-        const middleware = requireAuth([ROLES.ADMIN]); // VIEWER < ADMIN
+        const middleware = requireAuth([ROLES.ADMIN]);
 
         const req = {
             headers: { cookie: `cf_session=${session.token}` }
@@ -195,6 +180,7 @@ describe('Auth Guard Middleware', () => {
 
         await middleware(req, res, () => {});
         expect(statusCode).toBe(403);
-        expect(responseJson.error).toBe('Forbidden');
+        expect(responseJson.error).toBe('INSUFFICIENT_PERMISSIONS');
+        expect(responseJson.message).toBe('Insufficient permissions.');
     });
 });
