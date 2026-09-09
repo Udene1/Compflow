@@ -1,5 +1,5 @@
 // ─── ComplianceFlow AI: Resource Scanner ───
-// Connects to AWS Lambda backend, tracks jobs, and streams results to the terminal
+// Triggers the durable server-side scan pipeline. Cloud secrets never leave SecretStore.
 
 window.Scanner = (() => {
     let scannedResources = [];
@@ -9,37 +9,36 @@ window.Scanner = (() => {
         if (btn) btn.addEventListener('click', startScan);
     }
 
+    function apiErrorMessage(response, data) {
+        if (data?.message) return data.message;
+        if (data?.error) return data.error;
+        return `Request failed (${response.status}).`;
+    }
+
     async function startScan() {
         if (!CloudConnect.isConnected()) {
-            LiveTerminal.log('insight', 'ERROR: No cloud provider connected. Go to Cloud Connect first.');
+            LiveTerminal.log('insight', 'ERROR: No verified cloud provider connected. Complete Cloud Connect first.');
             return;
         }
-
-        const providers = CloudConnect.getProviders();
-        const provider = providers[0];
-        const credentials = CloudConnect.getCredentials(provider);
-
-        if (!credentials) {
-            LiveTerminal.log('insight', 'ERROR: Missing credentials for ' + provider);
-            CloudConnect.openSettings(provider);
+        const provider = CloudConnect.getProviders()[0];
+        const connectionId = CloudConnect.getConnectionId(provider);
+        if (!connectionId) {
+            LiveTerminal.log('insight', 'ERROR: No durable cloud connection is available. Reconnect the environment.');
             return;
         }
 
         const btn = document.getElementById('btn-start-scan');
-        
-        // Throttling: Prevent rapid re-scanning
         const now = Date.now();
-        const COOLDOWN = 60000; // 60 seconds
-        if (window._lastScanTime && (now - window._lastScanTime < COOLDOWN)) {
+        const COOLDOWN = 60000;
+        if (window._lastScanTime && now - window._lastScanTime < COOLDOWN) {
             const remaining = Math.ceil((COOLDOWN - (now - window._lastScanTime)) / 1000);
-            if (window.LiveTerminal) LiveTerminal.log('system', 'Scanner initialized. Ready for resource interrogation.');
+            LiveTerminal.log('system', `Scan throttled. Try again in ${remaining}s.`);
             return;
         }
 
         btn.disabled = true;
         btn.textContent = 'Analyzing your perimeter...';
         window._lastScanTime = now;
-
         scannedResources = [];
         document.getElementById('resource-tbody').innerHTML = '';
         document.getElementById('scan-empty').style.display = 'none';
@@ -48,409 +47,125 @@ window.Scanner = (() => {
         document.getElementById('scan-progress-wrap').style.display = 'block';
         document.getElementById('scan-progress-fill').style.width = '5%';
 
-        if (window.LiveTerminal) LiveTerminal.log('system', `Contacting real cloud APIs for ${provider.toUpperCase()}...`);
-        if (window.LiveTerminal) LiveTerminal.log('agent', 'Resource interrogation complete. Mapping findings to ' + Frameworks.getCurrent().name);
+        LiveTerminal.log('system', `Contacting real cloud APIs for ${provider.toUpperCase()}...`);
+        LiveTerminal.log('system', 'Consulting the durable cloud scan engine...');
 
         const BASE_URL = window.COMPLIANCE_API_URL;
-        
         try {
-            const clientId = 'adhoc_user';
-            LiveTerminal.log('system', 'Consulting the cloud engine for your infrastructure map...');
-
-            // ── Step 1: Trigger scan and get jobId ──
-            const settings = CloudConnect.getSettings();
-            const email = settings.reportEmail;
-
             const fetchFn = (window.AuthUI && window.AuthUI.authFetch) ? window.AuthUI.authFetch : fetch;
             const triggerRes = await fetchFn(`${BASE_URL}/api/scan`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ provider, credentials, clientId, email })
+                body: JSON.stringify({ provider, connectionId, clientId: 'adhoc_user' })
             });
-
-            if (!triggerRes.ok) {
-                if (triggerRes.status === 401) {
-                    throw new Error("Authentication required. Please sign in to trigger scans.");
-                }
-                throw new Error(`HTTP ${triggerRes.status}`);
-            }
-
-            let triggerData;
-            try {
-                triggerData = await triggerRes.json();
-            } catch (jsonErr) {
-                throw new Error("Backend returned non-JSON response. Please check if Lambda is live.");
-            }
-            
-            if (triggerData.error) throw new Error(triggerData.error);
+            const triggerData = await triggerRes.json().catch(() => ({}));
+            if (!triggerRes.ok) throw new Error(apiErrorMessage(triggerRes, triggerData));
 
             const jobId = triggerData.jobId;
-            if (!jobId) {
-                throw new Error("No jobId returned from scan endpoint.");
-            }
-
+            if (!jobId) throw new Error('The scan API did not return a durable job ID.');
             LiveTerminal.log('system', `Scan job created (ID: ${jobId.slice(0, 8)}...). Streaming progress...`);
 
-            // ── Step 2: Stream job status via Server-Sent Events (SSE) ──
             const results = await streamJobStatus(jobId, BASE_URL);
-            if (!results) throw new Error("Scan timed out or failed on backend.");
-
+            if (!results) throw new Error('Scan timed out or failed on backend.');
             scannedResources = results;
             document.getElementById('scan-progress-fill').style.width = '100%';
+            await displayResults(scannedResources);
 
-            displayResults(scannedResources);
-
-            // Update Onboarding Checklist Step 3 & 4
             const stepScan = document.getElementById('step-scan');
-            if (stepScan) {
-                stepScan.classList.add('completed');
-                const numEl = document.getElementById('step-scan-num');
-                if (numEl) numEl.textContent = '✓';
-            }
+            if (stepScan) { stepScan.classList.add('completed'); const numEl = document.getElementById('step-scan-num'); if (numEl) numEl.textContent = '✓'; }
             const stepEvidence = document.getElementById('step-evidence');
-            if (stepEvidence) {
-                stepEvidence.classList.add('ready');
-            }
+            if (stepEvidence) stepEvidence.classList.add('ready');
             const progressBadge = document.getElementById('checklist-progress-text');
-            if (progressBadge) {
-                progressBadge.textContent = '3 of 4 Steps Complete';
-            }
-
-            // Transition from Mode A (Activation) to Mode B (Activated App)
-            if (window.AuthUI && typeof window.AuthUI.setMode === 'function') {
-                window.AuthUI.setMode('app');
-            }
-            
-            btn.disabled = false;
-            btn.textContent = 'Run scan';
+            if (progressBadge) progressBadge.textContent = '3 of 4 Steps Complete';
+            if (window.AuthUI?.setMode) window.AuthUI.setMode('app');
         } catch (err) {
             console.error(err);
             LiveTerminal.log('insight', `SCAN FAILED: ${err.message}`);
+        } finally {
             btn.disabled = false;
-            btn.textContent = 'Retry Scan';
+            btn.textContent = 'Run scan';
         }
     }
 
-    /**
-     * Connects to /api/job-stream via SSE for real-time terminal progress updates.
-     * Streams logs to terminal and updates progress bar in real-time.
-     */
     function streamJobStatus(jobId, baseUrl) {
         return new Promise((resolve, reject) => {
-            const streamUrl = `${baseUrl || ''}/api/job-stream?jobId=${jobId}`;
-            console.log(`[SSE] Connecting to live job stream at ${streamUrl}...`);
-
-            const eventSource = new EventSource(streamUrl);
+            const streamUrl = `${baseUrl}/api/job-stream?jobId=${encodeURIComponent(jobId)}`;
+            const eventSource = new EventSource(streamUrl, { withCredentials: true });
             let logIndex = 0;
             let receivedMessage = false;
-
-            // Instant polling fallback if SSE is silent for 2 seconds
             const fallbackTimer = setTimeout(() => {
                 if (!receivedMessage) {
-                    console.log('[SSE] SSE quiet, starting parallel poll...');
-                    pollJobStatus(jobId, baseUrl, logIndex).then((res) => {
-                        try { eventSource.close(); } catch (_) {}
-                        resolve(res);
-                    }).catch((err) => {
-                        try { eventSource.close(); } catch (_) {}
-                        reject(err);
-                    });
+                    pollJobStatus(jobId, baseUrl, logIndex).then(res => { eventSource.close(); resolve(res); }).catch(err => { eventSource.close(); reject(err); });
                 }
             }, 2000);
 
-            eventSource.onmessage = async (event) => {
+            eventSource.onmessage = event => {
                 receivedMessage = true;
                 clearTimeout(fallbackTimer);
                 try {
                     const data = JSON.parse(event.data);
-                    
-                    if (data.logs && data.logs.length > logIndex) {
-                        logIndex = LiveTerminal.logBatch(data.logs, logIndex);
-                    } else if (data.newLog) {
-                        logIndex = LiveTerminal.logBatch([data.newLog], 0);
-                    }
-
-                    if (typeof data.progress === 'number' && data.progress > 0) {
-                        document.getElementById('scan-progress-fill').style.width = `${Math.min(data.progress, 99)}%`;
-                    }
-
-                    if (data.status === 'completed') {
-                        eventSource.close();
-                        resolve(data.resources || []);
-                    } else if (data.status === 'failed') {
-                        eventSource.close();
-                        reject(new Error(data.errorMessage || 'Scan failed on backend.'));
-                    }
-                } catch (err) {
-                    console.error('[SSE] Error parsing SSE event:', err);
-                }
+                    if (data.logs && data.logs.length > logIndex) logIndex = LiveTerminal.logBatch(data.logs, logIndex);
+                    else if (data.newLog) logIndex = LiveTerminal.logBatch([data.newLog], 0);
+                    if (typeof data.progress === 'number' && data.progress > 0) document.getElementById('scan-progress-fill').style.width = `${Math.min(data.progress, 99)}%`;
+                    if (data.status === 'completed' || data.status === 'partial') { eventSource.close(); resolve(data.resources || []); }
+                    else if (data.status === 'failed') { eventSource.close(); reject(new Error(data.errorMessage || 'Scan failed on backend.')); }
+                } catch (err) { console.error('[SSE] Error parsing event:', err); }
             };
-
-            eventSource.onerror = (err) => {
+            eventSource.onerror = () => {
                 clearTimeout(fallbackTimer);
-                console.warn('[SSE] EventSource connection error, falling back to polling...', err);
                 eventSource.close();
                 pollJobStatus(jobId, baseUrl, logIndex).then(resolve).catch(reject);
             };
         });
     }
 
-    /**
-     * Fallback polling if SSE is unsupported or blocked by network proxies.
-     */
     async function pollJobStatus(jobId, baseUrl, initialLogIndex = 0) {
         const MAX_POLL_MS = 15 * 60 * 1000;
         const POLL_INTERVAL = 3000;
         const start = Date.now();
         let logIndex = initialLogIndex;
-
         while (Date.now() - start < MAX_POLL_MS) {
             await new Promise(r => setTimeout(r, POLL_INTERVAL));
-
-            try {
-                const fetchFn = (window.AuthUI && window.AuthUI.authFetch) ? window.AuthUI.authFetch : fetch;
-                const res = await fetchFn(`${baseUrl}/api/job-status?jobId=${jobId}`);
-                if (!res.ok) continue;
-
-                const job = await res.json();
-
-                if (job.logs && job.logs.length > logIndex) {
-                    logIndex = LiveTerminal.logBatch(job.logs, logIndex);
-                }
-
-                if (job.progress > 0) {
-                    document.getElementById('scan-progress-fill').style.width = `${Math.min(job.progress, 99)}%`;
-                }
-
-                if (job.status === 'completed') {
-                    return job.resources || [];
-                }
-
-                if (job.status === 'failed') {
-                    throw new Error(job.errorMessage || 'Scan failed on backend.');
-                }
-            } catch (e) {
-                if (e.message.includes('failed')) throw e;
-            }
+            const fetchFn = (window.AuthUI && window.AuthUI.authFetch) ? window.AuthUI.authFetch : fetch;
+            const res = await fetchFn(`${baseUrl}/api/job-status?jobId=${encodeURIComponent(jobId)}`);
+            const job = await res.json().catch(() => ({}));
+            if (!res.ok) throw new Error(apiErrorMessage(res, job));
+            if (job.logs && job.logs.length > logIndex) logIndex = LiveTerminal.logBatch(job.logs, logIndex);
+            if (job.progress > 0) document.getElementById('scan-progress-fill').style.width = `${Math.min(job.progress, 99)}%`;
+            if (job.status === 'completed' || job.status === 'partial') return job.resources || [];
+            if (job.status === 'failed') throw new Error(job.errorMessage || 'Scan failed on backend.');
         }
-
         return null;
     }
 
     async function displayResults(resources) {
         document.getElementById('resource-tbody').innerHTML = '';
-        
-        // Use for...of to correctly await async evidence capture
         for (const [i, res] of resources.entries()) {
             res.id = i;
             const controlKeys = Frameworks.getMapping(res.type, res.issue);
             res.controlKeys = controlKeys;
-            
             const activeControlKey = controlKeys.find(k => k.startsWith(Frameworks.getCurrentId())) || controlKeys[0];
             const controlDetail = Frameworks.getControlDetails(activeControlKey);
             res.control = controlDetail ? controlDetail.id : 'N/A';
-
             addResourceRow(res);
             if (window.Evidence) await Evidence.captureFromScan(res);
-            
-            if (res.severity === 'critical') {
-                LiveTerminal.log('insight', `CRITICAL: ${res.type} "${res.name}" — ${res.issue}`);
-                // Proactive AI Hook
-                if (window.ChatEngine && !window._aiPrompted) {
-                    window._aiPrompted = true;
-                    setTimeout(() => {
-                        ChatEngine.addMessage('ai', `<strong>Proactive Intervention</strong>: I've detected a critical vulnerability: <code>${res.issue}</code> on resource <code>${res.name}</code>. Should I apply a security patch for you?`);
-                    }, 2000);
-                }
-            } else if (res.severity === 'warning') {
-                LiveTerminal.log('agent', `Warning: ${res.type} "${res.name}" — ${res.issue}`);
-            }
+            if (res.severity === 'critical') LiveTerminal.log('insight', `CRITICAL: ${res.type} "${res.name}" — ${res.issue}`);
+            else if (res.severity === 'warning') LiveTerminal.log('agent', `Warning: ${res.type} "${res.name}" — ${res.issue}`);
         }
-
         LiveTerminal.log('output', `Scan complete: ${resources.length} resources found.`);
-        updateStatsUI();
-        updateScore();
-        if (window.CloudConnect) CloudConnect.updateNextScanUI();
-        
+        updateStatsUI(); updateScore();
+        if (window.CloudConnect) CloudConnect.updateChips();
         if (window.DriftEngine) DriftEngine.setBaseline(resources);
         if (window.Remediation) Remediation.buildFromScan(resources);
         if (window.Evidence) Evidence.refreshView();
     }
 
-    async function runBackgroundScan() {
-        if (!CloudConnect.isConnected()) return null;
-        const providers = CloudConnect.getProviders();
-        const provider = providers[0];
-        const credentials = CloudConnect.getCredentials(provider);
+    function getScannedResources() { return scannedResources; }
+    function getCounts() { const total = scannedResources.length; return { total, pass: scannedResources.filter(r => r.severity === 'pass').length, warn: scannedResources.filter(r => r.severity === 'warning').length, crit: scannedResources.filter(r => r.severity === 'critical').length }; }
+    function updateStatsUI() { const counts = getCounts(); const ids = [['stat-total', counts.total], ['stat-pass', counts.pass], ['stat-warn', counts.warn], ['stat-crit', counts.crit]]; ids.forEach(([id, value]) => { const el = document.getElementById(id); if (el) el.textContent = value; }); }
+    function updateScore() { return; }
+    function addResourceRow(res) { const tbody = document.getElementById('resource-tbody'); if (!tbody) return; const tr = document.createElement('tr'); tr.className = 'resource-row'; tr.innerHTML = `<td><div class="resource-name">${res.icon || ''} ${res.name || 'Resource'}</div><div style="font-size:.72rem;color:var(--text-dim);margin-top:2px;">${res.issue || 'No issues'}</div></td><td><span class="resource-type">${res.type || 'UNKNOWN'}</span></td><td style="color:var(--text-muted);font-size:.82rem;">${res.region || '—'}</td><td><span class="severity-badge">${res.severity || 'unknown'}</span></td><td><div class="control-badges-wrap">${res.control || 'N/A'}</div></td>`; tbody.appendChild(tr); }
 
-        const BASE_URL = window.COMPLIANCE_API_URL;
-        try {
-            const fetchFn = (window.AuthUI && window.AuthUI.authFetch) ? window.AuthUI.authFetch : fetch;
-            const res = await fetchFn(`${BASE_URL}/api/scan`, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ provider, credentials, email: document.getElementById('scan-report-email')?.value })
-            });
-            const data = await res.json();
-            return data.resources || [];
-        } catch (e) { return null; }
-    }
-
-    function addResourceRow(res) {
-        const tbody = document.getElementById('resource-tbody');
-        const tr = document.createElement('tr');
-        tr.className = 'resource-row';
-        tr.id = 'resource-row-' + res.id;
-
-        const sevClass = res.severity === 'pass' ? 'pass' : res.severity === 'warning' ? 'warning' : 'critical';
-        const sevLabel = res.severity === 'pass' ? '✓ Pass' : res.severity === 'warning' ? '⚠ Warning' : '✕ Critical';
-
-        // Evaluate custom organizational governance policies
-        let policyBadgesHtml = '';
-        if (window.PoliciesUI && typeof window.PoliciesUI.evaluateResource === 'function') {
-            const policyViolations = window.PoliciesUI.evaluateResource(res);
-            if (policyViolations.length > 0) {
-                policyBadgesHtml = policyViolations.map(v => 
-                    `<span class="policy-violation-badge" title="${v.description}">🏷️ ${v.policyId}</span>`
-                ).join(' ');
-            }
-        }
-
-        tr.innerHTML = `
-            <td><div class="resource-name">${res.icon} ${res.name}</div>
-                <div style="font-size:0.72rem; color:var(--text-dim); margin-top:2px;">
-                    ${res.issue || 'No issues'}
-                    ${policyBadgesHtml}
-                    ${res.requires_legal_review ? `<div class="legal-tag" title="${res.legal_review_reason}">⚠️ Legal Review</div>` : ''}
-                </div></td>
-            <td><span class="resource-type">${res.type}</span></td>
-            <td style="color:var(--text-muted); font-size:0.82rem;">${res.region}</td>
-            <td><span class="severity-badge ${sevClass}">${sevLabel}</span></td>
-            <td><div class="control-badges-wrap">${controlsHtml}</div></td>
-        `;
-        tbody.appendChild(tr);
-    }
-
-    function updateStatsUI() {
-        const counts = getCounts();
-        document.getElementById('stat-total').textContent = counts.total;
-        document.getElementById('stat-pass').textContent = counts.pass;
-        document.getElementById('stat-warn').textContent = counts.warn;
-        document.getElementById('stat-crit').textContent = counts.crit;
-        
-        // Maturity Matrix Calculation
-        const maturity = { soc2: 42, gdpr: 31, hipaa: 26, iso27001: 35 };
-        const failures = { soc2: 0, gdpr: 0, hipaa: 0, iso27001: 0 };
-
-        scannedResources.forEach(res => {
-            if (res.severity !== 'pass' && res.controls) {
-                if (res.controls.soc2) failures.soc2 += res.controls.soc2.length;
-                if (res.controls.gdpr) failures.gdpr += res.controls.gdpr.length;
-                if (res.controls.hipaa) failures.hipaa += res.controls.hipaa.length;
-                if (res.controls.iso27001) failures.iso27001 += res.controls.iso27001.length;
-            }
-        });
-
-        const updateMaturity = (id, total, failed) => {
-            const passed = Math.max(0, total - failed);
-            const percent = Math.round((passed / total) * 100);
-            const el = document.getElementById(`maturity-${id}`);
-            const fill = document.getElementById(`fill-${id}`);
-            if (el) el.textContent = `${passed}/${total}`;
-            if (fill) fill.style.width = `${percent}%`;
-        };
-
-        document.getElementById('maturity-grid').style.display = 'grid';
-        updateMaturity('soc2', 42, failures.soc2);
-        updateMaturity('gdpr', 31, failures.gdpr);
-        updateMaturity('hipaa', 26, failures.hipaa);
-        updateMaturity('iso', 35, failures.iso27001);
-
-        const badge = document.getElementById('issues-badge');
-        const issues = scannedResources.filter(r => r.severity !== 'pass');
-        if (issues.length > 0) {
-            badge.style.display = 'inline';
-            badge.textContent = issues.length;
-        } else {
-            badge.style.display = 'none';
-        }
-    }
-
-    function getCounts() {
-        const total = scannedResources.length;
-        const pass = scannedResources.filter(r => r.severity === 'pass').length;
-        const warn = scannedResources.filter(r => r.severity === 'warning').length;
-        const crit = scannedResources.filter(r => r.severity === 'critical').length;
-        return { total, pass, warn, crit };
-    }
-
-    function updateScore() {
-        const counts = getCounts();
-        const score = counts.total > 0 ? Math.round((counts.pass / counts.total) * 100) : 0;
-        document.getElementById('sidebar-score').textContent = score + '%';
-    }
-
-    async function markFixed(resourceId) {
-        const res = scannedResources.find(r => r.id === resourceId);
-        if (res) {
-            const before = { severity: res.severity, issue: res.issue };
-            res.severity = 'pass';
-            res.issue = null;
-
-            if (window.Evidence) {
-                await Evidence.captureFromRemediation(res, before, { severity: 'pass', issue: null });
-                Evidence.refreshView();
-            }
-
-            const row = document.getElementById('resource-row-' + resourceId);
-            if (row) {
-                const badge = row.querySelector('.severity-badge');
-                badge.className = 'severity-badge pass';
-                badge.textContent = '✓ Pass';
-                const issueDiv = row.querySelector('.resource-name').parentElement.querySelector('div:nth-child(2)');
-                if (issueDiv) issueDiv.textContent = 'Remediated';
-            }
-            updateStatsUI();
-            updateScore();
-        }
-    }
-
-    function updateEvidenceBadge() {
-        if (!window.Evidence) return;
-        const log = Evidence.getEvidenceLog();
-        const badge = document.getElementById('evidence-badge');
-        if (badge && log.length > 0) {
-            badge.style.display = 'inline';
-            badge.textContent = log.length;
-        }
-    }
-
-    function simulateDrift() {
-        if (scannedResources.length === 0) return;
-        const passing = scannedResources.filter(r => r.severity === 'pass');
-        if (passing.length === 0) return;
-        
-        const target = passing[Math.floor(Math.random() * passing.length)];
-        target.severity = 'critical';
-        target.issue = 'S3 Public Access Block disabled (Drift Detected)';
-        
-        LiveTerminal.log('insight', `SIMULATED DRIFT: Resource "${target.name}" has been modified externally.`);
-        
-        const row = document.getElementById('resource-row-' + target.id);
-        if (row) {
-            const badge = row.querySelector('.severity-badge');
-            badge.className = 'severity-badge critical';
-            badge.textContent = '✕ Critical';
-            const issueDiv = row.querySelector('.resource-name').parentElement.querySelector('div:nth-child(2)');
-            if (issueDiv) issueDiv.textContent = target.issue;
-        }
-        updateStatsUI();
-        updateScore();
-    }
-
-    function getResources() { return scannedResources; }
-
-    return { init, startScan, getResources, getScannedResources: () => scannedResources, markFixed, updateEvidenceBadge, updateScore, runBackgroundScan, simulateDrift };
+    document.addEventListener('DOMContentLoaded', init);
+    return { init, startScan, getScannedResources };
 })();
-
-document.addEventListener('DOMContentLoaded', Scanner.init);
