@@ -7,7 +7,6 @@ import { runRemediationReanalysis } from '../core/remediation_reanalysis.js';
 import { getRemediationSecurityImpact } from '../core/remediation_impact.js';
 import { canApproveRemediation } from '../core/remediation_policy.js';
 import pool from '../core/db.js';
-
 const router = express.Router();
 const ID = /^[A-Za-z0-9._:-]{1,128}$/;
 const ACTION_ROLES = [ROLES.ENGINEER, ROLES.ADMIN, ROLES.OWNER];
@@ -17,15 +16,7 @@ function role(req) { return req.user?.role || req.authContext?.role || null; }
 function validId(value, error = 'ID_INVALID') { if (!ID.test(String(value || ''))) throw new Error(error); return String(value); }
 function text(value, error, max = 1000) { const result = String(value || '').trim(); if (!result || result.length > max) throw new Error(error); return result; }
 function authorize(req) { if (!hasRole(req.user?.role, ACTION_ROLES)) { const error = new Error('FORBIDDEN_ACTION'); error.status = 403; throw error; } }
-async function candidatesFor({ organizationId, executionId }) {
-  const paths = await getExecutionExposurePaths({ organizationId, executionId, limit: 100 });
-  const execution = await pool.query('SELECT metadata FROM execution_runs WHERE organization_id=$1 AND id=$2', [organizationId, executionId]);
-  if (!execution.rows[0]) throw new Error('EXECUTION_NOT_FOUND');
-  const scanId = execution.rows[0].metadata?.baselineScanId || execution.rows[0].metadata?.scanId || execution.rows[0].metadata?.scan_id || null;
-  const findings = scanId ? await pool.query('SELECT id,resource_id,code,severity,control_id,status FROM findings WHERE organization_id=$1 AND scan_id=$2 ORDER BY created_at ASC LIMIT 100', [organizationId, scanId]) : { rows: [] };
-  return deriveExecutionRemediationBreakpoints({ paths, findings: findings.rows });
-}
-
+async function candidatesFor({ organizationId, executionId }) { const paths = await getExecutionExposurePaths({ organizationId, executionId, limit: 100 }); const execution = await pool.query('SELECT metadata FROM execution_runs WHERE organization_id=$1 AND id=$2', [organizationId, executionId]); if (!execution.rows[0]) throw new Error('EXECUTION_NOT_FOUND'); const scanId = execution.rows[0].metadata?.scanId || execution.rows[0].metadata?.scan_id || execution.rows[0].metadata?.baselineScanId || null; const findings = scanId ? await pool.query('SELECT id,resource_id,code,severity,control_id,status FROM findings WHERE organization_id=$1 AND scan_id=$2 ORDER BY created_at ASC LIMIT 100', [organizationId, scanId]) : { rows: [] }; return deriveExecutionRemediationBreakpoints({ paths, findings: findings.rows }); }
 router.get('/executions/:executionId/remediations', async (req, res, next) => { try { const organizationId=org(req); if(!organizationId)return res.status(403).json({error:'ORGANIZATION_CONTEXT_REQUIRED'}); const executionId=validId(req.params.executionId,'EXECUTION_ID_INVALID'); return res.json({executionId,remediations:await listRemediations({organizationId,executionId})}); } catch(error){next(error);} });
 router.get('/executions/:executionId/remediation-candidates', async (req, res, next) => { try { const organizationId=org(req); if(!organizationId)return res.status(403).json({error:'ORGANIZATION_CONTEXT_REQUIRED'}); const executionId=validId(req.params.executionId,'EXECUTION_ID_INVALID'); return res.json({executionId,candidates:await candidatesFor({organizationId,executionId})}); } catch(error){next(error);} });
 router.get('/executions/:executionId/remediations/:remediationId/impact', async (req,res,next)=>{try{const organizationId=org(req);if(!organizationId)return res.status(403).json({error:'ORGANIZATION_CONTEXT_REQUIRED'});const executionId=validId(req.params.executionId,'EXECUTION_ID_INVALID');const remediationId=validId(req.params.remediationId,'REMEDIATION_ID_INVALID');return res.json(await getRemediationSecurityImpact({organizationId,executionId,remediationId}));}catch(error){next(error);}});
