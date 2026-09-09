@@ -25,4 +25,17 @@ describe('service entitlement contract', () => {
     expect(evaluateEntitlement({ plan: PLAN.STANDARD, status: ENTITLEMENT_STATUS.CANCELED }, now).allowed).toBe(false);
     expect(evaluateEntitlement({ plan: PLAN.STANDARD, status: ENTITLEMENT_STATUS.PAST_DUE }, now).allowed).toBe(false);
   });
+
+  it('fails closed for unknown plans and malformed expiry timestamps', () => {
+    const now = new Date('2026-09-09T00:00:00.000Z');
+    expect(evaluateEntitlement({ plan: 'free', status: ENTITLEMENT_STATUS.ACTIVE }, now).reason).toBe('SERVICE_ENTITLEMENT_INVALID_PLAN');
+    expect(evaluateEntitlement({ plan: PLAN.PILOT, status: ENTITLEMENT_STATUS.PILOT, expires_at: 'not-a-date' }, now).reason).toBe('SERVICE_ENTITLEMENT_INVALID_EXPIRY');
+  });
+
+  it('rejects entitlements that have not started yet', () => {
+    const now = new Date('2026-09-09T00:00:00.000Z');
+    const result = evaluateEntitlement({ plan: PLAN.STANDARD, status: ENTITLEMENT_STATUS.ACTIVE, starts_at: '2026-09-10T00:00:00.000Z' }, now);
+    expect(result.allowed).toBe(false);
+    expect(result.reason).toBe('SERVICE_ENTITLEMENT_NOT_STARTED');
+  });
 });
