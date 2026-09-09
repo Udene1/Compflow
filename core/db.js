@@ -44,13 +44,15 @@ const resilientPool = {
 export async function initDb() {
     const query = `
         CREATE TABLE IF NOT EXISTS jobs (
-            job_id VARCHAR(64) PRIMARY KEY, client_id VARCHAR(64) NOT NULL,
+            job_id VARCHAR(64) PRIMARY KEY, client_id VARCHAR(64) NOT NULL, org_id VARCHAR(64),
             scan_type VARCHAR(32) DEFAULT 'on_demand', status VARCHAR(32) DEFAULT 'queued', progress INT DEFAULT 0,
             logs JSONB DEFAULT '[]'::jsonb, resources JSONB DEFAULT '[]'::jsonb, error_message TEXT,
             created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP, updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
             completed_at TIMESTAMP WITH TIME ZONE, expires_at INT
         );
+        ALTER TABLE jobs ADD COLUMN IF NOT EXISTS org_id VARCHAR(64);
         CREATE INDEX IF NOT EXISTS idx_jobs_client_id ON jobs(client_id);
+        CREATE INDEX IF NOT EXISTS idx_jobs_org_id ON jobs(org_id);
         CREATE TABLE IF NOT EXISTS tenants (
             id VARCHAR(64) PRIMARY KEY, org_id VARCHAR(64) DEFAULT 'org_default', name VARCHAR(255) NOT NULL,
             provider VARCHAR(64) NOT NULL, role_arn TEXT, api_token TEXT, email VARCHAR(255), auto_remediate BOOLEAN DEFAULT false,
@@ -76,7 +78,7 @@ export async function initDb() {
             id VARCHAR(64) PRIMARY KEY, user_id VARCHAR(64) REFERENCES users(id) ON DELETE CASCADE,
             org_id VARCHAR(64) REFERENCES organizations(id) ON DELETE CASCADE, token_hash VARCHAR(255) NOT NULL,
             role VARCHAR(32) DEFAULT 'ENGINEER', expires_at TIMESTAMP WITH TIME ZONE NOT NULL,
-            created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+            created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
         );
         CREATE TABLE IF NOT EXISTS identities (
             id VARCHAR(64) PRIMARY KEY, user_id VARCHAR(64) REFERENCES users(id) ON DELETE CASCADE,
