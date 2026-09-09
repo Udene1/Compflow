@@ -1,4 +1,4 @@
-import { handler as workerHandler } from '../worker.js';
+import { processCloudScanJob } from './cloud_scan_worker.js';
 import { beginExecution } from './execution_worker_hooks.js';
 import { withExecutionContext } from './execution_context.js';
 import { heartbeatNodeAttempt } from './execution_engine.js';
@@ -9,12 +9,10 @@ function workerId() { return process.env.COMPFLOW_WORKER_ID || process.env.HOSTN
 function heartbeatIntervalMs() { const seconds = Math.max(5, Math.min(Number(process.env.COMPFLOW_HEARTBEAT_SECONDS) || 20, 120)); return seconds * 1000; }
 
 export async function durableWorkerHandler(payload) {
-  let data = payload;
-  if (payload?.Records?.[0]?.body) data = typeof payload.Records[0].body === 'string' ? JSON.parse(payload.Records[0].body) : payload.Records[0].body;
+  const data = payload?.Records?.[0]?.body
+    ? (typeof payload.Records[0].body === 'string' ? JSON.parse(payload.Records[0].body) : payload.Records[0].body)
+    : payload;
 
-  // Persisted policy-plan nodes are dispatched as their own durable BullMQ jobs.
-  // They do not create a second execution-level lease; the node attempt is the
-  // concurrency authority for the work item.
   if (data?.executionNodeType) {
     const { executePersistedPlanNode } = await import('./plan_executor.js');
     return executePersistedPlanNode(data);
@@ -46,12 +44,15 @@ export async function durableWorkerHandler(payload) {
       try {
         await heartbeatExecutionLease({ organizationId, executionId, workerId: owner, leaseToken: lease.lease_token });
         await heartbeatNodeAttempt({ attemptId: execution.attempt.id });
-      } catch (error) { heartbeatFailure = error; leaseLost = true; console.error('[EXECUTION-HEARTBEAT] Lease heartbeat failed:', error?.message || error); }
-      finally { heartbeatInFlight = false; }
+      } catch (error) {
+        heartbeatFailure = error;
+        leaseLost = true;
+        console.error('[EXECUTION-HEARTBEAT] Lease heartbeat failed:', error?.message || error);
+      } finally { heartbeatInFlight = false; }
     };
     heartbeatTimer = setInterval(() => { void heartbeat(); }, heartbeatIntervalMs()); heartbeatTimer.unref?.();
     try {
-      const result = await workerHandler(payload);
+      const result = await processCloudScanJob(data);
       await heartbeat();
       if (heartbeatFailure || leaseLost) throw heartbeatFailure || new Error('EXECUTION_LEASE_LOST');
       const terminalStatus = result?.status === 'completed' || result?.status === 'partial' ? 'SUCCEEDED' : 'FAILED';
