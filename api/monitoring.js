@@ -2,8 +2,8 @@ import pool from '../core/db.js';
 
 /**
  * Operational monitoring API backed by PostgreSQL.
- * Metrics are scoped to the authenticated organization and jobs are the
- * durable source of truth; Redis/BullMQ remains dispatch-only.
+ * Organization ownership is proven through the authoritative scans table;
+ * Redis/BullMQ remains dispatch-only and is never used as monitoring truth.
  */
 export default async function handler(req, res) {
     if (req.method === 'OPTIONS') return res.status(200).end();
@@ -15,33 +15,24 @@ export default async function handler(req, res) {
     try {
         const result = await pool.query(`
             SELECT
-                COUNT(*)::int AS total_jobs,
-                COUNT(*) FILTER (WHERE status = 'FAILED')::int AS failed_count
-            FROM jobs
-            WHERE org_id = $1
-              AND created_at >= NOW() - INTERVAL '24 hours'
+                COUNT(DISTINCT j.job_id)::int AS total_jobs,
+                COUNT(DISTINCT j.job_id) FILTER (WHERE j.status = 'FAILED')::int AS failed_count
+            FROM jobs j
+            INNER JOIN scans s ON s.job_id = j.job_id
+            WHERE s.organization_id = $1
+              AND j.created_at >= NOW() - INTERVAL '24 hours'
         `, [organizationId]);
 
         const recentFailures = await pool.query(`
-            SELECT job_id, client_id, scan_type, status, error_message, started_at, updated_at
-            FROM (
-                SELECT
-                    job_id,
-                    client_id,
-                    scan_type,
-                    status,
-                    error_message,
-                    created_at AS started_at,
-                    updated_at,
-                    ROW_NUMBER() OVER (PARTITION BY job_id ORDER BY updated_at DESC) AS row_number
-                FROM jobs
-                WHERE org_id = $1
-                  AND status = 'FAILED'
-                  AND created_at >= NOW() - INTERVAL '24 hours'
-            ) jobs_with_rank
-            WHERE row_number = 1
-            ORDER BY updated_at DESC
-            LIMIT 10
+            SELECT DISTINCT ON (j.job_id)
+                j.job_id, j.client_id, j.scan_type, j.status,
+                j.error_message, j.created_at AS started_at, j.updated_at
+            FROM jobs j
+            INNER JOIN scans s ON s.job_id = j.job_id
+            WHERE s.organization_id = $1
+              AND j.status = 'FAILED'
+              AND j.created_at >= NOW() - INTERVAL '24 hours'
+            ORDER BY j.job_id, j.updated_at DESC
         `, [organizationId]);
 
         const totalJobs = result.rows[0]?.total_jobs || 0;
@@ -55,15 +46,18 @@ export default async function handler(req, res) {
             totalJobs,
             successRate: `${successRate}%`,
             failedCount,
-            failures: recentFailures.rows.map(row => ({
-                jobId: row.job_id,
-                clientId: row.client_id,
-                scanType: row.scan_type,
-                time: row.started_at,
-                updatedAt: row.updated_at,
-                error: row.error_message || 'Unknown error',
-                status: row.status
-            }))
+            failures: recentFailures.rows
+                .sort((a, b) => new Date(b.updated_at) - new Date(a.updated_at))
+                .slice(0, 10)
+                .map(row => ({
+                    jobId: row.job_id,
+                    clientId: row.client_id,
+                    scanType: row.scan_type,
+                    time: row.started_at,
+                    updatedAt: row.updated_at,
+                    error: row.error_message || 'Unknown error',
+                    status: row.status
+                }))
         });
     } catch (error) {
         console.error('[MONITORING-API] Error:', error?.message || error);
