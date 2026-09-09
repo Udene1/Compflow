@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import crypto from 'crypto';
 import pool, { initDb } from '../../core/db.js';
-import { persistScanGraph } from '../../core/execution_worker_hooks.js';
+import { persistScanGraph, beginExecution } from '../../core/execution_worker_hooks.js';
 import { ensureExecutionGraph } from '../../core/execution_engine.js';
 
 const organizationId = `org_scan_evidence_${crypto.randomUUID().replace(/-/g, '').slice(0, 12)}`;
@@ -13,6 +13,7 @@ beforeAll(async () => {
     await ensureExecutionGraph();
     await pool.query('INSERT INTO organizations (id,name) VALUES ($1,$2)', [organizationId, 'Scan Evidence Integration']);
     await pool.query('INSERT INTO cloud_connections (id,organization_id,provider,status) VALUES ($1,$2,$3,$4)', [connectionId, organizationId, 'aws', 'VERIFIED']);
+    await beginExecution({ organizationId, executionId, provider: 'aws', clientId: 'scan-evidence-test', jobId: executionId, connectionId, scanId: executionId });
 });
 
 afterAll(async () => {
@@ -21,6 +22,7 @@ afterAll(async () => {
     await pool.query('DELETE FROM execution_events WHERE organization_id=$1', [organizationId]);
     await pool.query('DELETE FROM execution_graph_edges WHERE organization_id=$1', [organizationId]);
     await pool.query('DELETE FROM execution_graph_nodes WHERE organization_id=$1', [organizationId]);
+    await pool.query('DELETE FROM execution_runs WHERE organization_id=$1', [organizationId]);
     await pool.query('DELETE FROM cloud_connections WHERE organization_id=$1', [organizationId]);
     await pool.query('DELETE FROM organizations WHERE id=$1', [organizationId]);
 });
