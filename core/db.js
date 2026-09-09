@@ -63,21 +63,21 @@ export async function initDb() {
         ALTER TABLE tenants ADD COLUMN IF NOT EXISTS org_id VARCHAR(64) DEFAULT 'org_default';
         CREATE TABLE IF NOT EXISTS organizations (
             id VARCHAR(64) PRIMARY KEY, name VARCHAR(255) NOT NULL, domain VARCHAR(255),
-            sso_provider VARCHAR(32) DEFAULT 'native', created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+            sso_provider VARCHAR(32) DEFAULT 'native', created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
         );
         CREATE TABLE IF NOT EXISTS users (
             id VARCHAR(64) PRIMARY KEY, email VARCHAR(255) UNIQUE NOT NULL, name VARCHAR(255), avatar_url TEXT,
-            created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+            created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
         );
         CREATE TABLE IF NOT EXISTS org_memberships (
             user_id VARCHAR(64) REFERENCES users(id) ON DELETE CASCADE, org_id VARCHAR(64) REFERENCES organizations(id) ON DELETE CASCADE,
-            role VARCHAR(32) DEFAULT 'ENGINEER', joined_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+            role VARCHAR(32) DEFAULT 'ENGINEER', joined_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
             PRIMARY KEY (user_id, org_id)
         );
         CREATE TABLE IF NOT EXISTS sessions (
             id VARCHAR(64) PRIMARY KEY, user_id VARCHAR(64) REFERENCES users(id) ON DELETE CASCADE,
             org_id VARCHAR(64) REFERENCES organizations(id) ON DELETE CASCADE, token_hash VARCHAR(255) NOT NULL,
-            role VARCHAR(32) DEFAULT 'ENGINEER', expires_at TIMESTAMP WITH TIME ZONE NOT NULL,
+            role VARCHAR(32) DEFAULT 'ENGINEER', expires_at TIMESTAMPTZ NOT NULL,
             created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
         );
         CREATE TABLE IF NOT EXISTS identities (
@@ -131,6 +131,19 @@ export async function initDb() {
         );
         CREATE INDEX IF NOT EXISTS idx_findings_scan ON findings(scan_id);
         CREATE INDEX IF NOT EXISTS idx_findings_org ON findings(organization_id);
+        CREATE TABLE IF NOT EXISTS organization_entitlements (
+            organization_id VARCHAR(64) PRIMARY KEY REFERENCES organizations(id) ON DELETE CASCADE,
+            plan VARCHAR(32) NOT NULL,
+            status VARCHAR(32) NOT NULL,
+            source VARCHAR(64) NOT NULL,
+            starts_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            expires_at TIMESTAMPTZ,
+            metadata JSONB NOT NULL DEFAULT '{}'::jsonb,
+            updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            CHECK (plan IN ('pilot','trial','standard','enterprise')),
+            CHECK (status IN ('ACTIVE','TRIAL','PILOT','PAST_DUE','CANCELED'))
+        );
+        CREATE INDEX IF NOT EXISTS organization_entitlements_status_idx ON organization_entitlements (status, expires_at);
         CREATE TABLE IF NOT EXISTS execution_runs (
             id TEXT PRIMARY KEY, organization_id TEXT NOT NULL, status TEXT NOT NULL DEFAULT 'PENDING', lease_owner TEXT, lease_token TEXT,
             lease_expires_at TIMESTAMPTZ, heartbeat_at TIMESTAMPTZ, started_at TIMESTAMPTZ, finished_at TIMESTAMPTZ,
@@ -221,10 +234,9 @@ export async function initDb() {
         ALTER TABLE sessions ADD COLUMN IF NOT EXISTS is_revoked BOOLEAN DEFAULT false;
         ALTER TABLE sessions ADD COLUMN IF NOT EXISTS rotated_from VARCHAR(64);
         ALTER TABLE cloud_connections ADD COLUMN IF NOT EXISTS principal VARCHAR(255);
-        ALTER TABLE cloud_connections ADD COLUMN IF NOT EXISTS verification_method VARCHAR(64);
+        ALTER TABLE cloud_connections ADD COLUMN IF NOT EXISTS verification_method VARCHAR(255);
     `;
-    try { await resilientPool.query(query); }
-    catch (err) { console.error('[DB] Failed to initialize PostgreSQL schema:', err.message); throw err; }
+    await resilientPool.query(query);
 }
 
 export default resilientPool;
