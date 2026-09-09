@@ -89,6 +89,66 @@ const ScanHistory = {
     }
 };
 
+// API error boundary: API failures remain JSON/API failures and are surfaced to the
+// existing dashboard instead of becoming navigation/fallback-page events. This wrapper
+// never changes HTTP status codes, response bodies, redirects, or successful responses.
+(() => {
+    const nativeFetch = window.fetch.bind(window);
+    const apiBase = window.COMPLIANCE_API_URL || '';
+    const seen = new Map();
+    const toast = (message) => {
+        if (typeof window.showToast === 'function') window.showToast(message);
+    };
+
+    function isApiRequest(input) {
+        try {
+            const url = typeof input === 'string' ? input : input?.url;
+            if (!url) return false;
+            return apiBase && new URL(url, window.location.href).origin === new URL(apiBase, window.location.href).origin;
+        } catch {
+            return false;
+        }
+    }
+
+    async function inspectFailure(response) {
+        if (response.ok || !isApiRequest(response.url)) return;
+        try {
+            const data = await response.clone().json();
+            const code = data?.code || data?.error || `HTTP_${response.status}`;
+            const message = data?.message || 'The request could not be completed.';
+            const key = `${response.status}:${code}:${message}`;
+            const now = Date.now();
+            if (seen.get(key) && now - seen.get(key) < 3000) return;
+            seen.set(key, now);
+
+            if (response.status === 401) {
+                toast('Your session is no longer valid. Please sign in again.');
+            } else if (response.status === 402) {
+                toast('Compflow service access is not currently active for this workspace.');
+            } else if (response.status === 403) {
+                toast('You do not have permission to perform this action.');
+            } else if (response.status === 429) {
+                toast('Too many requests. Please wait and try again.');
+            } else if (response.status >= 500) {
+                toast(`Compflow could not complete the request (${code}). Please try again.`);
+            }
+        } catch {
+            // Non-JSON API failures are left to the calling feature; never redirect.
+        }
+    }
+
+    window.fetch = async (...args) => {
+        try {
+            const response = await nativeFetch(...args);
+            void inspectFailure(response);
+            return response;
+        } catch (error) {
+            if (isApiRequest(args[0])) toast('Unable to reach Compflow API. Please check your connection and try again.');
+            throw error;
+        }
+    };
+})();
+
 // Initial load
 document.addEventListener('DOMContentLoaded', () => {
     // Check if on scan panel to load history
