@@ -24,7 +24,7 @@ export async function getRemediationSecurityImpact({ organizationId, executionId
   const freshEvidence = latest.rows[0] || null;
   const effect = deriveRemediationSecurityEffect({ code: remediation.code, remediationState: remediation.state, evidence: freshEvidence, affectedPathCount: affectedPaths.length });
   const reanalysisEvents = await listExecutionEvents({ organizationId, executionId, limit: 1000 });
-  const event = reanalysisEvents.find(item => item.event_type === 'REMEDIATION_REANALYSIS_COMPLETED' && item.payload?.remediationId === remediationId);
+  const event = reanalysisEvents.filter(item => item.event_type === 'REMEDIATION_REANALYSIS_COMPLETED' && item.result === 'completed' && item.payload?.remediationId === remediationId).at(-1) || null;
   const reanalysis = event?.payload || null;
   const proof = deriveRemediationSecurityProof({
     remediationId, executionId, findingId: remediation.findingId,
