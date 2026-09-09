@@ -126,10 +126,10 @@ describe('Onboarding & Cloud Verification Hardening — All Suites', () => {
             const emptyOrgId = 'org_empty_prereq_99';
             const emptySession = await createSessionToken({ id: 'usr_empty', email: 'empty@org.io' }, { id: emptyOrgId, name: 'Empty Org' }, ROLES.ADMIN, 1);
             const resNoFw = await invokeOnboarding({ method: 'POST', url: '/complete', sessionToken: emptySession.token });
-            expect(resNoFw.statusCode).toBe(400); expect(resNoFw.body.error).toBe('Prerequisite Failed'); expect(resNoFw.body.message).toContain('compliance framework objective');
+            expect(resNoFw.statusCode).toBe(400); expect(resNoFw.body.error).toBe('OBJECTIVES_REQUIRED'); expect(resNoFw.body.code).toBe('OBJECTIVES_REQUIRED'); expect(resNoFw.body.message).toContain('compliance framework objective');
             await pool.query('INSERT INTO organization_frameworks (id, org_id, framework_id, status) VALUES ($1, $2, $3, $4);', ['fw_obj_99', emptyOrgId, 'soc2', 'selected']);
             const resNoConn = await invokeOnboarding({ method: 'POST', url: '/complete', sessionToken: emptySession.token });
-            expect(resNoConn.statusCode).toBe(400); expect(resNoConn.body.error).toBe('Prerequisite Failed'); expect(resNoConn.body.message).toContain('verified cloud connection');
+            expect(resNoConn.statusCode).toBe(400); expect(resNoConn.body.error).toBe('VERIFIED_CLOUD_CONNECTION_REQUIRED'); expect(resNoConn.body.code).toBe('VERIFIED_CLOUD_CONNECTION_REQUIRED'); expect(resNoConn.body.message).toContain('verified cloud connection');
         });
     });
 
@@ -193,11 +193,11 @@ describe('Onboarding & Cloud Verification Hardening — All Suites', () => {
         });
         it('API error responses use controlled messages, never system internals', async () => {
             const invalidProviderRes = await invokeOnboarding({ method: 'POST', url: '/cloud-connection', sessionToken: session.token, body: { provider: 'nonexistent_cloud' } });
-            expect(invalidProviderRes.statusCode).toBe(400); expect(invalidProviderRes.body.error).toBe('Validation Error'); expect(invalidProviderRes.body.message).toContain('Unsupported provider'); expect(invalidProviderRes.body.message).not.toContain('Error:'); expect(invalidProviderRes.body.message).not.toContain('at ');
+            expect(invalidProviderRes.statusCode).toBe(400); expect(invalidProviderRes.body.error).toBe('UNSUPPORTED_PROVIDER'); expect(invalidProviderRes.body.code).toBe('UNSUPPORTED_PROVIDER'); expect(invalidProviderRes.body.message).toContain('Unsupported provider'); expect(invalidProviderRes.body.message).not.toContain('Error:'); expect(invalidProviderRes.body.message).not.toContain('at ');
             const noNameRes = await invokeOnboarding({ method: 'POST', url: '/organization', sessionToken: session.token, body: {} });
-            expect(noNameRes.statusCode).toBe(400); expect(noNameRes.body.error).toBe('Validation Error'); expect(noNameRes.body.message).toContain('Organization name is required');
+            expect(noNameRes.statusCode).toBe(400); expect(noNameRes.body.error).toBe('ORGANIZATION_NAME_REQUIRED'); expect(noNameRes.body.code).toBe('ORGANIZATION_NAME_REQUIRED'); expect(noNameRes.body.message).toContain('Organization name is required');
             const notFoundRes = await invokeOnboarding({ method: 'POST', url: '/cloud-connection/conn_does_not_exist/verify', sessionToken: session.token });
-            expect(notFoundRes.statusCode).toBe(404); expect(notFoundRes.body.error).toBe('Not Found'); expect(notFoundRes.body.message).not.toContain('FATAL'); expect(notFoundRes.body.message).not.toContain('password');
+            expect(notFoundRes.statusCode).toBe(404); expect(notFoundRes.body.error).toBe('CLOUD_CONNECTION_NOT_FOUND'); expect(notFoundRes.body.code).toBe('CLOUD_CONNECTION_NOT_FOUND'); expect(notFoundRes.body.message).not.toContain('FATAL'); expect(notFoundRes.body.message).not.toContain('password');
         });
     });
 });
