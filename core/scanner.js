@@ -30,6 +30,7 @@ export async function runScan(provider, credentials, customPolicies = null) {
                 organizationId: context.organizationId,
                 executionId: context.executionId,
                 provider: definition.id,
+                connectionId: context.connectionId,
                 resources: result.resources
             });
         }
