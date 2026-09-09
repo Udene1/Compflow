@@ -36,9 +36,9 @@ export function requireAuth(allowedRoles = []) {
         }
         req.user = user;
 
-        // Authentication and session-management endpoints must remain reachable so an
-        // authenticated customer can inspect/rotate/logout even when service access is locked.
-        if (req.baseUrl === '/api/auth') return next();
+        // Direct unit invocation has no Express baseUrl. Real HTTP requests always do.
+        // Authentication/session endpoints remain usable when service access is locked.
+        if (!req.baseUrl || req.baseUrl === '/api/auth') return next();
 
         const organizationId = user.orgId;
         if (!organizationId) return res.status(403).json({ error: 'ORGANIZATION_CONTEXT_REQUIRED' });
