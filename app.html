@@ -9,71 +9,1321 @@
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;600;800&family=JetBrains+Mono:wght@300;500&display=swap" rel="stylesheet">
-    <script>window.COMPLIANCE_API_URL = "https://api.compflow.icu";</script>
-    <style>
-      .execution-grid{display:grid;grid-template-columns:1.15fr .85fr;gap:1rem}.execution-toolbar{display:flex;gap:.5rem;flex-wrap:wrap;align-items:center}.execution-toolbar input{min-width:240px}.execution-stat-grid{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:.6rem;margin:1rem 0}.execution-stat{padding:.75rem;border:1px solid rgba(255,255,255,.08);border-radius:8px;background:rgba(0,0,0,.12)}.execution-stat strong{display:block;font-size:1.05rem}.execution-stat span{font-size:.68rem;color:var(--text-muted);text-transform:uppercase;letter-spacing:.06em}.execution-section{padding:1rem}.execution-list{display:flex;flex-direction:column;gap:.5rem;max-height:360px;overflow:auto}.execution-row{display:grid;grid-template-columns:12px 1fr auto;gap:.7rem;align-items:center;padding:.65rem;border:1px solid rgba(255,255,255,.07);border-radius:7px}.execution-dot{width:9px;height:9px;border-radius:50%;background:currentColor}.execution-row small{display:block;color:var(--text-muted);font-family:'JetBrains Mono',monospace;font-size:.65rem;margin-top:.2rem}.execution-status{font-size:.68rem;font-family:'JetBrains Mono',monospace}.execution-status.SUCCEEDED{color:#75d69c}.execution-status.FAILED{color:#ff7c7c}.execution-status.RUNNING{color:#f4ca68}.execution-status.PENDING,.execution-status.CANCELLED{color:var(--text-muted)}.execution-event{padding:.55rem .7rem;border-left:2px solid rgba(255,255,255,.12);font-size:.75rem}.execution-event small{color:var(--text-muted);display:block}.execution-kv{display:grid;grid-template-columns:130px 1fr;gap:.35rem;font-size:.75rem}.execution-kv code{word-break:break-all}.execution-empty{color:var(--text-muted);font-size:.8rem;padding:.8rem}.execution-danger{border-color:rgba(255,90,90,.4)!important}.execution-decision{border:1px solid rgba(255,255,255,.08);border-radius:8px;padding:.8rem}.execution-decision h4{margin:0 0 .4rem}.execution-pass{color:#75d69c}.execution-fail{color:#ff7c7c}.execution-unknown{color:#f4ca68}@media(max-width:900px){.execution-grid{grid-template-columns:1fr}.execution-stat-grid{grid-template-columns:repeat(2,minmax(0,1fr))}}
-    </style>
+    <script>
+        window.COMPLIANCE_API_URL = "https://api.compflow.icu";
+    </script>
 </head>
 <body>
+    <!-- Premium Cyber-Mesh Background -->
     <div class="cyber-mesh"></div>
+    
     <div class="app-layout">
+        <!-- Sidebar -->
         <aside class="sidebar">
-            <div class="sidebar-logo">ComplianceFlow<span>AI</span><div class="version-badge">v2.4-iron-clad</div><small>Dashboard</small></div>
-            <div class="framework-selector"><div class="fw-label">Global Focus</div><div class="framework-pill-grid"><button class="fw-pill active" onclick="setGlobalFramework('soc2')">SOC2</button><button class="fw-pill" onclick="setGlobalFramework('gdpr')">GDPR</button><button class="fw-pill" onclick="setGlobalFramework('hipaa')">HIPAA</button><button class="fw-pill" onclick="setGlobalFramework('iso27001')">ISO</button></div></div>
-            <div class="framework-selector" style="margin-top:0"><div class="fw-label">Governance Autopilot</div><div style="display:flex;align-items:center;justify-content:space-between"><span style="font-size:.7rem;color:var(--text-muted)">Auto-fix drift</span><label class="switch"><input type="checkbox" id="autopilot-toggle" onchange="DriftEngine.toggleAutopilot(this.checked)"><span class="slider"></span></label></div></div>
+            <div class="sidebar-logo">
+                ComplianceFlow<span>AI</span>
+                <div class="version-badge">v2.4-iron-clad</div>
+                <small>Dashboard</small>
+            </div>
+
+            <!-- ─── Framework Selector ─── -->
+            <div class="framework-selector">
+                <div class="fw-label">Global Focus</div>
+                <div class="framework-pill-grid">
+                    <button class="fw-pill active" onclick="setGlobalFramework('soc2')">SOC2</button>
+                    <button class="fw-pill" onclick="setGlobalFramework('gdpr')">GDPR</button>
+                    <button class="fw-pill" onclick="setGlobalFramework('hipaa')">HIPAA</button>
+                    <button class="fw-pill" onclick="setGlobalFramework('iso27001')">ISO</button>
+                </div>
+            </div>
+
+            <!-- ─── Autopilot Toggle ─── -->
+            <div class="framework-selector" style="margin-top: 0">
+                <div class="fw-label">Governance Autopilot</div>
+                <div style="display:flex; align-items:center; justify-content:space-between;">
+                    <span style="font-size:0.7rem; color:var(--text-muted);">Auto-fix drift</span>
+                    <label class="switch">
+                        <input type="checkbox" id="autopilot-toggle" onchange="DriftEngine.toggleAutopilot(this.checked)">
+                        <span class="slider"></span>
+                    </label>
+                </div>
+            </div>
+
             <nav class="sidebar-nav">
-                <div class="nav-section-label">Infrastructure</div><a class="nav-item active" data-panel="connect" id="nav-connect"><span class="icon">🔌</span> Cloud Connect</a><a class="nav-item" data-panel="tenants" id="nav-tenants"><span class="icon">👥</span> Governance Registry</a><a class="nav-item" data-panel="policies" id="nav-policies"><span class="icon">📜</span> Custom Policies</a><a class="nav-item" id="nav-settings" onclick="CloudConnect.openSettings()"><span class="icon">⚙️</span> Connection Settings</a><a class="nav-item" data-panel="scan" id="nav-scan"><span class="icon">🔍</span> Scan <span class="badge-count" id="issues-badge" style="display:none">0</span></a>
-                <div class="nav-section-label">Compliance</div><a class="nav-item" data-panel="remediate" id="nav-remediate"><span class="icon">🛡️</span> Remediate</a><a class="nav-item" data-panel="terminal" id="nav-terminal"><span class="icon">⚡</span> Live Terminal</a>
-                <div class="nav-section-label">Evidence & Audit</div><a class="nav-item" data-panel="evidence" id="nav-evidence"><span class="icon">📸</span> Evidence Vault <span class="badge-count" id="evidence-badge" style="display:none">0</span></a><a class="nav-item" data-panel="auditor" id="nav-auditor"><span class="icon">⚖️</span> Auditor Portal</a><a class="nav-item" data-panel="reports" id="nav-reports"><span class="icon">📄</span> Audit Report</a><a class="nav-item" data-panel="monitoring" id="nav-monitoring"><span class="icon">📈</span> System Health</a>
+                <div class="nav-section-label">Infrastructure</div>
+                <a class="nav-item active" data-panel="connect" id="nav-connect">
+                    <span class="icon">🔌</span> Cloud Connect
+                </a>
+                <a class="nav-item" data-panel="tenants" id="nav-tenants">
+                    <span class="icon">👥</span> Governance Registry
+                </a>
+                <a class="nav-item" data-panel="policies" id="nav-policies">
+                    <span class="icon">📜</span> Custom Policies
+                </a>
+                <a class="nav-item" id="nav-settings" onclick="CloudConnect.openSettings()">
+                    <span class="icon">⚙️</span> Connection Settings
+                </a>
+                <a class="nav-item" data-panel="scan" id="nav-scan">
+                    <span class="icon">🔍</span> Scan
+                    <span class="badge-count" id="issues-badge" style="display:none">0</span>
+                </a>
+
+                <div class="nav-section-label">Compliance</div>
+                <a class="nav-item" data-panel="remediate" id="nav-remediate">
+                    <span class="icon">🛡️</span> Remediate
+                </a>
+                <a class="nav-item" data-panel="terminal" id="nav-terminal">
+                    <span class="icon">⚡</span> Live Terminal
+                </a>
+
+                <div class="nav-section-label">Evidence & Audit</div>
+                <a class="nav-item" data-panel="evidence" id="nav-evidence">
+                    <span class="icon">📸</span> Evidence Vault
+                    <span class="badge-count" id="evidence-badge" style="display:none">0</span>
+                </a>
+                <a class="nav-item" data-panel="auditor" id="nav-auditor">
+                    <span class="icon">⚖️</span> Auditor Portal
+                </a>
+                <a class="nav-item" data-panel="reports" id="nav-reports">
+                    <span class="icon">📄</span> Audit Report
+                </a>
+                <a class="nav-item" data-panel="monitoring" id="nav-monitoring">
+                    <span class="icon">📈</span> System Health
+                </a>
             </nav>
+            <div class="sidebar-footer">
+                <div class="readiness-mini">
+                    <div class="pulse-ring">
+                        <div class="score" id="sidebar-score">—</div>
+                    </div>
+                    <div class="label">Compliance Pulse</div>
+                </div>
+            </div>
         </aside>
         <div class="sidebar-overlay" id="sidebar-overlay" onclick="toggleMobileSidebar()"></div>
+
+        <!-- Main -->
         <main class="main-content">
-            <div class="topbar"><button class="mobile-toggle no-print" onclick="toggleMobileSidebar()">☰</button><div class="header-main"><h2 id="page-title">Cloud Connect</h2><div id="active-fw-badge" class="fw-status-badge">SOC2 Type II</div></div><div class="topbar-actions"><div id="auth-profile-widget" class="auth-profile-widget"></div><div class="connection-chips" id="connection-chips"></div><button class="btn btn-secondary btn-sm" onclick="runShowcase()">✨ Play Show</button><a href="index.html" class="btn btn-secondary btn-sm">← Landing Page</a></div></div>
-            <div class="page-content">
-              <div id="execution-product-panel" class="panel active" style="margin-bottom:1rem">
-                <div class="card execution-section">
-                  <div style="display:flex;justify-content:space-between;gap:1rem;align-items:center;flex-wrap:wrap">
-                    <div><h3 style="margin:0">Durable Compliance Execution</h3><p style="margin:.35rem 0 0;color:var(--text-muted);font-size:.82rem">Intent → Plan → Graph → Worker → Evidence → Verification → Decision</p></div>
-                    <div class="execution-toolbar"><input id="execution-id-input" placeholder="execution ID" aria-label="Execution ID"><button class="btn btn-secondary btn-sm" onclick="CompflowExecutionUI.refresh()">Refresh</button><button class="btn btn-secondary btn-sm" onclick="CompflowExecutionUI.watch()">Live</button><button class="btn btn-secondary btn-sm" onclick="CompflowExecutionUI.resume()">Resume</button><button class="btn btn-secondary btn-sm execution-danger" onclick="CompflowExecutionUI.cancel()">Cancel</button></div>
-                  </div>
-                  <div id="execution-stat-grid" class="execution-stat-grid"></div>
+            <div class="topbar">
+                <button class="mobile-toggle no-print" onclick="toggleMobileSidebar()">☰</button>
+                <div class="header-main">
+                    <h2 id="page-title">Cloud Connect</h2>
+                    <div id="active-fw-badge" class="fw-status-badge">SOC2 Type II</div>
                 </div>
-                <div class="execution-grid">
-                  <div class="card execution-section"><div style="display:flex;justify-content:space-between;align-items:center"><h3 style="margin:0">Execution Graph</h3><span id="execution-live-label" class="execution-status">IDLE</span></div><div id="execution-node-list" class="execution-list" style="margin-top:.8rem"></div></div>
-                  <div class="card execution-section"><h3 style="margin:0">Final Decision</h3><div id="execution-decision" style="margin-top:.8rem" class="execution-empty">No decision loaded.</div><h3 style="margin:1.2rem 0 .5rem">Evidence</h3><div id="execution-evidence-list" class="execution-list"></div></div>
+                <div class="topbar-actions">
+                    <div id="auth-profile-widget" class="auth-profile-widget"></div>
+                    <div class="connection-chips" id="connection-chips"></div>
+                    <button class="btn btn-secondary btn-sm" onclick="runShowcase()">✨ Play Show</button>
+                    <a href="index.html" class="btn btn-secondary btn-sm">← Landing Page</a>
                 </div>
-                <div class="card execution-section" style="margin-top:1rem"><div style="display:flex;justify-content:space-between;align-items:center"><h3 style="margin:0">Durable Timeline</h3><span style="font-size:.7rem;color:var(--text-muted)">PostgreSQL event cursor</span></div><div id="execution-timeline" class="execution-list" style="margin-top:.8rem"></div></div>
-              </div>
             </div>
+
+            <div class="page-content">
+
+                <!-- ─── Top Organization Status Strip ─── -->
+                <div class="org-status-strip" id="org-status-strip" style="display:none; margin-bottom:1.25rem; background:rgba(255,255,255,0.03); border:1px solid rgba(255,255,255,0.08); padding:0.6rem 1rem; border-radius:8px; justify-content:space-between; align-items:center; font-size:0.8rem; color:var(--text-muted); flex-wrap:wrap; gap:0.5rem;">
+                    <div style="display:flex; gap:1.25rem; align-items:center; flex-wrap:wrap;">
+                        <span>🏢 Workspace: <strong id="strip-org-name" style="color:#fff;">Loading...</strong></span>
+                        <span>👤 Role: <strong id="strip-user-role" style="color:var(--primary); background:rgba(99,102,241,0.15); padding:2px 6px; border-radius:4px;">VIEWER</strong></span>
+                        <span>☁️ Connected Clouds: <strong id="strip-tenant-count" style="color:#fff;">0</strong></span>
+                    </div>
+                    <div style="display:flex; gap:0.75rem; align-items:center;">
+                        <span id="strip-autopilot-status" style="color:#10b981; font-weight:600;">● Autopilot: Active</span>
+                        <button class="btn btn-secondary btn-xs" id="btn-switch-workspace" onclick="AuthUI.logout(event)" style="display:none;">Sign out</button>
+                    </div>
+                </div>
+
+                <!-- ─── First-Run Pilot Onboarding Checklist ─── -->
+                <div class="onboarding-checklist-card" id="onboarding-checklist-card" style="display:none; background:linear-gradient(135deg, rgba(16,185,129,0.08) 0%, rgba(99,102,241,0.08) 100%); border:1px solid rgba(16,185,129,0.3); border-radius:12px; padding:1.25rem; margin-bottom:1.75rem;">
+                    <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:0.5rem; flex-wrap:wrap; gap:0.5rem;">
+                        <div style="display:flex; align-items:center; gap:0.5rem;">
+                            <span style="font-size:1.25rem;">🚀</span>
+                            <h4 style="margin:0; font-size:1.05rem; color:#fff;">Pilot Activation Checklist</h4>
+                        </div>
+                        <span class="checklist-progress-badge" id="checklist-progress-text" style="font-size:0.75rem; background:rgba(16,185,129,0.2); color:#10b981; padding:4px 10px; border-radius:12px; font-weight:600;">1 of 4 Steps Complete</span>
+                    </div>
+                    <p style="font-size:0.82rem; color:var(--text-muted); margin-bottom:1rem;">Follow these 4 guided steps to connect your cloud accounts, run an autonomous scan, and certify your compliance posture.</p>
+                    
+                    <div class="checklist-steps-grid" style="display:grid; grid-template-columns:repeat(auto-fit, minmax(210px, 1fr)); gap:0.75rem;">
+                        <div class="checklist-step-item completed" id="step-auth" style="background:rgba(0,0,0,0.3); border:1px solid rgba(16,185,129,0.4); padding:0.75rem; border-radius:8px; display:flex; gap:0.6rem; align-items:center;">
+                            <div class="step-num" style="background:#10b981; color:#000; width:24px; height:24px; border-radius:50%; display:flex; align-items:center; justify-content:center; font-weight:bold; font-size:0.8rem;">✓</div>
+                            <div>
+                                <div class="step-title" style="font-size:0.85rem; font-weight:600; color:#fff;">1. Authenticate</div>
+                                <div class="step-desc" id="step-auth-desc" style="font-size:0.72rem; color:var(--text-muted);">Signed in via SSO</div>
+                            </div>
+                        </div>
+                        <div class="checklist-step-item" id="step-connect" onclick="switchPanel('connect')" style="cursor:pointer; background:rgba(0,0,0,0.2); border:1px solid rgba(255,255,255,0.08); padding:0.75rem; border-radius:8px; display:flex; gap:0.6rem; align-items:center;">
+                            <div class="step-num" id="step-connect-num" style="background:rgba(255,255,255,0.1); color:#fff; width:24px; height:24px; border-radius:50%; display:flex; align-items:center; justify-content:center; font-weight:bold; font-size:0.8rem;">2</div>
+                            <div>
+                                <div class="step-title" style="font-size:0.85rem; font-weight:600; color:#fff;">2. Connect Cloud</div>
+                                <div class="step-desc" style="font-size:0.72rem; color:var(--text-muted);">AWS CFN / AssumeRole</div>
+                            </div>
+                        </div>
+                        <div class="checklist-step-item" id="step-scan" onclick="switchPanel('scan')" style="cursor:pointer; background:rgba(0,0,0,0.2); border:1px solid rgba(255,255,255,0.08); padding:0.75rem; border-radius:8px; display:flex; gap:0.6rem; align-items:center;">
+                            <div class="step-num" id="step-scan-num" style="background:rgba(255,255,255,0.1); color:#fff; width:24px; height:24px; border-radius:50%; display:flex; align-items:center; justify-content:center; font-weight:bold; font-size:0.8rem;">3</div>
+                            <div>
+                                <div class="step-title" style="font-size:0.85rem; font-weight:600; color:#fff;">3. Run First Scan</div>
+                                <div class="step-desc" style="font-size:0.72rem; color:var(--text-muted);">Discover assets & drift</div>
+                            </div>
+                        </div>
+                        <div class="checklist-step-item" id="step-evidence" onclick="switchPanel('evidence')" style="cursor:pointer; background:rgba(0,0,0,0.2); border:1px solid rgba(255,255,255,0.08); padding:0.75rem; border-radius:8px; display:flex; gap:0.6rem; align-items:center;">
+                            <div class="step-num" id="step-evidence-num" style="background:rgba(255,255,255,0.1); color:#fff; width:24px; height:24px; border-radius:50%; display:flex; align-items:center; justify-content:center; font-weight:bold; font-size:0.8rem;">4</div>
+                            <div>
+                                <div class="step-title" style="font-size:0.85rem; font-weight:600; color:#fff;">4. Auditor Evidence</div>
+                                <div class="step-desc" style="font-size:0.72rem; color:var(--text-muted);">Export signed package</div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- ══════ Panel: Connect (Mode A Primary Funnel) ══════ -->
+                <div class="panel active" id="panel-connect">
+                    <div class="activation-funnel-header" style="margin-bottom: 1.5rem;">
+                        <h2 style="font-size: 1.5rem; font-weight: 700; color: #fff; margin-bottom: 0.25rem;">Get to your first scan</h2>
+                        <p style="color:var(--text-muted); font-size: 0.9rem;">
+                            Step 2 · Connect your cloud infrastructure using our secure AssumeRole CloudFormation template.
+                        </p>
+                    </div>
+
+                    <!-- Primary AWS Path Card -->
+                    <div class="aws-activation-box" style="background: linear-gradient(145deg, rgba(15, 23, 42, 0.9), rgba(10, 15, 28, 0.95)); border: 1px solid rgba(16, 185, 129, 0.35); border-radius: 12px; padding: 1.75rem; margin-bottom: 1.5rem; box-shadow: 0 10px 30px rgba(0,0,0,0.5);">
+                        <div style="display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 1.25rem; flex-wrap: wrap; gap: 0.75rem;">
+                            <div>
+                                <div style="display:flex; align-items:center; gap:0.5rem;">
+                                    <span style="font-size: 1.5rem;">☁️</span>
+                                    <h3 style="font-size: 1.2rem; color: #fff; margin: 0;">Connect AWS (Recommended)</h3>
+                                </div>
+                                <p style="font-size: 0.82rem; color: var(--text-muted); margin-top: 0.25rem;">Least-privilege read/audit cross-account role</p>
+                            </div>
+                            <a href="complianceflow-iam-setup.yaml" download class="btn btn-secondary btn-sm" style="display:inline-flex; align-items:center; gap:6px;">
+                                📦 Download CloudFormation template
+                            </a>
+                        </div>
+
+                        <div class="aws-steps-list" style="font-size: 0.84rem; color: var(--text); line-height: 1.6; margin-bottom: 1.25rem; background: rgba(0,0,0,0.25); padding: 1rem; border-radius: 8px; border: 1px solid rgba(255,255,255,0.05);">
+                            <div><strong>1.</strong> Download the CloudFormation template above.</div>
+                            <div><strong>2.</strong> Create the stack in your AWS Management Console.</div>
+                            <div><strong>3.</strong> Paste the generated <code>Role ARN</code> and <code>External ID</code> below:</div>
+                        </div>
+
+                        <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 1rem; margin-bottom: 1.25rem;">
+                            <div class="input-group">
+                                <label style="font-size: 0.8rem; font-weight: 600; color: #fff; margin-bottom: 4px; display: block;">Role ARN <span style="color:#ef4444;">*</span></label>
+                                <input type="text" id="input-aws-role-arn" placeholder="arn:aws:iam::123456789012:role/ComplianceFlow-Role" style="width:100%; padding:0.65rem 0.8rem; background:rgba(0,0,0,0.3); border:1px solid rgba(255,255,255,0.12); border-radius:6px; color:#fff; font-size:0.85rem; font-family:var(--font-mono);">
+                            </div>
+                            <div class="input-group">
+                                <label style="font-size: 0.8rem; font-weight: 600; color: #fff; margin-bottom: 4px; display: block;">External ID</label>
+                                <input type="text" id="input-aws-external-id" value="CF-AINS-ONBOARDING-SECRET" placeholder="Handshake secret" style="width:100%; padding:0.65rem 0.8rem; background:rgba(0,0,0,0.3); border:1px solid rgba(255,255,255,0.12); border-radius:6px; color:#fff; font-size:0.85rem; font-family:var(--font-mono);">
+                            </div>
+                        </div>
+
+                        <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:0.75rem;">
+                            <div id="aws-connect-status-inline" class="status-line" style="display:none; font-size:0.82rem;"></div>
+                            <button class="btn btn-primary" id="btn-test-aws-connection" onclick="CloudConnect.testAndConnectAWS()">
+                                🔌 Test connection
+                            </button>
+                        </div>
+                    </div>
+
+                    <!-- Collapsible Other Cloud Providers -->
+                    <details class="other-providers-details" style="background:rgba(255,255,255,0.02); border:1px solid rgba(255,255,255,0.06); border-radius:10px; padding:0.75rem 1rem; margin-bottom:1.5rem;">
+                        <summary style="font-size:0.85rem; font-weight:600; color:var(--text-muted); cursor:pointer;">
+                            Other cloud providers (GCP, Azure, DigitalOcean, Hetzner)
+                        </summary>
+                        <div class="provider-grid" style="margin-top:1rem;">
+                            <div class="provider-card" data-provider="gcp" onclick="CloudConnect.openSettings('gcp')">
+                                <div class="provider-icon">🌐</div>
+                                <h3>Google Cloud Platform</h3>
+                                <p>Service Account Key / Project ID</p>
+                            </div>
+                            <div class="provider-card" data-provider="azure" onclick="CloudConnect.openSettings('azure')">
+                                <div class="provider-icon">🔷</div>
+                                <h3>Microsoft Azure</h3>
+                                <p>Entra ID / Client Secret</p>
+                            </div>
+                            <div class="provider-card" data-provider="hetzner" onclick="CloudConnect.openSettings('hetzner')">
+                                <div class="provider-icon">🚀</div>
+                                <h3>Hetzner Cloud</h3>
+                                <p>API Token</p>
+                            </div>
+                            <div class="provider-card" data-provider="digitalocean" onclick="CloudConnect.openSettings('digitalocean')">
+                                <div class="provider-icon">🌊</div>
+                                <h3>DigitalOcean</h3>
+                                <p>Personal Access Token</p>
+                            </div>
+                        </div>
+                    </details>
+
+                    <!-- Full-Width Primary Action: Run First Scan -->
+                    <div class="first-scan-cta-box" style="margin-top: 1.5rem; text-align: center;">
+                        <button class="btn btn-primary btn-lg" id="btn-run-first-scan" onclick="switchPanel('scan'); if(window.Scanner) Scanner.startScan();" style="width: 100%; padding: 1rem; font-size: 1.05rem; font-weight: 700; justify-content: center;" disabled>
+                            🔍 Run first scan →
+                        </button>
+                        <p style="font-size: 0.78rem; color: var(--text-dim); margin-top: 0.5rem;">
+                            Connect your cloud above to unlock real-time compliance discovery.
+                        </p>
+                    </div>
+                </div>
+
+                <!-- ══════ Panel: Tenants (Multi-Tenancy) ══════ -->
+                <div class="panel" id="panel-tenants">
+                    <div class="panel-header-actions">
+                        <div>
+                            <h3>Governance Registry</h3>
+                            <p style="color:var(--text-muted); font-size:0.85rem;">Manage multi-tenant cloud environments and auto-remediation policies.</p>
+                        </div>
+                        <div style="display:flex; gap:0.5rem;">
+                            <button class="btn btn-secondary" onclick="TenantManager.triggerAutonomousSweep('all')">⚡ Trigger Autonomous Sweep</button>
+                            <button class="btn btn-primary" onclick="TenantManager.openOnboarding()">➕ Onboard Tenant</button>
+                        </div>
+                    </div>
+                    
+                    <div class="tenant-grid" id="tenant-list">
+                        <!-- Tenants will be injected here -->
+                    </div>
+
+                    <div id="tenants-empty" class="empty-state">
+                        <div class="icon">👥</div>
+                        <h3>No tenants registered</h3>
+                        <p>Start by onboarding your first cloud environment to the registry.</p>
+                    </div>
+                </div>
+
+                <!-- ══════ Panel: Custom Policies ══════ -->
+                <div class="panel" id="panel-policies">
+                    <div class="panel-header-actions">
+                        <div>
+                            <h3>Custom Governance Policies Engine</h3>
+                            <p style="color:var(--text-muted); font-size:0.85rem;">Define organization-wide infrastructure guardrails, geographic restrictions, and tagging standards.</p>
+                        </div>
+                        <div style="display:flex; gap:0.5rem">
+                            <button class="btn btn-secondary btn-sm" onclick="PoliciesUI.resetToDefaults()">🔄 Reset Defaults</button>
+                            <button class="btn btn-primary btn-sm" onclick="PoliciesUI.save()">💾 Save Policies</button>
+                        </div>
+                    </div>
+
+                    <div class="policy-card-grid">
+                        <!-- Allowed Regions Card -->
+                        <div class="policy-card">
+                            <div class="policy-card-header">
+                                <div>
+                                    <div class="policy-id-badge">ORG-GOV-01</div>
+                                    <h4>Restricted Cloud Regions</h4>
+                                </div>
+                                <span class="policy-enforcement-pill">Enforced</span>
+                            </div>
+                            <p class="policy-desc">Authorize specific geographic deployment regions. Resources detected outside these zones are flagged as non-compliant.</p>
+                            <div class="policy-chips-container" id="policy-region-chips"></div>
+                        </div>
+
+                        <!-- Mandatory Tags Card -->
+                        <div class="policy-card">
+                            <div class="policy-card-header">
+                                <div>
+                                    <div class="policy-id-badge">ORG-GOV-02</div>
+                                    <h4>Mandatory Resource Tagging</h4>
+                                </div>
+                                <span class="policy-enforcement-pill">Enforced</span>
+                            </div>
+                            <p class="policy-desc">Every provisioned resource must contain these metadata tags for accountability and cost allocation.</p>
+                            <div class="policy-tag-adder">
+                                <input type="text" id="policy-tag-input" placeholder="e.g. CostCenter, ProjectID" onkeydown="if(event.key === 'Enter') PoliciesUI.addTag()">
+                                <button class="btn btn-secondary btn-sm" onclick="PoliciesUI.addTag()">+ Add Tag</button>
+                            </div>
+                            <div class="policy-tags-container" id="policy-tags-container"></div>
+                        </div>
+
+                        <!-- Whitelisted Inbound Ports Card -->
+                        <div class="policy-card">
+                            <div class="policy-card-header">
+                                <div>
+                                    <div class="policy-id-badge">ORG-NET-01</div>
+                                    <h4>Inbound Port Security Whitelist</h4>
+                                </div>
+                                <span class="policy-enforcement-pill">Enforced</span>
+                            </div>
+                            <p class="policy-desc">Permissible publicly open inbound ports. Any security group or firewall opening non-whitelisted ports is flagged immediately.</p>
+                            <div class="policy-tag-adder">
+                                <input type="number" id="policy-port-input" placeholder="e.g. 443, 80" min="1" max="65535" onkeydown="if(event.key === 'Enter') PoliciesUI.addPort()">
+                                <button class="btn btn-secondary btn-sm" onclick="PoliciesUI.addPort()">+ Add Port</button>
+                            </div>
+                            <div class="policy-tags-container" id="policy-ports-container"></div>
+                        </div>
+
+                        <!-- Automated Backup & Encryption Rules -->
+                        <div class="policy-card">
+                            <div class="policy-card-header">
+                                <div>
+                                    <div class="policy-id-badge">ORG-DATA-01</div>
+                                    <h4>Automated Backup & Data Governance</h4>
+                                </div>
+                                <span class="policy-enforcement-pill">Enforced</span>
+                            </div>
+                            <p class="policy-desc">Automated security baselines applied across storage, databases, and disk volumes.</p>
+                            <div class="policy-toggle-list">
+                                <div class="policy-toggle-item">
+                                    <div>
+                                        <div class="toggle-title">Enforce Automated Database Backups</div>
+                                        <div class="toggle-sub">Mandates automated daily snapshots on RDS, Cloud SQL, and Azure SQL.</div>
+                                    </div>
+                                    <label class="switch">
+                                        <input type="checkbox" id="policy-toggle-backups" onchange="PoliciesUI.updateToggles()">
+                                        <span class="slider"></span>
+                                    </label>
+                                </div>
+                                <div class="policy-toggle-item">
+                                    <div>
+                                        <div class="toggle-title">Mandatory At-Rest Encryption (AES-256 / KMS)</div>
+                                        <div class="toggle-sub">Requires encryption on all S3 buckets, EBS volumes, and Azure Disks.</div>
+                                    </div>
+                                    <label class="switch">
+                                        <input type="checkbox" id="policy-toggle-encryption" onchange="PoliciesUI.updateToggles()">
+                                        <span class="slider"></span>
+                                    </label>
+                                </div>
+                                <div class="policy-toggle-item">
+                                    <div>
+                                        <div class="toggle-title">Object Storage Versioning & MFA Delete</div>
+                                        <div class="toggle-sub">Prevents accidental or malicious object destruction in S3 and Azure Blobs.</div>
+                                    </div>
+                                    <label class="switch">
+                                        <input type="checkbox" id="policy-toggle-versioning" onchange="PoliciesUI.updateToggles()">
+                                        <span class="slider"></span>
+                                    </label>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- ══════ Panel: Scan ══════ -->
+                <div class="panel" id="panel-scan">
+                    <div class="scan-header">
+                        <h3>Governance & Risk Discovery</h3>
+                        <div style="display:flex; gap:0.5rem; align-items:center; flex-wrap:wrap;">
+                            <button class="btn btn-secondary btn-sm" onclick="Scanner.simulateDrift()">🧪 Simulate Drift</button>
+                            <button class="btn btn-primary" id="btn-start-scan">Start Scan</button>
+                        </div>
+                    </div>
+
+                    <!-- Continuous Monitoring Controls -->
+                    <div class="monitor-bar" id="monitor-bar">
+                        <div class="monitor-left">
+                            <span id="monitor-status" class="monitor-badge">○ OFF</span>
+                            <span class="monitor-label">Real-time Drift Monitoring</span>
+                        </div>
+                        <div class="monitor-right">
+                            <select id="monitor-schedule" class="monitor-select" onchange="DriftEngine.setSchedule(this.value)">
+                                <option value="15s">Demo (15s)</option>
+                                <option value="5m">Every 5 min</option>
+                                <option value="30m">Every 30 min</option>
+                                <option value="1h">Hourly</option>
+                                <option value="6h" selected>Every 6 hours</option>
+                                <option value="12h">Every 12 hours</option>
+                                <option value="24h">Daily</option>
+                            </select>
+                            <button class="btn btn-secondary btn-sm" onclick="DriftEngine.toggleAutopilot(!DriftEngine.isActive())">
+                                <span id="monitor-toggle-text">▶ Start</span>
+                            </button>
+                        </div>
+                    </div>
+
+                    <div class="scan-history-card" id="scheduled-scan-tracker" style="display:none; background:rgba(0,0,0,0.2); border:1px solid rgba(255,255,255,0.05); padding:1rem; border-radius:8px; margin-bottom:1rem; margin-top:1rem;">
+                        <h4 style="font-size:0.9rem; color:var(--text-muted); margin-bottom:0.8rem; text-transform:uppercase; letter-spacing:0.05em;">Autonomous Schedule</h4>
+                        <div style="display:flex; justify-content:space-between; align-items:center;">
+                            <div>
+                                <div style="font-size:1.05rem; font-weight:600; color:#fff;" id="next-scan-time">Next Scan: Today at 12:00 PM UTC</div>
+                                <div style="font-size:0.75rem; color:var(--text-dim); margin-top:3px;">Triggered natively via AWS EventBridge Cron</div>
+                            </div>
+                            <div style="text-align:right;">
+                                <div style="font-size:0.9rem; color:var(--text-muted);" id="last-scan-status">Last Scan: 0 anomalies (No Data)</div>
+                                <div style="font-size:0.8rem; margin-top:3px;"><a href="#" onclick="switchPanel('reports')" style="color:var(--primary); text-decoration:none;">View Full Audit Logs →</a></div>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <div class="monitor-history" id="monitor-history"></div>
+
+                    <!-- Framework Maturity Matrix -->
+                    <div class="maturity-grid" id="maturity-grid" style="display:none">
+                        <div class="maturity-card soc2">
+                            <div class="label">SOC2 Type II</div>
+                            <div class="value" id="maturity-soc2">0/42</div>
+                            <div class="progress-mini"><div class="fill" id="fill-soc2"></div></div>
+                        </div>
+                        <div class="maturity-card gdpr">
+                            <div class="label">GDPR</div>
+                            <div class="value" id="maturity-gdpr">0/31</div>
+                            <div class="progress-mini"><div class="fill" id="fill-gdpr"></div></div>
+                        </div>
+                        <div class="maturity-card hipaa">
+                            <div class="label">HIPAA</div>
+                            <div class="value" id="maturity-hipaa">0/26</div>
+                            <div class="progress-mini"><div class="fill" id="fill-hipaa"></div></div>
+                        </div>
+                        <div class="maturity-card iso">
+                            <div class="label">ISO 27001</div>
+                            <div class="value" id="maturity-iso">0/35</div>
+                            <div class="progress-mini"><div class="fill" id="fill-iso"></div></div>
+                        </div>
+                    </div>
+
+                    <div class="scan-progress-bar" id="scan-progress-wrap" style="display:none">
+                        <div class="fill" id="scan-progress-fill"></div>
+                    </div>
+                    <div class="scan-stats" id="scan-stats" style="display:none">
+                        <div class="stat-card">
+                            <div class="stat-label">Total Resources</div>
+                            <div class="stat-value" id="stat-total">0</div>
+                        </div>
+                        <div class="stat-card">
+                            <div class="stat-label">Passing</div>
+                            <div class="stat-value pass" id="stat-pass">0</div>
+                        </div>
+                        <div class="stat-card">
+                            <div class="stat-label">Warnings</div>
+                            <div class="stat-value warn" id="stat-warn">0</div>
+                        </div>
+                        <div class="stat-card">
+                            <div class="stat-label">Critical</div>
+                            <div class="stat-value crit" id="stat-crit">0</div>
+                        </div>
+                    </div>
+                    <div id="audit-trail-section" class="audit-trail-section" style="display:none; margin-top:2rem; border-top:1px solid rgba(255,255,255,0.05); padding-top:1.5rem;">
+                        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:1rem;">
+                            <h4 style="color:var(--text-muted); font-size:0.9rem; text-transform:uppercase; letter-spacing:0.05em;">AI Governance Audit Trail</h4>
+                            <button class="btn btn-secondary btn-xs" onclick="AuditTrail.refresh()">🔄 Refresh Trace</button>
+                        </div>
+                        <div id="audit-trail-list" class="audit-trail-list">
+                            <!-- Audit logs will be injected here -->
+                        </div>
+                    </div>
+
+                    <div id="scan-empty" class="empty-state">
+                        <div class="icon">🔍</div>
+                        <h3>No scan results yet</h3>
+                        <p>Connect a cloud provider and click "Start Scan" to discover your resources.</p>
+                    </div>
+                    <table class="resource-table" id="resource-table" style="display:none">
+                        <thead>
+                            <tr>
+                                <th>Resource</th>
+                                <th>Type</th>
+                                <th>Region</th>
+                                <th>Status</th>
+                                <th>Control</th>
+                            </tr>
+                        </thead>
+                        <tbody id="resource-tbody"></tbody>
+                    </table>
+                </div>
+
+                <!-- ══════ Panel: Remediate ══════ -->
+                <div class="panel" id="panel-remediate">
+                    <div class="remediation-header">
+                        <div>
+                            <h3>Remediation Center</h3>
+                            <p style="color:var(--text-muted); font-size:0.85rem; margin-top:0.25rem;" id="rem-subtitle">Fix issues to reach 100% readiness.</p>
+                        </div>
+                        <button class="btn btn-primary" id="btn-fix-all" style="display:none">⚡ Fix All Issues</button>
+                    </div>
+
+                    <!-- ─── Execution Safety Mode Bar ─── -->
+                    <div class="remediation-controls-bar" style="display:flex; justify-content:space-between; align-items:center; background:rgba(255,255,255,0.03); border:1px solid rgba(255,255,255,0.08); padding:0.75rem 1rem; border-radius:8px; margin-bottom:1.25rem; flex-wrap:wrap; gap:0.75rem;">
+                        <div style="display:flex; align-items:center; gap:0.75rem;">
+                            <span style="font-size:0.85rem; font-weight:600; color:#fff;">Execution Mode:</span>
+                            <div class="mode-pills" style="display:flex; gap:0.4rem;">
+                                <button class="btn btn-sm btn-mode active" id="btn-mode-dryrun" onclick="Remediation.setDryRunMode(true)" style="background:#10b981; color:#000; font-weight:600;">🛡️ Dry-Run (Safety Preview)</button>
+                                <button class="btn btn-sm btn-mode" id="btn-mode-apply" onclick="Remediation.setDryRunMode(false)" style="background:rgba(255,255,255,0.1); color:#fff;">⚡ Live Fix (Apply Changes)</button>
+                            </div>
+                        </div>
+                        <div id="remediation-mode-badge" class="badge-mode-info" style="font-size:0.75rem; color:#10b981; font-weight:500;">
+                            ● Dry-Run Active: Simulates changes without modifying cloud infrastructure
+                        </div>
+                    </div>
+
+                    <div class="fix-all-progress" id="fix-all-progress"><div class="fill" id="fix-all-fill"></div></div>
+                    <div id="rem-empty" class="empty-state">
+                        <div class="icon">🛡️</div>
+                        <h3>No issues to remediate</h3>
+                        <p>Run an autonomous scan first to discover compliance drift and security vulnerabilities.</p>
+                        <button class="btn btn-primary btn-sm" onclick="switchPanel('scan')" style="margin-top:1rem;">🔍 Go to Scanner</button>
+                    </div>
+                    <div class="remediation-list" id="remediation-list"></div>
+                </div>
+
+                <!-- ══════ Panel: Terminal ══════ -->
+                <div class="panel" id="panel-terminal">
+                    <div class="terminal-wrap">
+                        <div class="terminal-toolbar">
+                            <div class="filter-group">
+                                <button class="filter-btn active" data-filter="all">All</button>
+                                <button class="filter-btn" data-filter="system">System</button>
+                                <button class="filter-btn" data-filter="agent">Agent</button>
+                                <button class="filter-btn" data-filter="insight">Insight</button>
+                                <button class="filter-btn" data-filter="action">Action</button>
+                                <button class="filter-btn" data-filter="output">Output</button>
+                            </div>
+                            <button class="btn btn-secondary btn-sm" id="btn-clear-terminal">Clear</button>
+                        </div>
+                        <div class="live-terminal" id="live-terminal">
+                            <div class="log-line">
+                                <span class="timestamp">--:--:--</span>
+                                <span class="tag tag-system">SYSTEM</span>
+                                <span class="msg">Terminal ready. Waiting for events...</span>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- ══════ Panel: Evidence ══════ -->
+                <div class="panel" id="panel-evidence">
+                    <div class="evidence-header">
+                        <div>
+                            <h3>Evidence Vault</h3>
+                            <p style="color:var(--text-muted); font-size:0.85rem; margin-top:0.25rem;" id="evidence-subtitle">All captured evidence with cryptographic integrity hashes.</p>
+                        </div>
+                    </div>
+                    <div id="evidence-empty" class="empty-state">
+                        <div class="icon">📸</div>
+                        <h3>No evidence captured yet</h3>
+                        <p>Run a scan and remediate issues. Evidence is automatically captured for every action.</p>
+                    </div>
+                    <div id="evidence-list" class="evidence-list"></div>
+                </div>
+
+                <!-- ══════ Panel: Auditor Portal ══════ -->
+                <div class="panel" id="panel-auditor">
+                    <div class="auditor-hero-banner">
+                        <div class="auditor-hero-content">
+                            <div class="trust-badge">⚖️ SOC2 TYPE II CRYPTOGRAPHIC PORTAL</div>
+                            <h3 style="margin-top:0.4rem; font-size:1.4rem;">Third-Party Auditor Verification & Evidence Access</h3>
+                            <p style="color:var(--text-muted); font-size:0.88rem; margin-top:0.3rem;">Generate time-bounded, cryptographically signed access tokens for external compliance auditors (PwC, EY, Deloitte, KPMG) with automated HMAC-SHA256 evidence package verification.</p>
+                        </div>
+                        <div class="auditor-hero-actions">
+                            <button class="btn btn-primary" onclick="Evidence.downloadAuditorPackage()">📦 Export Signed Bundle (.json)</button>
+                            <button class="btn btn-secondary" onclick="window.print()">📑 Export Executive PDF</button>
+                        </div>
+                    </div>
+
+                    <div class="auditor-grid">
+                        <!-- Card 1: Issue Auditor Access Token -->
+                        <div class="auditor-card">
+                            <div class="auditor-card-header">
+                                <div class="card-icon">🔑</div>
+                                <div>
+                                    <h4>Issue Auditor Access Token</h4>
+                                    <p style="color:var(--text-muted); font-size:0.8rem;">Grant read-only, expiring access to verified infrastructure proofs.</p>
+                                </div>
+                            </div>
+                            
+                            <div class="input-group" style="margin-top:1.2rem;">
+                                <label>Target Environment / Tenant</label>
+                                <select id="auditor-tenant-select">
+                                    <option value="prod-aws-env">AWS Production Environment</option>
+                                    <option value="azure-cloud-core">Azure Enterprise Core</option>
+                                    <option value="gcp-analytics-hub">GCP Analytics Cluster</option>
+                                    <option value="hetzner-gpu-nodes">Hetzner Dedicated Fleet</option>
+                                </select>
+                            </div>
+
+                            <div class="input-group">
+                                <label>Auditor Email Address <span style="color:var(--danger)">*</span></label>
+                                <input type="email" id="auditor-email-input" placeholder="lead.auditor@firm.com" value="auditor@complianceflow.icu">
+                            </div>
+
+                            <div class="input-group">
+                                <label>Access Duration</label>
+                                <select id="auditor-expiry-select">
+                                    <option value="24">24 Hours (Standard Review)</option>
+                                    <option value="48" selected>48 Hours (Full Audit Period)</option>
+                                    <option value="72">72 Hours (Extended Deep Dive)</option>
+                                    <option value="168">7 Days (Comprehensive Certification)</option>
+                                </select>
+                            </div>
+
+                            <button class="btn btn-primary" style="width:100%; margin-top:0.8rem;" onclick="Evidence.issueAuditorToken()">
+                                ⚡ Generate Cryptographic Auditor Token
+                            </button>
+
+                            <!-- Token Result Display -->
+                            <div id="auditor-token-result" class="auditor-token-result" style="display:none;">
+                                <div class="token-success-header">
+                                    <span class="pulse-dot green"></span> Token Issued & Signed with HMAC-SHA256
+                                </div>
+                                <div class="token-row">
+                                    <label>Auditor Token:</label>
+                                    <code id="auditor-token-value"></code>
+                                </div>
+                                <div class="token-row">
+                                    <label>Expires At:</label>
+                                    <span id="auditor-token-expires"></span>
+                                </div>
+                                <div class="token-row">
+                                    <label>Direct Portal URL:</label>
+                                    <div class="copy-url-group">
+                                        <input type="text" id="auditor-portal-link" readonly>
+                                        <button class="btn btn-secondary btn-sm" onclick="Evidence.copyPortalLink()">📋 Copy</button>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Card 2: Interactive Tamper Detection & Verifier -->
+                        <div class="auditor-card">
+                            <div class="auditor-card-header">
+                                <div class="card-icon">🛡️</div>
+                                <div>
+                                    <h4>Cryptographic Package Verifier</h4>
+                                    <p style="color:var(--text-muted); font-size:0.8rem;">Verify that an evidence bundle has not been modified, forged, or tampered with.</p>
+                                </div>
+                            </div>
+
+                            <div class="input-group" style="margin-top:1.2rem;">
+                                <label>Paste Signed Evidence Bundle JSON</label>
+                                <textarea id="verify-package-input" placeholder='Paste export JSON bundle here (starts with { "manifest": ... })' style="height:140px; font-family:var(--font-mono); font-size:0.75rem;"></textarea>
+                            </div>
+
+                            <button class="btn btn-secondary" style="width:100%;" onclick="Evidence.verifyEvidencePackage()">
+                                🔍 Interrogate Cryptographic Authenticity
+                            </button>
+
+                            <!-- Verification Result Card -->
+                            <div id="verify-result-card" class="verify-result-card" style="display:none;">
+                                <div id="verify-result-status"></div>
+                                <div id="verify-result-details" class="verify-result-details"></div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- ══════ Panel: Reports ══════ -->
+                <div class="panel" id="panel-reports">
+                    <div class="report-header-actions no-print">
+                        <div>
+                            <h3>Premium Governance Audit</h3>
+                            <p style="color:var(--text-muted); font-size:0.85rem; margin-top:0.25rem;">Multi-framework audit with 120+ controls and cryptographic proof.</p>
+                        </div>
+                        <div style="display:flex; gap:0.5rem">
+                            <button class="btn btn-secondary btn-sm" onclick="window.print()">🖨️ Export PDF</button>
+                            <button class="btn btn-primary" id="btn-generate-report" onclick="Evidence.generateReport()">📊 Regenerate Audit</button>
+                        </div>
+                    </div>
+
+                    <div id="professional-report-container" style="display:none">
+                        <div class="premium-audit-header">
+                            <div class="branding">
+                                <div class="logo">Compliance<span>Flow</span></div>
+                                <div class="report-type">Governance & Risk Analysis Report</div>
+                            </div>
+                            <div class="meta">
+                                <div><strong>Report ID:</strong> <span id="rep-id-val">CF-2026-A001</span></div>
+                                <div><strong>Date:</strong> <span id="rep-date-val"></span></div>
+                                <div><strong>Classification:</strong> <span style="color:var(--danger); font-weight:700;">PROPRIETARY / CONFIDENTIAL</span></div>
+                            </div>
+                        </div>
+
+                        <div class="report-grid">
+                            <div class="exec-summary-card">
+                                <h4>Executive Summary</h4>
+                                <p id="exec-summary-text">Comprehensive infrastructure scan complete. The system has interrogated multi-cloud environments across AWS, GCP, and Azure. Governance maturity is trending positive, though critical drifts were identified in perimeter security.</p>
+                                <div class="risk-meter-wrap">
+                                    <div class="risk-label">Overall Risk Posture</div>
+                                    <div class="risk-meter"><div class="fill" id="risk-fill" style="width:15%"></div></div>
+                                    <div class="risk-value" id="risk-val">Low Risk</div>
+                                </div>
+                            </div>
+
+                            <div class="framework-scores-grid">
+                                <div class="fw-score-item soc2">
+                                    <span class="label">SOC2 Type II</span>
+                                    <span class="value" id="score-soc2">0%</span>
+                                </div>
+                                <div class="fw-score-item gdpr">
+                                    <span class="label">GDPR</span>
+                                    <span class="value" id="score-gdpr">0%</span>
+                                </div>
+                                <div class="fw-score-item hipaa">
+                                    <span class="label">HIPAA</span>
+                                    <span class="value" id="score-hipaa">0%</span>
+                                </div>
+                                <div class="fw-score-item iso">
+                                    <span class="label">ISO 27001</span>
+                                    <span class="value" id="score-iso">0%</span>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div class="report-section-title">Audit Findings & Mappings</div>
+                        <div id="report-findings-area"></div>
+                    </div>
+                    <div id="report-empty" class="empty-state">
+                        <div class="icon">📄</div>
+                        <h3>No report generated yet</h3>
+                        <p>Complete the scan → remediation cycle, then click "Generate Report".</p>
+                    </div>
+                    <div id="report-content"></div>
+                </div>
+
+            </div>
+            <!-- Monitoring Panel -->
+            <section id="panel-monitoring" class="content-panel" style="display:none">
+                <div class="panel-header">
+                    <h2>Governance Engine Health</h2>
+                    <p>Real-time monitoring of remediation jobs and failure rates.</p>
+                </div>
+
+                <div class="stats-grid">
+                    <div class="stat-card">
+                        <div class="stat-value" id="monitor-total-jobs">0</div>
+                        <div class="stat-label">Total Jobs (24h)</div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-value" id="monitor-success-rate">100%</div>
+                        <div class="stat-label">Success Rate</div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-value text-error" id="monitor-failed-jobs">0</div>
+                        <div class="stat-label">Failed Remediations</div>
+                    </div>
+                </div>
+
+                <div class="data-table-container" style="margin-top: 2rem;">
+                    <h3>Recent Failures & Incidents</h3>
+                    <table class="data-table">
+                        <thead>
+                            <tr>
+                                <th>Timestamp</th>
+                                <th>Provider</th>
+                                <th>Action</th>
+                                <th>Error Message</th>
+                                <th>Status</th>
+                            </tr>
+                        </thead>
+                        <tbody id="monitor-failure-list">
+                            <tr>
+                                <td colspan="5" style="text-align:center; padding: 2rem; color: var(--text-muted);">
+                                    No active incidents detected.
+                                </td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+
+                <!-- Session History Section -->
+                <div class="card" style="margin-top: 1rem; padding: 1.5rem;">
+                    <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom: 1rem;">
+                        <h3 style="margin:0; font-size: 1rem;">Recent Sessions</h3>
+                        <button class="btn btn-secondary btn-sm" onclick="ScanHistory.refresh()">🔄 Refresh</button>
+                    </div>
+                    <div id="scan-history-list" class="history-list">
+                        <!-- History items will be injected here -->
+                        <div class="empty-state">No recent sessions found.</div>
+                    </div>
+                </div>
+            </section>
         </main>
+
+        <!-- ══════ AI Chat Drawer (Floating) ══════ -->
+        <button class="chat-toggle no-print" id="chat-toggle" onclick="ChatEngine.toggle()">
+            <span class="icon">🤖</span>
+            <span class="label">AI Assistant</span>
+        </button>
+
+        <div class="chat-drawer no-print" id="chat-drawer">
+            <div class="chat-header">
+                <div class="title">
+                    Governance Architect <span>AI</span>
+                </div>
+                <button class="chat-close" onclick="ChatEngine.toggle()">✕</button>
+            </div>
+            <div class="chat-messages" id="chat-messages">
+                <div class="chat-msg system">
+                    Greetings. I am your Cloud Governance Architect. I have live access to your scan data and compliance evidence. How can I assist you with your infrastructure audit today?
+                </div>
+            </div>
+            <div class="chat-input-area">
+                <textarea id="chat-input" placeholder="Ask about your infrastructure..." rows="1" onkeydown="if(event.key === 'Enter' && !event.shiftKey) { event.preventDefault(); ChatEngine.send(); }"></textarea>
+                <button class="chat-send" id="chat-send" onclick="ChatEngine.send()">🚀</button>
+            </div>
+        </div>
+
+        <!-- ══════ Modal: Tenant Onboarding ══════ -->
+        <div class="modal-overlay" id="modal-onboarding">
+            <div class="modal-card">
+                <div class="modal-header">
+                    <h3>Onboard New Tenant</h3>
+                    <button class="modal-close" onclick="TenantManager.closeOnboarding()">✕</button>
+                </div>
+                <div class="modal-body">
+                    <div class="input-group">
+                        <label>Cloud Provider</label>
+                        <select id="onboard-provider" onchange="TenantManager.updateOnboardFields()">
+                            <option value="aws">Amazon Web Services (AWS)</option>
+                            <option value="gcp">Google Cloud Platform (GCP)</option>
+                            <option value="azure">Microsoft Azure</option>
+                            <option value="hetzner">Hetzner Cloud</option>
+                            <option value="digitalocean">DigitalOcean</option>
+                        </select>
+                    </div>
+                    <div class="input-group">
+                        <label>Tenant Name</label>
+                        <input type="text" id="onboard-name" placeholder="e.g. My GPU Hive">
+                    </div>
+                    
+                    <!-- Dynamic Fields Container -->
+                    <div id="onboard-dynamic-fields">
+                        <div class="input-group">
+                            <label>AWS Account ID <span style="color:var(--danger)">*</span></label>
+                            <input type="text" id="onboard-aws-account" placeholder="12-Digit Account ID" maxlength="12" oninput="TenantManager.updatePathPreview()">
+                        </div>
+                        <div id="arn-preview-wrap" style="background:rgba(0,0,0,0.2); padding:0.6rem; border-radius:4px; font-size:0.75rem; border:1px solid rgba(255,255,255,0.05); margin-top:0.5rem; display:none;">
+                            <div style="color:var(--text-dim); margin-bottom:4px; text-transform:uppercase; font-size:0.65rem;">Predicted Scanner ARN:</div>
+                            <code id="arn-preview" style="color:var(--primary); word-break:break-all;">arn:aws:iam::...:role/ComplianceFlow-AINS-Scanner</code>
+                        </div>
+                    </div>
+
+                    <div class="input-group">
+                        <label>Scan Frequency</label>
+                        <select id="onboard-frequency">
+                            <option value="daily" selected>Daily (24h)</option>
+                            <option value="weekly">Weekly (7d)</option>
+                            <option value="continuous">Continuous (15s Drift Engine)</option>
+                        </select>
+                    </div>
+
+                    <div class="input-group">
+                        <label>Report Delivery Email <span style="color:var(--danger)">*</span></label>
+                        <input type="email" id="onboard-email" placeholder="compliance@company.com" required>
+                        <small style="color:var(--text-dim); font-size:0.72rem;">Automated scan reports & alerts will be sent here.</small>
+                    </div>
+                    <div style="display:flex; align-items:center; gap:0.5rem; margin-top:1rem;">
+                        <input type="checkbox" id="onboard-auto" checked>
+                        <label style="margin:0; font-size:0.85rem;">Enable Auto-Remediation (Recommended)</label>
+                    </div>
+                    <div class="modal-actions">
+                        <button class="btn btn-secondary" onclick="TenantManager.closeOnboarding()">Cancel</button>
+                        <button class="btn btn-primary" onclick="TenantManager.saveTenant()">Authorize & Save</button>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- ══════ Modal: Team Authentication & SSO ══════ -->
+        <div class="modal-overlay" id="modal-auth">
+            <div class="modal-card" style="max-width: 460px;">
+                <div class="modal-header">
+                    <h3>Team Authentication & SSO</h3>
+                    <button class="modal-close" onclick="AuthUI.closeAuthModal()">✕</button>
+                </div>
+                <div class="modal-body">
+                    <p style="font-size:0.85rem; color:var(--text-muted); margin-bottom:1.5rem;">
+                        Sign in to access your organization's compliance dashboard, automated sweeps, and evidence vault.
+                    </p>
+
+                    <!-- OAuth SSO Options -->
+                    <div class="auth-provider-buttons">
+                        <button class="btn btn-sso btn-google" onclick="AuthUI.signInWithGoogle()">
+                            <span class="provider-logo">🌐</span> Continue with Google Workspace
+                        </button>
+                        <button class="btn btn-sso btn-github" onclick="AuthUI.signInWithGitHub()">
+                            <span class="provider-logo">🐙</span> Continue with GitHub Enterprise
+                        </button>
+                    </div>
+
+                    <div class="auth-divider">
+                        <span>OR QUICK RBAC ROLE TEST</span>
+                    </div>
+
+                    <div class="quick-roles-grid">
+                        <button class="btn-role-select" onclick="AuthUI.quickDevLogin('ADMIN')">
+                            <span class="role-icon">👑</span>
+                            <div>
+                                <div class="role-name">Admin / Owner</div>
+                                <div class="role-desc">Full access & tenant management</div>
+                            </div>
+                        </button>
+                        <button class="btn-role-select" onclick="AuthUI.quickDevLogin('ENGINEER')">
+                            <span class="role-icon">⚡</span>
+                            <div>
+                                <div class="role-name">Cloud Engineer</div>
+                                <div class="role-desc">Trigger scans & auto-remediations</div>
+                            </div>
+                        </button>
+                        <button class="btn-role-select" onclick="AuthUI.quickDevLogin('AUDITOR')">
+                            <span class="role-icon">⚖️</span>
+                            <div>
+                                <div class="role-name">SOC2 Auditor</div>
+                                <div class="role-desc">View evidence & export bundles</div>
+                            </div>
+                        </button>
+                        <button class="btn-role-select" onclick="AuthUI.quickDevLogin('VIEWER')">
+                            <span class="role-icon">👁️</span>
+                            <div>
+                                <div class="role-name">Read-Only Viewer</div>
+                                <div class="role-desc">Audit logs & status dashboards</div>
+                            </div>
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- ══════ Modal: Connection Settings ══════ -->
+        <div class="modal-overlay" id="modal-settings">
+            <div class="modal-card">
+                <div class="modal-header">
+                    <h3>Cloud Connection Settings</h3>
+                    <button class="modal-close" onclick="CloudConnect.closeSettings()">✕</button>
+                </div>
+                <div class="modal-body">
+                    <p style="font-size:0.85rem; color:var(--text-muted); margin-bottom:1.5rem;">
+                        Enter your cloud credentials. These are used only for the current session and are passed to the scanning engine via HTTPS.
+                    </p>
+                    
+                    <div class="input-group">
+                        <label>Provider</label>
+                        <select id="setting-provider" onchange="CloudConnect.toggleAuthMethod()">
+                            <option value="aws">Amazon Web Services (AWS)</option>
+                            <option value="gcp">Google Cloud Platform (GCP)</option>
+                            <option value="azure">Microsoft Azure</option>
+                            <option value="hetzner">Hetzner Cloud</option>
+                            <option value="digitalocean">DigitalOcean</option>
+                        </select>
+                    </div>
+
+                    <div class="input-group">
+                        <label>Authentication Method</label>
+                        <select id="setting-auth-method" onchange="CloudConnect.toggleAuthMethod()" style="background:rgba(0,0,0,0.2); color:#fff; border:1px solid rgba(255,255,255,0.1); padding:0.5rem; border-radius:4px; width:100%">
+                            <option value="keys">API Keys (Direct Access)</option>
+                            <option value="role">IAM Role (Cross-Account Secure)</option>
+                            <option value="token">API Token (Provider Specific)</option>
+                        </select>
+                    </div>
+
+                    <div id="aws-keys-group">
+                        <div class="input-group">
+                            <label id="key-id-label">Access Key ID / Client ID</label>
+                            <input type="text" id="setting-access-key" placeholder="AKIA... or Azure Client ID">
+                        </div>
+                        <div class="input-group">
+                            <label id="secret-key-label">Secret Access Key / Client Secret</label>
+                            <input type="password" id="setting-secret-key" placeholder="Your secret key">
+                        </div>
+                    </div>
+
+                    <div id="azure-gcp-group" style="display:none">
+                        <div class="input-group">
+                            <label id="project-id-label">Project ID / Subscription ID</label>
+                            <input type="text" id="setting-project-id" placeholder="my-gcp-project or azure-sub-id">
+                        </div>
+                        <div id="azure-tenant-group" style="display:none">
+                            <div class="input-group">
+                                <label>Tenant ID</label>
+                                <input type="text" id="setting-tenant-id" placeholder="Azure Tenant ID (GUID)">
+                            </div>
+                        </div>
+                    </div>
+
+                    <div id="aws-role-group" style="display:none">
+                        <div class="input-group">
+                            <label>Cross-Account Role ARN</label>
+                            <input type="text" id="setting-role-arn" placeholder="arn:aws:iam::ACCOUNT_ID:role/ComplianceFlow-Role">
+                        </div>
+                        <div class="input-group">
+                            <label>External ID</label>
+                            <input type="text" id="setting-external-id" placeholder="Your unique security handshake ID" value="CF-AINS-ONBOARDING-SECRET">
+                        </div>
+                    </div>
+
+                    <div id="token-group" style="display:none">
+                        <div class="input-group">
+                            <label id="token-label">API Token / Service Key</label>
+                            <input type="password" id="setting-token" placeholder="Paste your provider token here">
+                        </div>
+                    </div>
+
+                    <div class="input-group">
+                        <label>Default Region</label>
+                        <input type="text" id="setting-region" placeholder="us-east-1" value="us-east-1">
+                    </div>
+
+                    <div class="input-group">
+                        <label>Reporting Email</label>
+                        <input type="email" id="setting-report-email" placeholder="compliance@yourcompany.com">
+                    </div>
+
+                    <div class="modal-actions">
+                        <button class="btn btn-secondary" onclick="CloudConnect.closeSettings()">Cancel</button>
+                        <button class="btn btn-primary" onclick="CloudConnect.saveSettings()">Save Connection</button>
+                    </div>
+                </div>
+            </div>
+        </div>
     </div>
-    <script src="execution-client.js"></script>
+
+    <!-- ══════ Honest Auth Gate Overlay ══════ -->
+    <div class="auth-gate-overlay" id="auth-gate-overlay">
+        <div class="auth-gate-card">
+            <div class="auth-gate-logo">
+                ComplianceFlow<span>AI</span>
+            </div>
+            <h2>Sign in to continue</h2>
+            <p class="auth-gate-subtitle">Use your work Google or GitHub account</p>
+
+            <div class="auth-gate-actions" id="auth-gate-dynamic-actions">
+                <!-- Dynamically populated from /api/auth/providers -->
+            </div>
+
+            <div style="font-size:0.75rem; color:var(--text-dim); margin-top:1.25rem; border-top:1px solid rgba(255,255,255,0.06); padding-top:0.75rem;">
+                Need a pilot account? Contact <a href="mailto:support@compflow.icu" style="color:var(--primary); text-decoration:none;">support@compflow.icu</a>
+            </div>
+        </div>
+    </div>
+
+    <!-- ══════ Switch Account / Role Modal ══════ -->
+    <div class="modal" id="modal-account">
+        <div class="modal-backdrop" onclick="AuthUI.closeAccountModal()"></div>
+        <div class="modal-content" style="max-width: 480px;">
+            <div class="modal-header">
+                <h3>Identity & Role Management</h3>
+                <button class="modal-close" onclick="AuthUI.closeAccountModal()">×</button>
+            </div>
+            <div class="modal-body">
+                <!-- Dev-only role picker (hidden in production by auth-ui.js) -->
+                <div id="dev-roles-section">
+                    <p style="font-size:0.85rem; color:var(--text-muted); margin-bottom:1.25rem;">
+                        Select an identity role to test permissions and tenant isolation.
+                    </p>
+                    <div style="display:flex; flex-direction:column; gap:0.6rem;">
+                        <button class="btn btn-secondary" style="justify-content:flex-start; text-align:left; padding:0.75rem;" onclick="AuthUI.quickDevLogin('OWNER')">
+                            <div>
+                                <div style="font-weight:600; color:#fff;">👑 OWNER</div>
+                                <div style="font-size:0.72rem; color:var(--text-muted);">Full administrative control & billing access</div>
+                            </div>
+                        </button>
+                        <button class="btn btn-secondary" style="justify-content:flex-start; text-align:left; padding:0.75rem;" onclick="AuthUI.quickDevLogin('ADMIN')">
+                            <div>
+                                <div style="font-weight:600; color:#fff;">🛡️ ADMIN</div>
+                                <div style="font-size:0.72rem; color:var(--text-muted);">Trigger scans, edit policies, auto-remediate drift</div>
+                            </div>
+                        </button>
+                        <button class="btn btn-secondary" style="justify-content:flex-start; text-align:left; padding:0.75rem;" onclick="AuthUI.quickDevLogin('ENGINEER')">
+                            <div>
+                                <div style="font-weight:600; color:#fff;">⚙️ ENGINEER</div>
+                                <div style="font-size:0.72rem; color:var(--text-muted);">Run scans and validate cloud credentials</div>
+                            </div>
+                        </button>
+                        <button class="btn btn-secondary" style="justify-content:flex-start; text-align:left; padding:0.75rem;" onclick="AuthUI.quickDevLogin('AUDITOR')">
+                            <div>
+                                <div style="font-weight:600; color:#fff;">⚖️ AUDITOR</div>
+                                <div style="font-size:0.72rem; color:var(--text-muted);">Read-only access to evidence vault and compliance reports</div>
+                            </div>
+                        </button>
+                    </div>
+                </div>
+                <!-- Production: sign-out only -->
+                <div id="prod-account-section" style="display:none;">
+                    <p style="font-size:0.85rem; color:var(--text-muted); margin-bottom:1rem;">
+                        Signed in via SSO. To switch accounts, sign out and re-authenticate.
+                    </p>
+                    <button class="btn btn-secondary" style="width:100%; padding:0.75rem;" onclick="AuthUI.logout(event)">
+                        Sign out
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script src="live-terminal.js?v=2.1"></script>
+    <script src="auth-ui.js"></script>
+    <script src="policies-ui.js"></script>
+    <script src="tenant-manager.js?v=2.1"></script>
+    <script src="frameworks.js?v=2.1"></script>
+    <script src="evidence.js?v=2.1"></script>
+    <script src="cloud-connect.js"></script>
+    <script src="monitoring-ui.js"></script>
+    <script src="scan-history.js"></script>
+    <script src="scanner.js"></script>
+    <script src="remediation.js?v=2.1"></script>
+    <script src="drift-engine.js?v=2.1"></script>
+
     <script>
-      window.CompflowExecutionUI = (() => {
-        let stream;
-        let sequence = 0;
-        const id = () => document.getElementById('execution-id-input')?.value.trim();
-        const el = name => document.getElementById(name);
-        const esc = value => String(value ?? '').replace(/[&<>\"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','\"':'&quot;'}[c]));
-        const statusClass = value => ['SUCCEEDED','FAILED','RUNNING','PENDING','CANCELLED'].includes(value) ? value : 'PENDING';
-        const renderStats = data => { const nodes=data?.graph?.nodes||[]; const counts=nodes.reduce((a,n)=>{a[n.status]=(a[n.status]||0)+1;return a},{}); el('execution-stat-grid').innerHTML=[['Status',data?.execution?.status||'UNKNOWN'],['Nodes',nodes.length],['Running',counts.RUNNING||0],['Failed',counts.FAILED||0],['Completed',(counts.SUCCEEDED||0)+(counts.SKIPPED||0)]].map(([k,v])=>`<div class="execution-stat"><span>${esc(k)}</span><strong>${esc(v)}</strong></div>`).join(''); };
-        const renderNodes = data => { const nodes=data?.graph?.nodes||[]; el('execution-node-list').innerHTML=nodes.length?nodes.map(n=>`<div class="execution-row"><span class="execution-dot execution-status ${statusClass(n.status)}"></span><div><strong>${esc(n.label||n.node_type)}</strong><small>${esc(n.node_type)} · ${esc(n.logical_key)}</small></div><span class="execution-status ${statusClass(n.status)}">${esc(n.status)}</span></div>`).join(''):'<div class="execution-empty">No graph nodes.</div>'; };
-        const renderTimeline = data => { const events=data?.events?.events||data?.events||[]; const list=Array.isArray(events)?events:[]; el('execution-timeline').innerHTML=list.length?list.slice().reverse().map(e=>`<div class="execution-event"><strong>${esc(e.event_type||e.eventType||'EVENT')}</strong> · ${esc(e.result||'')}</strong><small>${esc(e.created_at||e.createdAt||'')} · #${esc(e.sequence||'')}</small></div>`).join(''):'<div class="execution-empty">No durable events returned.</div>'; sequence=list.reduce((m,e)=>Math.max(m,Number(e.sequence||0)),sequence); };
-        const renderDecision = data => { const final=data?.final||data?.decision||null; if(!final){el('execution-decision').innerHTML='<div class="execution-empty">No final decision.</div>';return;} const cls=final.outcome==='PASS'?'execution-pass':final.outcome==='FAIL'?'execution-fail':'execution-unknown'; el('execution-decision').innerHTML=`<div class="execution-decision"><h4 class="${cls}">${esc(final.outcome)}</h4><div class="execution-kv"><span>Decision hash</span><code>${esc(final.decision_hash)}</code><span>Decided</span><span>${esc(final.decided_at)}</span></div></div>`; };
-        const renderEvidence = data => { const rows=data?.evidence||[]; el('execution-evidence-list').innerHTML=rows.length?rows.map(r=>`<div class="execution-row"><span class="execution-dot"></span><div><strong>${esc(r.control_id)}</strong><small>${esc(r.provider)} · ${esc(r.resource_id||'target')} · ${esc(r.freshness?.state||'UNKNOWN')}</small></div><span class="execution-status ${r.integrityValid?'SUCCEEDED':'FAILED'}">${r.integrityValid?'VERIFIED':'TAMPERED'}</span></div>`).join(''):'<div class="execution-empty">No evidence records.</div>'; };
-        async function refresh(){ const executionId=id(); if(!executionId){el('execution-live-label').textContent='ENTER ID';return;} try{ const [data,evidence,decisions]=await Promise.all([CompflowExecution.get(executionId,sequence),CompflowExecution.evidence(executionId),CompflowExecution.decisions(executionId)]); renderStats(data);renderNodes(data);renderTimeline(data);renderEvidence(evidence);renderDecision(decisions);el('execution-live-label').textContent='SYNCED'; }catch(error){el('execution-live-label').textContent=error.message;}}
-        function stop(){if(stream){stream.close();stream=null;}el('execution-live-label').textContent='IDLE';}
-        return {
-          refresh,
-          resume: async()=>{const executionId=id();if(!executionId)return;await CompflowExecution.action(executionId,'resume',{},`ui-resume-${executionId}`);await refresh();},
-          cancel: async()=>{const executionId=id();if(!executionId)return;await CompflowExecution.action(executionId,'cancel',{reason:'Cancelled from execution dashboard'},`ui-cancel-${executionId}`);await refresh();},
-          watch: ()=>{const executionId=id();if(!executionId)return;stop();stream=CompflowExecution.stream(executionId,{ready:()=>el('execution-live-label').textContent='LIVE',execution:()=>refresh(),audit:()=>refresh(),error:value=>el('execution-live-label').textContent=typeof value==='string'?value:'STREAM ERROR'});return stream;},
-          stop
+        // ─── Navigation ───
+        const navItems = document.querySelectorAll('.nav-item');
+        const panels = document.querySelectorAll('.panel');
+        const pageTitle = document.getElementById('page-title');
+
+        const titles = {
+            connect: 'Cloud Connect',
+            tenants: 'Governance Registry',
+            policies: 'Governance Policies',
+            scan: 'Resource Scanner',
+            remediate: 'Remediation Center',
+            terminal: 'Live Terminal',
+            evidence: 'Evidence Vault',
+            auditor: 'Auditor Portal',
+            reports: 'Audit Report'
         };
-      })();
+
+        navItems.forEach(item => {
+            item.addEventListener('click', () => {
+                const panel = item.dataset.panel;
+                if (!panel) return;
+                
+                // Switch panel
+                switchPanel(panel);
+                
+                // Highlight nav
+                navItems.forEach(n => n.classList.remove('active'));
+                item.classList.add('active');
+
+                // Close mobile sidebar on selection
+                if (window.innerWidth <= 768) {
+                    toggleMobileSidebar();
+                }
+            });
+        });
+
+        function toggleMobileSidebar() {
+            const sidebar = document.querySelector('.sidebar');
+            const overlay = document.getElementById('sidebar-overlay');
+            if (sidebar) sidebar.classList.toggle('open');
+            if (overlay) overlay.classList.toggle('active');
+        }
+
+        function switchPanel(panelId) {
+            panels.forEach(p => p.classList.remove('active'));
+            const target = document.getElementById('panel-' + panelId);
+            if (target) {
+                target.classList.add('active');
+                pageTitle.textContent = titles[panelId] || 'ComplianceFlow';
+            }
+        }
+
+        async function runShowcase() {
+            if (typeof showToast !== 'function') return;
+            showToast("🎬 Starting Platform Showcase...");
+            const sequence = ['connect', 'tenants', 'policies', 'scan', 'remediate', 'terminal', 'evidence', 'auditor', 'reports'];
+            for (const p of sequence) {
+                switchPanel(p);
+                const nav = document.querySelector(`.nav-item[data-panel="${p}"]`);
+                if (nav) {
+                    navItems.forEach(n => n.classList.remove('active'));
+                    nav.classList.add('active');
+                }
+                await new Promise(r => setTimeout(r, 1500));
+            }
+            showToast("✨ Showcase Complete.");
+            await new Promise(r => setTimeout(r, 1000));
+            switchPanel('connect');
+            navItems.forEach(n => n.classList.remove('active'));
+            document.getElementById('nav-connect').classList.add('active');
+        }
+
+        window.switchPanel = switchPanel;
+        window.runShowcase = runShowcase;
+
+        function setGlobalFramework(id) {
+            Frameworks.setFramework(id);
+            const fw = Frameworks.getCurrent();
+            
+            // Update UI
+            document.querySelectorAll('.fw-pill').forEach(p => {
+                p.classList.toggle('active', p.textContent.toLowerCase().includes(id));
+            });
+            
+            const badge = document.getElementById('active-fw-badge');
+            badge.textContent = fw.name;
+            badge.className = 'fw-status-badge fw-' + id;
+
+            LiveTerminal.log('system', `Switching Governance Framework context to ${fw.name}...`);
+            
+            // Trigger UI refreshes
+            if (window.Scanner) Scanner.updateScore();
+            if (window.Evidence) Evidence.refreshView();
+        }
     </script>
-    <script src="live-terminal.js?v=2.1"></script><script src="auth-ui.js"></script><script src="policies-ui.js"></script><script src="tenant-manager.js?v=2.1"></script><script src="frameworks.js?v=2.1"></script><script src="evidence.js?v=2.1"></script><script src="cloud-connect.js"></script><script src="monitoring-ui.js"></script><script src="scan-history.js"></script><script src="scanner.js"></script><script src="remediation.js?v=2.1"></script><script src="drift-engine.js?v=2.1"></script>
-    <script>const navItems=document.querySelectorAll('.nav-item');const panels=document.querySelectorAll('.panel');const pageTitle=document.getElementById('page-title');const titles={connect:'Cloud Connect',tenants:'Governance Registry',policies:'Custom Governance Policies',scan:'Resource Scanner',remediate:'Remediation Center',terminal:'Live Terminal',evidence:'Evidence Vault',auditor:'Auditor Portal',reports:'Audit Report',monitoring:'System Health'};function switchPanel(panel){navItems.forEach(n=>n.classList.toggle('active',n.dataset.panel===panel));panels.forEach(p=>p.classList.toggle('active',p.id===`panel-${panel}`));if(pageTitle)pageTitle.textContent=titles[panel]||panel;}navItems.forEach(item=>item.addEventListener('click',()=>{if(item.dataset.panel)switchPanel(item.dataset.panel)}));</script>
+
+
+    <div id="toast-container" class="toast-container"></div>
+    <script src="chat-engine.js"></script>
+    <script>
+        function showToast(msg) {
+            const container = document.getElementById('toast-container');
+            if (!container) return;
+            const toast = document.createElement('div');
+            toast.className = 'toast';
+            toast.textContent = msg;
+            container.appendChild(toast);
+            setTimeout(() => {
+                toast.style.opacity = '0';
+                setTimeout(() => toast.remove(), 500);
+            }, 3000);
+        }
+
+        const AuditTrail = {
+            async refresh() {
+                const list = document.getElementById('audit-trail-list');
+                const section = document.getElementById('audit-trail-section');
+                const clientId = 'demo-client'; // In prod, this would come from the context
+                
+                try {
+                    const fetchFn = (window.AuthUI && window.AuthUI.authFetch) ? window.AuthUI.authFetch : fetch;
+                    const res = await fetchFn(`${window.COMPLIANCE_API_URL}/api/audit?clientId=${clientId}`);
+                    const logs = await res.json();
+                    
+                    if (logs && logs.length > 0) {
+                        section.style.display = 'block';
+                        list.innerHTML = logs.map(log => `
+                            <div class="audit-item">
+                                <div class="audit-item-header">
+                                    <div class="audit-item-title">${log.message}</div>
+                                    <div class="audit-item-badge audit-badge-${log.level.toLowerCase()}">${log.level}</div>
+                                </div>
+                                <div class="audit-item-time">${new Date(log.timestamp).toLocaleString()}</div>
+                                <div class="audit-item-reason">${log.details?.reason || 'No additional reasoning provided.'}</div>
+                                <div class="audit-item-details">
+                                    <div class="audit-detail-cell">
+                                        <div class="label">Resource</div>
+                                        <div class="val">${log.details?.resource || 'N/A'}</div>
+                                    </div>
+                                    <div class="audit-detail-cell">
+                                        <div class="label">Decision</div>
+                                        <div class="val">${log.details?.decision || 'Escalated'}</div>
+                                    </div>
+                                    <div class="audit-detail-cell">
+                                        <div class="label">Status</div>
+                                        <div class="val">${log.details?.status || 'Active'}</div>
+                                    </div>
+                                </div>
+                            </div>
+                        `).join('');
+                    } else {
+                        section.style.display = 'none';
+                    }
+                } catch (e) {
+                    console.error('Failed to fetch audit trail:', e);
+                }
+            }
+        };
+
+        // Hook into scan completion
+        const originalUpdateScore = Scanner.updateScore;
+        Scanner.updateScore = function() {
+            originalUpdateScore.apply(this, arguments);
+            AuditTrail.refresh();
+        };
+
+        function toggleMobileSidebar() {
+            const sidebar = document.querySelector('.sidebar');
+            const overlay = document.getElementById('sidebar-overlay');
+            if (sidebar) sidebar.classList.toggle('open');
+            if (overlay) overlay.classList.toggle('active');
+        }
+
+        window.showToast = showToast;
+        window.toggleMobileSidebar = toggleMobileSidebar;
+    </script>
 </body>
 </html>
