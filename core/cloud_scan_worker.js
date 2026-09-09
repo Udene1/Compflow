@@ -1,3 +1,4 @@
+import crypto from 'crypto';
 import { runScan } from './scanner.js';
 import { runRemediation } from './remediator.js';
 import { evaluateWithGemini } from './gemini.js';
@@ -30,11 +31,14 @@ async function persistScanResults({ scanId, organizationId, connectionId, resour
         for (const controlIds of Object.values(controls)) {
             if (!Array.isArray(controlIds)) continue;
             for (const controlId of controlIds) {
+                const resourceId = resource.id || resource.name || 'unknown-resource';
+                const stableKey = `${scanId}:${resourceId}:${controlId}:${resource.technicalId || resource.code || resource.type || 'CLOUD_FINDING'}`;
+                const findingId = `finding_${crypto.createHash('sha256').update(stableKey).digest('hex').slice(0, 32)}`;
                 findings.push({
-                    id: `finding_${crypto.randomUUID()}`,
+                    id: findingId,
                     organizationId,
                     scanId,
-                    resourceId: resource.id || resource.name || null,
+                    resourceId,
                     controlId,
                     severity: String(resource.severity || 'unknown').toUpperCase(),
                     status: 'FAIL',
@@ -48,7 +52,7 @@ async function persistScanResults({ scanId, organizationId, connectionId, resour
         await pool.query(
             `INSERT INTO findings (id,organization_id,scan_id,resource_id,control_id,severity,status,code)
              VALUES ($1,$2,$3,$4,$5,$6,$7,$8)
-             ON CONFLICT (id) DO NOTHING`,
+             ON CONFLICT (id) DO UPDATE SET severity=EXCLUDED.severity, status=EXCLUDED.status, code=EXCLUDED.code`,
             [finding.id, finding.organizationId, finding.scanId, finding.resourceId, finding.controlId, finding.severity, finding.status, finding.code]
         );
     }
