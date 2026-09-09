@@ -59,7 +59,7 @@ beforeAll(async () => {
 
     serverProcess = spawn(process.execPath, ['server.js'], {
         cwd: process.cwd(),
-        env: { ...process.env, NODE_ENV: 'test', PORT: String(PORT) },
+        env: { ...process.env, NODE_ENV: 'test', PORT: String(PORT), COMPFLOW_PLATFORM_ADMINS: adminEmail },
         stdio: ['ignore', 'pipe', 'pipe']
     });
     await waitForReady();
