@@ -12,6 +12,8 @@ const adminUserId = `usr_e2e_admin_${randomUUID().replace(/-/g, '').slice(0, 16)
 const adminOrgId = `org_e2e_admin_${randomUUID().replace(/-/g, '').slice(0, 16)}`;
 let adminBearer;
 let serverProcess;
+let serverOutput = '';
+let serverExit;
 
 async function db(query, params = []) {
     const client = new Client({ connectionString: process.env.DATABASE_URL });
@@ -23,6 +25,9 @@ async function waitForReady(timeoutMs = 30000) {
     const deadline = Date.now() + timeoutMs;
     let lastError;
     while (Date.now() < deadline) {
+        if (serverExit) {
+            throw new Error(`API server exited before readiness (code=${serverExit.code}, signal=${serverExit.signal}). Output:\n${serverOutput.slice(-12000)}`);
+        }
         try {
             const response = await fetch(`${BASE_URL}/health/ready`);
             if (response.ok) return;
@@ -30,7 +35,7 @@ async function waitForReady(timeoutMs = 30000) {
         } catch (error) { lastError = error; }
         await new Promise(resolve => setTimeout(resolve, 250));
     }
-    throw lastError || new Error('server readiness timed out');
+    throw new Error(`API server did not become ready within ${timeoutMs}ms. Last error: ${lastError?.message || 'unknown'}. Output:\n${serverOutput.slice(-12000)}`);
 }
 
 function sessionCookie(response) {
@@ -62,6 +67,12 @@ beforeAll(async () => {
         env: { ...process.env, NODE_ENV: 'test', PORT: String(PORT), COMPFLOW_PLATFORM_ADMINS: adminEmail },
         stdio: ['ignore', 'pipe', 'pipe']
     });
+    const capture = (chunk) => {
+        serverOutput = `${serverOutput}${chunk.toString()}`.slice(-20000);
+    };
+    serverProcess.stdout.on('data', capture);
+    serverProcess.stderr.on('data', capture);
+    serverProcess.once('exit', (code, signal) => { serverExit = { code, signal }; });
     await waitForReady();
 }, 60000);
 
