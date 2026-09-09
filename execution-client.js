@@ -31,7 +31,7 @@
     const anchor = panel.querySelector('.card.execution-section'); if (!anchor) return;
     const workspace = document.createElement('div'); workspace.id = 'execution-workspace'; workspace.className = 'card execution-section'; workspace.style.marginBottom = '1rem';
     workspace.innerHTML = `
-      <div style="display:flex;justify-content:space-between;gap:1rem;align-items:center;flex-wrap:wrap"><div><h3 style="margin:0">Compliance Operations</h3><p style="margin:.35rem 0 0;color:var(--text-muted);font-size:.82rem">Run a real audit, follow it live, and return to any durable execution.</p></div><div class="execution-toolbar"><select id="execution-status-filter" aria-label="Execution status"><option value="">All runs</option><option>RUNNING</option><option>PENDING</option><option>SUCCEEDED</option><option>FAILED</option><option>CANCELLED</option></select><button class="btn btn-primary btn-sm" id="execution-new-run">+ New compliance run</button></div></div>
+      <div style="display:flex;justify-content:space-between;gap:1rem;align-items:center;flex-wrap:wrap"><div><h3 style="margin:0">Compliance Operations</h3><p style="margin:.35rem 0;color:var(--text-muted);font-size:.82rem">Run a real audit, follow it live, and return to any durable execution.</p></div><div class="execution-toolbar"><select id="execution-status-filter" aria-label="Execution status"><option value="">All runs</option><option>RUNNING</option><option>PENDING</option><option>SUCCEEDED</option><option>FAILED</option><option>CANCELLED</option></select><button class="btn btn-primary btn-sm" id="execution-new-run">+ New compliance run</button></div></div>
       <div id="execution-run-list" class="execution-list" style="margin-top:.8rem;max-height:300px"></div>
       <div id="execution-exposure-panel" style="margin-top:1rem;border-top:1px solid rgba(255,255,255,.08);padding-top:1rem"><div style="display:flex;justify-content:space-between;align-items:center;gap:1rem"><div><h4 style="margin:0">Exposure paths</h4><p style="margin:.3rem 0;color:var(--text-muted);font-size:.78rem">Correlates only observed findings and explicit evidence-backed relationships. Detected does not mean breached.</p></div><button class="btn btn-secondary btn-sm" id="execution-analyze-exposure" disabled>Analyze selected run</button></div><div id="execution-exposure-list" class="execution-list" style="margin-top:.7rem"></div></div>`;
     panel.insertBefore(workspace, anchor);
@@ -84,3 +84,8 @@
 
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', mountWorkspace, { once: true }); else mountWorkspace();
 })();
+
+const trustScript = document.createElement('script');
+trustScript.src = 'trust-instrumentation.js?v=1.0';
+trustScript.defer = true;
+document.head.appendChild(trustScript);
