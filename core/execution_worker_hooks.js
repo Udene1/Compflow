@@ -46,7 +46,6 @@ export async function beginExecution({ organizationId, executionId, provider, cl
 
 export async function persistScanGraph({ organizationId, executionId, provider, connectionId = null, resources = [] }) {
   const executionNodeId = stableUsageId(organizationId, executionId, 'EXECUTION', executionId);
-  if (!connectionId) throw new Error('SCAN_CONNECTION_REQUIRED');
 
   for (const resource of resources) {
     const severity = safeSeverity(resource);
@@ -86,45 +85,47 @@ export async function persistScanGraph({ organizationId, executionId, provider, 
         });
         await addDependencyEdge({ organizationId, executionId, fromNodeId: control.id, toNodeId: evidence.id, edgeType: 'DEPENDS_ON' });
 
-        // A failed control still has provider evidence. Evidence collection is not
-        // the same thing as passing the control, so persist the real observation
-        // for both PASS and FAIL assessments.
-        const evidenceAttempt = await recordAttempt({
-          organizationId,
-          executionId,
-          node: evidence,
-          metadata: { frameworkId, controlId, observationId: observation.id, source: 'cloud_scan' },
-          failed: false,
-          errorCode: null
-        });
-        if (evidenceAttempt) {
-          await recordEvidence({
+        // Generic graph executions may not have a cloud connection. The
+        // authoritative evidence record is therefore written only when the
+        // worker has the real connection reference from a cloud scan.
+        if (connectionId) {
+          const evidenceAttempt = await recordAttempt({
             organizationId,
             executionId,
-            nodeId: evidence.id,
-            attemptId: evidenceAttempt.id,
-            controlId,
-            provider,
-            connectionId,
-            resourceId: resource.id || resource.name || null,
-            sourceType: 'cloud_scan',
-            sourceRef: executionId,
-            evidenceKind: 'provider_observation',
-            observedAt: resource.observedAt || new Date().toISOString(),
-            evidence: {
-              provider,
-              resource: {
-                id: resource.id || null,
-                name: resource.name || null,
-                type: resource.type || null,
-                technicalId: resource.technicalId || null,
-                severity: resource.severity || null,
-                status: resource.status || null,
-                issue: resource.issue || null,
-                controls: { [frameworkId]: [controlId] }
-              }
-            }
+            node: evidence,
+            metadata: { frameworkId, controlId, observationId: observation.id, source: 'cloud_scan' },
+            failed: false,
+            errorCode: null
           });
+          if (evidenceAttempt) {
+            await recordEvidence({
+              organizationId,
+              executionId,
+              nodeId: evidence.id,
+              attemptId: evidenceAttempt.id,
+              controlId,
+              provider,
+              connectionId,
+              resourceId: resource.id || resource.name || null,
+              sourceType: 'cloud_scan',
+              sourceRef: executionId,
+              evidenceKind: 'provider_observation',
+              observedAt: resource.observedAt || new Date().toISOString(),
+              evidence: {
+                provider,
+                resource: {
+                  id: resource.id || null,
+                  name: resource.name || null,
+                  type: resource.type || null,
+                  technicalId: resource.technicalId || null,
+                  severity: resource.severity || null,
+                  status: resource.status || null,
+                  issue: resource.issue || null,
+                  controls: { [frameworkId]: [controlId] }
+                }
+              }
+            });
+          }
         }
 
         if (controlFailed) {
