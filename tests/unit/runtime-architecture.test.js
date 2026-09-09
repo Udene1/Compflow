@@ -26,6 +26,14 @@ describe('runtime architecture boundary', () => {
         expect(server).not.toContain('/api/lambda-');
     });
 
+    it('routes durable cloud work through the runtime-neutral worker', () => {
+        expect(existsSync(resolve(root, 'core/cloud_scan_worker.js'))).toBe(true);
+        const durableWorker = read('core/durable_worker.js');
+        expect(durableWorker).toContain("import { processCloudScanJob } from './cloud_scan_worker.js';");
+        expect(durableWorker).toContain('processCloudScanJob(data)');
+        expect(durableWorker).not.toContain("from '../worker.js'");
+    });
+
     it('preserves AWS Lambda as a scanned cloud resource rather than a runtime', () => {
         const pkg = JSON.parse(read('package.json'));
         expect(pkg.dependencies['@aws-sdk/client-lambda']).toBeTruthy();
