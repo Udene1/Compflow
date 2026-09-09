@@ -1,6 +1,6 @@
-import { generateAuditorToken, validateAuditorToken, verifyAuditorPackage } from '../core/auditor_portal.js';
-import { getClient } from '../core/registry.js';
+import { generateAuditorToken, verifyAuditorPackage } from '../core/auditor_portal.js';
 import { buildAuditExport } from '../core/audit_export.js';
+import pool from '../core/db.js';
 
 /**
  * Auditor Portal API.
@@ -19,8 +19,11 @@ export default async function handler(req, res) {
 
     if (req.method === 'POST' && (path.endsWith('/token') || req.query.action === 'token')) {
         try {
+            if (!organizationId) return res.status(403).json({ error: 'ORGANIZATION_CONTEXT_REQUIRED' });
             const { tenantId, auditorEmail, expiryHours } = req.body || {};
             if (!tenantId || !auditorEmail) return res.status(400).json({ error: 'Missing tenantId or auditorEmail' });
+            const tenant = await pool.query('SELECT id FROM tenants WHERE id=$1 AND org_id=$2 LIMIT 1', [String(tenantId), organizationId]);
+            if (!tenant.rows[0]) return res.status(404).json({ error: 'TENANT_NOT_FOUND' });
             const tokenInfo = generateAuditorToken(tenantId, auditorEmail, expiryHours || 72);
             return res.status(200).json({ success: true, ...tokenInfo, portalUrl: `/auditor-portal.html?token=${tokenInfo.token}` });
         } catch (err) {
