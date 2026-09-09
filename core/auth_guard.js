@@ -36,9 +36,9 @@ export function requireAuth(allowedRoles = []) {
         }
         req.user = user;
 
-        // Direct unit invocation has no Express baseUrl. Real HTTP requests always do.
+        // Direct unit invocation has no Express application object. Real HTTP requests do.
         // Authentication/session endpoints remain usable when service access is locked.
-        if (!req.baseUrl || req.baseUrl === '/api/auth') return next();
+        if (!req.app || req.baseUrl === '/api/auth') return next();
 
         const organizationId = user.orgId;
         if (!organizationId) return res.status(403).json({ error: 'ORGANIZATION_CONTEXT_REQUIRED' });
