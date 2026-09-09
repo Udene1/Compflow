@@ -1,3 +1,4 @@
+import crypto from 'node:crypto';
 import { createJob, completeJob } from '../core/jobs.js';
 import { enqueueJob } from '../core/queue.js';
 import pool from '../core/db.js';
