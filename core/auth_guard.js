@@ -15,6 +15,12 @@ function parseCookies(cookieHeader) {
     return list;
 }
 
+function apiError(res, status, code, message, details = undefined) {
+    const body = { error: code, code, message };
+    if (details !== undefined) body.details = details;
+    return res.status(status).json(body);
+}
+
 export function requireAuth(allowedRoles = []) {
     return async (req, res, next) => {
         const cookies = req.cookies || parseCookies(req.headers.cookie);
@@ -22,17 +28,16 @@ export function requireAuth(allowedRoles = []) {
         const token = cookies.cf_session || (typeof bearer === 'string' && /^Bearer\s+[^\s]+$/i.test(bearer) ? bearer.replace(/^Bearer\s+/i, '') : null);
 
         if (!token) {
-            return res.status(401).json({
-                error: 'Unauthorized',
-                message: 'Authentication required. Please sign in or provide a session token.'
-            });
+            return apiError(res, 401, 'AUTHENTICATION_REQUIRED', 'Authentication required. Please sign in or provide a session token.');
         }
 
         const { valid, user, error } = await validateSessionToken(token);
-        if (!valid || !user) return res.status(401).json({ error: 'Unauthorized', message: error || 'Invalid session credentials.' });
+        if (!valid || !user) {
+            return apiError(res, 401, 'INVALID_SESSION', error || 'Invalid session credentials.');
+        }
 
         if (allowedRoles.length > 0 && !hasRole(user.role, allowedRoles)) {
-            return res.status(403).json({ error: 'Forbidden', message: 'Insufficient permissions.' });
+            return apiError(res, 403, 'INSUFFICIENT_PERMISSIONS', 'Insufficient permissions.');
         }
         req.user = user;
 
@@ -41,20 +46,16 @@ export function requireAuth(allowedRoles = []) {
         if (!req.app || req.baseUrl === '/api/auth') return next();
 
         const organizationId = user.orgId;
-        if (!organizationId) return res.status(403).json({ error: 'ORGANIZATION_CONTEXT_REQUIRED' });
+        if (!organizationId) return apiError(res, 403, 'ORGANIZATION_CONTEXT_REQUIRED', 'Organization context is required for this service request.');
         try {
             const entitlement = await getOrganizationEntitlement(organizationId);
             const decision = evaluateEntitlement(entitlement);
             if (!decision.allowed) {
-                return res.status(402).json({
-                    error: decision.reason,
-                    message: 'An active Compflow service entitlement is required to use the service.',
-                    access: {
-                        allowed: false,
-                        plan: entitlement?.plan || null,
-                        status: entitlement?.status || 'NONE',
-                        expiresAt: entitlement?.expires_at || null
-                    }
+                return apiError(res, 402, decision.reason, 'An active Compflow service entitlement is required to use the service.', {
+                    allowed: false,
+                    plan: entitlement?.plan || null,
+                    status: entitlement?.status || 'NONE',
+                    expiresAt: entitlement?.expires_at || null
                 });
             }
             req.serviceEntitlement = entitlement;
@@ -62,7 +63,7 @@ export function requireAuth(allowedRoles = []) {
         } catch {
             // PostgreSQL is authoritative for entitlements. Never fail open when access
             // state cannot be determined.
-            return res.status(503).json({ error: 'SERVICE_ENTITLEMENT_AUTHORITY_UNAVAILABLE' });
+            return apiError(res, 503, 'SERVICE_ENTITLEMENT_AUTHORITY_UNAVAILABLE', 'Service access could not be verified. Please try again.');
         }
     };
 }
