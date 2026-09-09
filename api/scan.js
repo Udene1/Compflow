@@ -23,7 +23,7 @@ export default async function handler(req, res) {
             return res.status(400).json({ error: 'Missing cloud connection credentials.' });
         }
 
-        const jobId = await createJob(clientId, 'on_demand');
+        const jobId = await createJob(clientId, 'on_demand', orgId);
         let connectionId = req.body?.connectionId || null;
 
         if (credentials && !connectionId) {
@@ -59,12 +59,7 @@ export default async function handler(req, res) {
             });
         }
 
-        return res.status(202).json({
-            success: true,
-            status: 'queued',
-            jobId,
-            clientId
-        });
+        return res.status(202).json({ success: true, status: 'queued', jobId, clientId });
     } catch (err) {
         console.error('[SCAN-API] Fatal Error:', err?.message || err);
         return res.status(500).json({ error: 'Internal server error triggering scan.' });
