@@ -37,10 +37,53 @@ export function validatePilotInvitationInput({ email, companyName, days = DEFAUL
     if (!normalizedCompany) throw new Error('PILOT_COMPANY_REQUIRED');
     return Object.freeze({ email: normalizedEmail, companyName: normalizedCompany, days: Number(days) });
 }
+
+// A pilot invitation remains a valid credential until its expiry or explicit revocation.
+// The first successful use creates the customer account; later uses authenticate that same
+// pilot identity. The code is never returned by the API after creation and only its hash is stored.
 export function isPilotInvitationUsable(row, now = new Date()) {
-    if (!row || row.status !== 'PENDING' || row.redeemed_at) return false;
+    if (!row || ![PILOT_INVITATION_STATUS.PENDING, PILOT_INVITATION_STATUS.REDEEMED].includes(row.status)) return false;
     const expires = new Date(row.expires_at).getTime();
     return Number.isFinite(expires) && expires > new Date(now).getTime();
+}
+
+async function authenticateExistingPilotInvitation({ client, invitation, email, req }) {
+    const normalizedEmail = emailOf(email);
+    const identityRes = await client.query(
+        `SELECT i.user_id, u.email, u.name, u.avatar_url, m.org_id, m.role, o.name AS org_name, o.domain
+         FROM identities i
+         JOIN users u ON u.id=i.user_id
+         JOIN org_memberships m ON m.user_id=i.user_id
+         JOIN organizations o ON o.id=m.org_id
+         WHERE i.provider='pilot_invitation' AND i.provider_subject=$1 AND i.provider_email=$2
+         LIMIT 1`,
+        [invitation.id, normalizedEmail]
+    );
+    if (!identityRes.rows.length) throw new Error('PILOT_ACCOUNT_MISSING');
+
+    const account = identityRes.rows[0];
+    const entitlementRes = await client.query(
+        `SELECT plan,status,starts_at,expires_at
+         FROM organization_entitlements
+         WHERE organization_id=$1
+         ORDER BY updated_at DESC NULLS LAST
+         LIMIT 1`,
+        [account.org_id]
+    );
+    const entitlement = entitlementRes.rows[0];
+    const now = Date.now();
+    if (!entitlement || entitlement.plan !== 'pilot' || !['PILOT', 'TRIAL', 'ACTIVE'].includes(entitlement.status) ||
+        !entitlement.starts_at || new Date(entitlement.starts_at).getTime() > now ||
+        !entitlement.expires_at || new Date(entitlement.expires_at).getTime() <= now) {
+        throw new Error('PILOT_ACCESS_EXPIRED');
+    }
+
+    const user = { id: account.user_id, email: account.email, name: account.name, avatarUrl: account.avatar_url || '' };
+    const org = { id: account.org_id, name: account.org_name, domain: account.domain };
+    const session = await createSessionToken(user, org, account.role || ROLES.OWNER, 1);
+    await client.query('UPDATE identities SET last_login_at=CURRENT_TIMESTAMP WHERE provider=\'pilot_invitation\' AND provider_subject=$1 AND user_id=$2', [invitation.id, account.user_id]);
+    await recordAuditEvent(account.org_id, account.user_id, 'pilot_authenticated', 'pilot_invitation', invitation.id, { emailDomain: normalizedEmail.split('@')[1], organizationId: account.org_id }, req);
+    return { user, org, role: account.role || ROLES.OWNER, session, invitationId: invitation.id, expiresAt: invitation.expires_at, firstActivation: false };
 }
 
 export async function createPilotInvitation({ email, companyName, days = DEFAULT_DAYS, createdByUserId, req = null }) {
@@ -53,7 +96,7 @@ export async function createPilotInvitation({ email, companyName, days = DEFAULT
         `INSERT INTO pilot_invitations (id, token_hash, email, email_domain, company_name, created_by_user_id, expires_at, status, metadata)
          VALUES ($1,$2,$3,$4,$5,$6,$7,'PENDING',$8::jsonb)
          RETURNING id,email,email_domain,company_name,created_by_user_id,created_at,expires_at,status`,
-        [invitationId, hash(code), input.email, input.email.split('@')[1], input.companyName, createdByUserId, expiresAt.toISOString(), JSON.stringify({ pilotDays: input.days, accessModel: 'unique_pilot_invitation' })]
+        [invitationId, hash(code), input.email, input.email.split('@')[1], input.companyName, createdByUserId, expiresAt.toISOString(), JSON.stringify({ pilotDays: input.days, accessModel: 'time_limited_pilot_credential' })]
     );
     await recordAuditEvent(null, createdByUserId, 'pilot_invitation_created', 'pilot_invitation', invitationId, { email: input.email, emailDomain: input.email.split('@')[1], companyName: input.companyName, expiresAt: expiresAt.toISOString(), pilotDays: input.days }, req);
     return { invitation: result.rows[0], code, url: buildPilotInvitationUrl(code) };
@@ -65,10 +108,24 @@ export async function listPilotInvitations(limit = 100) {
 }
 
 export async function revokePilotInvitation(invitationId, actorUserId, req = null) {
-    const result = await pool.query(`UPDATE pilot_invitations SET status='REVOKED',revoked_at=CURRENT_TIMESTAMP,updated_at=CURRENT_TIMESTAMP WHERE id=$1 AND status='PENDING' AND redeemed_at IS NULL RETURNING id,email,company_name,status,expires_at`, [invitationId]);
-    if (!result.rows.length) throw new Error('PILOT_INVITATION_NOT_REVOCABLE');
-    await recordAuditEvent(null, actorUserId, 'pilot_invitation_revoked', 'pilot_invitation', invitationId, { email: result.rows[0].email, companyName: result.rows[0].company_name }, req);
-    return result.rows[0];
+    const client = await pool.connect();
+    try {
+        await client.query('BEGIN');
+        const result = await client.query(`UPDATE pilot_invitations SET status='REVOKED',revoked_at=CURRENT_TIMESTAMP,updated_at=CURRENT_TIMESTAMP WHERE id=$1 AND status IN ('PENDING','REDEEMED') RETURNING id,email,company_name,status,expires_at,organization_id`, [invitationId]);
+        if (!result.rows.length) throw new Error('PILOT_INVITATION_NOT_REVOCABLE');
+        const invitation = result.rows[0];
+        if (invitation.organization_id) {
+            await client.query(`UPDATE organization_entitlements SET status='CANCELED',updated_at=CURRENT_TIMESTAMP WHERE organization_id=$1 AND plan='pilot' AND status IN ('PILOT','TRIAL','ACTIVE')`, [invitation.organization_id]);
+        }
+        await client.query('COMMIT');
+        await recordAuditEvent(invitation.organization_id, actorUserId, 'pilot_invitation_revoked', 'pilot_invitation', invitationId, { email: invitation.email, companyName: invitation.company_name, accessRevoked: Boolean(invitation.organization_id) }, req);
+        return invitation;
+    } catch (error) {
+        await client.query('ROLLBACK').catch(() => {});
+        throw error;
+    } finally {
+        client.release();
+    }
 }
 
 export async function redeemPilotInvitation({ code, email, name, req = null }) {
@@ -82,10 +139,18 @@ export async function redeemPilotInvitation({ code, email, name, req = null }) {
         const invitation = invitationRes.rows[0];
         if (!invitation) throw new Error('PILOT_INVITATION_INVALID');
         if (!isPilotInvitationUsable(invitation)) {
-            if (invitation.status === 'PENDING' && new Date(invitation.expires_at).getTime() <= Date.now()) await client.query("UPDATE pilot_invitations SET status='EXPIRED',updated_at=CURRENT_TIMESTAMP WHERE id=$1", [invitation.id]);
+            if ([PILOT_INVITATION_STATUS.PENDING, PILOT_INVITATION_STATUS.REDEEMED].includes(invitation.status) && new Date(invitation.expires_at).getTime() <= Date.now()) {
+                await client.query("UPDATE pilot_invitations SET status='EXPIRED',updated_at=CURRENT_TIMESTAMP WHERE id=$1", [invitation.id]);
+            }
             throw new Error('PILOT_INVITATION_UNAVAILABLE');
         }
         if (emailOf(invitation.email) !== normalizedEmail) throw new Error('PILOT_EMAIL_MISMATCH');
+
+        if (invitation.status === PILOT_INVITATION_STATUS.REDEEMED) {
+            await client.query('COMMIT');
+            return authenticateExistingPilotInvitation({ client: pool, invitation, email: normalizedEmail, req });
+        }
+
         const existing = await client.query('SELECT id FROM users WHERE email=$1 FOR UPDATE', [normalizedEmail]);
         if (existing.rows.length) throw new Error('PILOT_ACCOUNT_ALREADY_EXISTS');
         const domain = normalizedEmail.split('@')[1];
@@ -105,8 +170,8 @@ export async function redeemPilotInvitation({ code, email, name, req = null }) {
         const user = { id:userId,email:normalizedEmail,name:displayName,avatarUrl:'' };
         const org = { id:orgId,name:invitation.company_name,domain };
         const session = await createSessionToken(user,org,ROLES.OWNER,1);
-        await recordAuditEvent(orgId,userId,'pilot_invitation_redeemed','pilot_invitation',invitation.id,{ companyName:invitation.company_name,emailDomain:domain,organizationId:orgId,entitlement:'pilot' },req);
-        return { user,org,role:ROLES.OWNER,session,invitationId:invitation.id,expiresAt:invitation.expires_at };
+        await recordAuditEvent(orgId,userId,'pilot_invitation_redeemed','pilot_invitation',invitation.id,{ companyName:invitation.company_name,emailDomain:domain,organizationId:orgId,entitlement:'pilot',accessModel:'time_limited_pilot_credential' },req);
+        return { user,org,role:ROLES.OWNER,session,invitationId:invitation.id,expiresAt:invitation.expires_at,firstActivation:true };
     } catch (error) { await client.query('ROLLBACK').catch(()=>{}); throw error; }
     finally { client.release(); }
 }
