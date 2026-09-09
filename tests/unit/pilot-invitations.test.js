@@ -20,15 +20,16 @@ describe('pilot invitation security contract', () => {
         expect(() => validatePilotInvitationInput({ email: 'jane@acme.com', companyName: 'Acme', days: 91 })).toThrow('PILOT_DURATION_INVALID');
     });
 
-    it('expires invitations server-side by timestamp', () => {
+    it('keeps the pilot credential usable after first activation until expiry', () => {
         const now = new Date('2026-09-09T12:00:00.000Z');
         const expiry = pilotInvitationExpiry(30, now);
         expect(isPilotInvitationUsable({ status: 'PENDING', redeemed_at: null, expires_at: expiry.toISOString() }, now)).toBe(true);
-        expect(isPilotInvitationUsable({ status: 'PENDING', redeemed_at: null, expires_at: expiry.toISOString() }, new Date('2026-10-10T12:00:00.000Z'))).toBe(false);
-        expect(isPilotInvitationUsable({ status: 'REDEEMED', redeemed_at: now.toISOString(), expires_at: expiry.toISOString() }, now)).toBe(false);
+        expect(isPilotInvitationUsable({ status: 'REDEEMED', redeemed_at: now.toISOString(), expires_at: expiry.toISOString() }, now)).toBe(true);
+        expect(isPilotInvitationUsable({ status: 'REDEEMED', redeemed_at: now.toISOString(), expires_at: expiry.toISOString() }, new Date('2026-10-10T12:00:00.000Z'))).toBe(false);
+        expect(isPilotInvitationUsable({ status: 'REVOKED', redeemed_at: now.toISOString(), expires_at: expiry.toISOString() }, now)).toBe(false);
     });
 
-    it('builds a trusted HTTPS activation destination from the configured app URL', () => {
+    it('builds a trusted HTTPS login destination from the configured app URL', () => {
         const url = buildPilotInvitationUrl('CFP-ABCD-EFGH-IJKL-MNOP-QRST', 'https://www.compflow.icu');
         expect(url).toBe('https://www.compflow.icu/pilot.html?code=CFP-ABCD-EFGH-IJKL-MNOP-QRST');
     });
