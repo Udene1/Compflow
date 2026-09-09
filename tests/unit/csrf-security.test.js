@@ -63,7 +63,8 @@ describe('CSRF & Cookie Security Protection (Amendment 19)', () => {
             it(`blocks unauthenticated POST /${url.slice(1)} with stable authentication code`, async () => {
                 const res = await invokeWithMiddleware(onboardingChain, { method: 'POST', url, body });
                 expect(res.statusCode).toBe(401);
-                expect(res.body.error).toBe('AUTHENTICATION_REQUIRED');
+                expect(res.body.code).toBe('AUTHENTICATION_REQUIRED');
+                expect(res.body.error).toBe('Unauthorized');
                 expect(res.body.message).toContain('Authentication required');
             });
         }
