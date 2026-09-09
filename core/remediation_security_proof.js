@@ -29,6 +29,7 @@ export function deriveRemediationSecurityProof({
   );
   const riskDelta = riskComparable ? Number(riskAfter.score) - Number(riskBefore.score) : null;
   const pathImpactClaimed = controlVerified && diff.complete && diff.removed.length > 0;
+  const measurableReduction = pathImpactClaimed || (riskComparable && riskDelta < 0);
   const proofComplete = Boolean(
     remediationId && executionId && findingId && evidenceId && evidenceHash &&
     controlVerified && reanalysisEventId && diff.complete
@@ -56,13 +57,15 @@ export function deriveRemediationSecurityProof({
       delta: riskDelta
     },
     proofComplete,
-    claimSafe: proofComplete && (pathImpactClaimed || riskComparable),
+    claimSafe: proofComplete && measurableReduction,
     reason: !diff.complete
       ? 'Fresh exposure analysis is incomplete; no path removal or risk delta is claimed.'
       : !controlVerified
         ? 'The targeted control is not verified from fresh provider evidence; no security reduction is claimed.'
         : !proofComplete
           ? 'Verification exists, but the complete evidence and reanalysis lineage required for an auditable security-effect claim is incomplete.'
-          : 'Security-effect claims are grounded in fresh evidence, verification, complete exposure reanalysis, and explicit lineage.'
+          : !measurableReduction
+            ? 'Verification and reanalysis are complete, but no measurable exposure-path removal or aggregate-risk reduction was demonstrated.'
+            : 'Security-effect claims are grounded in fresh evidence, verification, complete exposure reanalysis, and explicit lineage.'
   };
 }
