@@ -15,7 +15,16 @@ router.post('/redeem', async (req, res) => {
         const { code, email, name } = req.body || {};
         const result = await redeemPilotInvitation({ code, email, name, req });
         setSessionCookie(res, result.session.token);
-        return res.json({ success: true, user: result.session.payload, organization: result.org, pilot: { expiresAt: result.expiresAt, invitationId: result.invitationId } });
+        return res.json({
+            success: true,
+            user: result.session.payload,
+            organization: result.org,
+            pilot: {
+                expiresAt: result.expiresAt,
+                invitationId: result.invitationId,
+                firstActivation: result.firstActivation
+            }
+        });
     } catch (error) {
         const status = {
             PILOT_CODE_INVALID: 400,
@@ -24,12 +33,17 @@ router.post('/redeem', async (req, res) => {
             PILOT_INVITATION_UNAVAILABLE: 410,
             PILOT_EMAIL_MISMATCH: 403,
             PILOT_ACCOUNT_ALREADY_EXISTS: 409,
+            PILOT_ACCOUNT_MISSING: 409,
+            PILOT_ACCESS_EXPIRED: 410,
             PILOT_INVITATION_RACE_LOST: 409
         }[error?.message] || 500;
-        return res.status(status).json({ error: error?.message || 'PILOT_REDEMPTION_FAILED', message: status === 500 ? 'Pilot activation could not be completed.' : undefined });
+        return res.status(status).json({
+            error: error?.message || 'PILOT_AUTHENTICATION_FAILED',
+            message: status === 500 ? 'Pilot authentication could not be completed.' : undefined
+        });
     }
 });
 
-router.get('/status', (req, res) => res.json({ enabled: true, appUrl: APP_URL }));
+router.get('/status', (req, res) => res.json({ enabled: true, appUrl: APP_URL, accessModel: 'time_limited_code_and_link' }));
 
 export default router;
