@@ -8,10 +8,9 @@ describe('evidence-backed exposure paths', () => {
       { id: 'finding-bucket', resource_id: 'customer-data', code: 'S3_ENCRYPTION_DISABLED', severity: 'CRITICAL' }
     ];
     const evidenceRows = [
-      { id: 'evidence-edge', evidence: { resources: [{ id: 'internet-edge', type: 'EC2', name: 'web' }], relationships: [{ fromResourceId: 'internet-edge', toResourceId: 'customer-data', type: 'CAN_ACCESS', verified: false }] } },
-      { id: 'evidence-data', evidence: { resources: [{ id: 'customer-data', type: 'S3', name: 'customer-data' }] } }
+      { id: 'evidence-edge', provider: 'aws', observed_at: '2026-09-09T00:00:00.000Z', source_ref: 'scan-1', evidence: { resources: [{ id: 'internet-edge', type: 'EC2', name: 'web' }], relationships: [{ fromResourceId: 'internet-edge', toResourceId: 'customer-data', type: 'CAN_ACCESS', verified: false }] } },
+      { id: 'evidence-data', provider: 'aws', observed_at: '2026-09-09T00:00:00.000Z', source_ref: 'scan-1', evidence: { resources: [{ id: 'customer-data', type: 'S3', name: 'customer-data' }] } }
     ];
-
     const paths = analyzeExposurePaths({ findingRows, evidenceRows });
     expect(paths).toHaveLength(1);
     expect(paths[0].status).toBe('POTENTIAL');
@@ -36,13 +35,18 @@ describe('evidence-backed exposure paths', () => {
     expect(paths).toEqual([]);
   });
 
-  it('marks a fully verified relationship as verified only when every path node has evidence', () => {
+  it('marks a fully verified relationship as verified only when provenance has evidence lineage', () => {
     const paths = analyzeExposurePaths({
+      findingRows: [{ id: 'finding-edge', resource_id: 'edge', code: 'SG_OPEN_HTTP_WORLD', severity: 'HIGH' }],
+      evidenceRows: [{ id: 'e1', provider: 'aws', observed_at: '2026-09-09T00:00:00.000Z', source_ref: 'scan-1', evidence: { resources: [{ id: 'edge', type: 'EC2' }, { id: 'db', type: 'RDS' }], relationships: [{ fromResourceId: 'edge', toResourceId: 'db', type: 'CAN_REACH', status: 'verified' }] } }]
+    });
+    const pathsWithoutLineage = analyzeExposurePaths({
       findingRows: [{ id: 'finding-edge', resource_id: 'edge', code: 'SG_OPEN_HTTP_WORLD', severity: 'HIGH' }],
       evidenceRows: [{ id: 'e1', evidence: { resources: [{ id: 'edge', type: 'EC2' }, { id: 'db', type: 'RDS' }], relationships: [{ fromResourceId: 'edge', toResourceId: 'db', type: 'CAN_REACH', status: 'verified' }] } }]
     });
     expect(paths).toHaveLength(1);
     expect(paths[0].status).toBe('VERIFIED');
     expect(paths[0].confidence).toBe(1);
+    expect(pathsWithoutLineage[0].status).toBe('POTENTIAL');
   });
 });
