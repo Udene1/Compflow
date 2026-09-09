@@ -11,8 +11,19 @@ describe('deterministic remediation proof boundary', () => {
         riskBefore: { score: 10 }, riskAfter: { score: 1 }, pathRemoved: 1
       }]
     });
-    expect(context.remediationProofs[0].claimSafe).toBe(true);
+    expect(context.remediationProofs[0].claimSafe).toBe(false);
     expect(context.remediationProofs[0].afterComplete).toBe(false);
+  });
+
+  it('allows only a complete proof with evidence to remain claim-safe', () => {
+    const context = buildAnalystContext({
+      remediationProofs: [{
+        remediationId: 'r1', findingId: 'f1', baselineScanId: 'old', freshScanId: 'new',
+        evidenceId: 'ev1', evidenceHash: 'hash', afterComplete: true, claimSafe: true,
+        riskBefore: { score: 10 }, riskAfter: { score: 1 }, pathRemoved: 1
+      }]
+    });
+    expect(context.remediationProofs[0].claimSafe).toBe(true);
   });
 
   it('rejects a reanalysis that reuses the baseline scan', () => {
