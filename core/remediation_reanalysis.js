@@ -82,7 +82,9 @@ export async function runRemediationReanalysis({ organizationId, executionId, re
   } catch (error) {
     if (freshScanId) await pool.query(`UPDATE scans SET status='FAILED',completed_at=NOW() WHERE organization_id=$1 AND id=$2 AND status IN ('RUNNING','COMPLETED')`, [organizationId, freshScanId]).catch(() => {});
     if (switchedToFreshScan) { await pool.query('UPDATE execution_runs SET metadata=$1::jsonb,updated_at=NOW() WHERE organization_id=$2 AND id=$3', [JSON.stringify(previousMetadata), organizationId, executionId]).catch(() => {}); await analyzeExecutionExposurePaths({ organizationId, executionId }).catch(() => {}); }
-    await finishNodeAttempt({ attemptId: attempt.id, status: 'FAILED', errorCode: clean(error.code || error.message || 'REMEDIATION_REANALYSIS_FAILED', 64), errorMessage: clean(error.message, 500) }).catch(() => {}); await appendExecutionEvent({ organizationId, executionId, nodeId: node.id, attemptId: attempt.id, eventType: EVENT_TYPE, actorType: 'SYSTEM', actorId, result: 'incomplete', payload: { remediationId, findingId, baselineScanId, freshScanId, afterComplete: false, claimSafe: false, errorCode: clean(error.code || 'REMEDIATION_REANALYSIS_FAILED', 64), reason: clean(error.message, 500) }).catch(() => {}); throw error;
+    await finishNodeAttempt({ attemptId: attempt.id, status: 'FAILED', errorCode: clean(error.code || error.message || 'REMEDIATION_REANALYSIS_FAILED', 64), errorMessage: clean(error.message, 500) }).catch(() => {});
+    await appendExecutionEvent({ organizationId, executionId, nodeId: node.id, attemptId: attempt.id, eventType: EVENT_TYPE, actorType: 'SYSTEM', actorId, result: 'incomplete', payload: { remediationId, findingId, baselineScanId, freshScanId, afterComplete: false, claimSafe: false, errorCode: clean(error.code || 'REMEDIATION_REANALYSIS_FAILED', 64), reason: clean(error.message, 500) } }).catch(() => {});
+    throw error;
   }
 }
 export { EVENT_TYPE as REMEDIATION_REANALYSIS_EVENT };
