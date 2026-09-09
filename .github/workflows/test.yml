@@ -120,11 +120,17 @@ jobs:
           console.log('Deterministic PostgreSQL test principals seeded');
           NODE
 
-      - name: Run Vitest
-        run: npx vitest run
+      # Keep HTTP E2E processes isolated from the unit/integration workers. The
+      # pilot lifecycle test starts the real API server, which must not race with
+      # other Vitest workers that are using the same PostgreSQL/Redis services.
+      - name: Run unit and integration tests
+        run: npx vitest run tests/unit tests/integration
 
       - name: Run complete recorded test suite
         run: npm run test:record
+
+      - name: Run real HTTP E2E tests
+        run: npx vitest run tests/e2e
 
       - name: Verify production image builds
         run: docker build --tag compflow-ci:latest .
