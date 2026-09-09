@@ -23,4 +23,23 @@ describe('remediation reanalysis proof boundary', () => {
     expect(result.risk.delta).toBe(-50);
     expect(result.claimSafe).toBe(true);
   });
+
+  it('does not claim a reduction when complete reanalysis shows equal or higher risk', () => {
+    const result = deriveRemediationSecurityProof({
+      remediationId: 'r1', executionId: 'e1', findingId: 'f1', evidenceId: 'ev1', evidenceHash: 'hash',
+      verification: { outcome: 'VERIFIED' }, beforePaths: [], afterPaths: [], afterComplete: true,
+      riskBefore: { score: 40 }, riskAfter: { score: 40 }, reanalysisEventId: 'event1'
+    });
+    expect(result.proofComplete).toBe(true);
+    expect(result.risk.comparable).toBe(true);
+    expect(result.risk.delta).toBe(0);
+    expect(result.claimSafe).toBe(false);
+
+    const increased = deriveRemediationSecurityProof({
+      remediationId: 'r1', executionId: 'e1', findingId: 'f1', evidenceId: 'ev1', evidenceHash: 'hash',
+      verification: { outcome: 'VERIFIED' }, beforePaths: [], afterPaths: [], afterComplete: true,
+      riskBefore: { score: 40 }, riskAfter: { score: 50 }, reanalysisEventId: 'event1'
+    });
+    expect(increased.claimSafe).toBe(false);
+  });
 });
