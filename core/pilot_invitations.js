@@ -35,7 +35,10 @@ export function validatePilotInvitationInput({ email, companyName, days = DEFAUL
     if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(normalizedEmail)) throw new Error('PILOT_EMAIL_INVALID');
     const normalizedCompany = companyOf(companyName);
     if (!normalizedCompany) throw new Error('PILOT_COMPANY_REQUIRED');
-    return Object.freeze({ email: normalizedEmail, companyName: normalizedCompany, days: Number(days) });
+    const normalizedDays = Number(days);
+    // Validate the same bounded duration used by creation, without duplicating its rules.
+    pilotInvitationExpiry(normalizedDays);
+    return Object.freeze({ email: normalizedEmail, companyName: normalizedCompany, days: normalizedDays });
 }
 
 // A pilot invitation remains a valid credential until its expiry or explicit revocation.
