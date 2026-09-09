@@ -1,55 +1,43 @@
 // ─── ComplianceFlow AI: Cloud Connect & Onboarding Module ───
-// Server-side tenant integration (Zero localStorage secrets, AssumeRole-first)
+// Durable server-side cloud connection state. Secrets stay in SecretStore.
 
 window.CloudConnect = (() => {
-    const state = { 
+    const state = {
         providers: {},
         activeTenant: null,
-        credentials: {} // In-memory runtime session only (NEVER in localStorage)
+        credentials: {},
+        connectionIds: {}
     };
 
-    const STEPS = [
-        'Establishing secure handshake...',
-        'Validating AssumeRole trust policy...',
-        'Verifying read-only security audit permissions...',
-        'Registering cloud environment in registry...'
-    ];
-
     function init() {
-        // Purge any legacy localStorage credentials for security compliance
-        ['aws', 'azure', 'gcp', 'hetzner', 'digitalocean'].forEach(p => {
-            localStorage.removeItem(`cf_creds_${p}`);
-        });
+        ['aws', 'azure', 'gcp', 'hetzner', 'digitalocean'].forEach(p => localStorage.removeItem(`cf_creds_${p}`));
         localStorage.removeItem('cf_aws_creds');
-
-        // Check if server already has tenants for this org
         checkExistingConnections();
     }
 
     async function checkExistingConnections() {
         try {
             const fetchFn = (window.AuthUI && window.AuthUI.authFetch) ? window.AuthUI.authFetch : fetch;
-            const res = await fetchFn(`${window.COMPLIANCE_API_URL}/api/tenants`);
-            if (res.ok) {
-                const data = await res.json();
-                const tenants = data.tenants || [];
-                if (tenants.length > 0) {
-                    state.activeTenant = tenants[0];
-                    state.providers[tenants[0].provider] = true;
-                    updateUIForConnectedState(tenants[0]);
-                }
-            }
+            const res = await fetchFn(`${window.COMPLIANCE_API_URL}/api/onboarding/status`);
+            if (!res.ok) return;
+            const data = await res.json();
+            const verified = (data.connections || []).filter(c => c.status === 'VERIFIED');
+            if (verified.length === 0) return;
+            const connection = verified[0];
+            state.activeTenant = connection;
+            state.providers[connection.provider] = true;
+            state.connectionIds[connection.provider] = connection.id;
+            updateUIForConnectedState(connection);
         } catch (e) {
             console.warn('Initial connection check skipped:', e);
         }
     }
 
-    function updateUIForConnectedState(tenant) {
+    function updateUIForConnectedState(connection) {
         const stepConnect = document.getElementById('step-connect');
         const numEl = document.getElementById('step-connect-num');
         const btnRunScan = document.getElementById('btn-run-first-scan');
         const connectStatus = document.getElementById('aws-connect-status-badge');
-        
         if (stepConnect) stepConnect.classList.add('completed');
         if (numEl) numEl.textContent = '✓';
         if (btnRunScan) {
@@ -60,189 +48,77 @@ window.CloudConnect = (() => {
         if (connectStatus) {
             connectStatus.style.display = 'inline-flex';
             connectStatus.className = 'status-line connected';
-            connectStatus.textContent = `✓ Connected (${tenant.name || tenant.provider.toUpperCase()})`;
+            connectStatus.textContent = `✓ Connected (${connection.display_name || connection.name || String(connection.provider).toUpperCase()})`;
         }
-
         const tracker = document.getElementById('scheduled-scan-tracker');
         if (tracker) tracker.style.display = 'block';
-
         updateChips();
     }
 
-    /**
-     * Primary Guided AWS Onboarding Path (CloudFormation -> Role ARN)
-     */
     async function testAndConnectAWS() {
         const roleArnInput = document.getElementById('input-aws-role-arn');
         const externalIdInput = document.getElementById('input-aws-external-id');
-        const emailInput = document.getElementById('input-aws-email');
         const statusEl = document.getElementById('aws-connect-status-inline');
         const btnTest = document.getElementById('btn-test-aws-connection');
-
-        const roleArn = roleArnInput ? roleArnInput.value.trim() : '';
-        const externalId = externalIdInput ? externalIdInput.value.trim() : '';
-        const email = emailInput ? emailInput.value.trim() : '';
+        const roleArn = roleArnInput?.value?.trim() || '';
+        const externalId = externalIdInput?.value?.trim() || '';
 
         if (!roleArn) {
             if (window.showToast) window.showToast('Please paste the Role ARN from your CloudFormation stack output.');
-            if (roleArnInput) roleArnInput.focus();
+            roleArnInput?.focus();
             return;
         }
-
-        if (btnTest) {
-            btnTest.disabled = true;
-            btnTest.textContent = 'Testing connection...';
-        }
-        if (statusEl) {
-            statusEl.style.display = 'block';
-            statusEl.className = 'status-line connecting';
-            statusEl.textContent = 'Validating IAM AssumeRole handshake...';
-        }
-
-        if (window.LiveTerminal) {
-            LiveTerminal.log('system', `Initiating real AWS STS AssumeRole handshake: ${roleArn}`);
-        }
+        if (btnTest) { btnTest.disabled = true; btnTest.textContent = 'Verifying connection...'; }
+        if (statusEl) { statusEl.style.display = 'block'; statusEl.className = 'status-line connecting'; statusEl.textContent = 'Validating IAM AssumeRole handshake...'; }
+        if (window.LiveTerminal) LiveTerminal.log('system', `Initiating real AWS STS AssumeRole handshake: ${roleArn}`);
 
         try {
-            const credentials = {
-                authMethod: 'role',
-                roleArn,
-                externalId: externalId || 'CF-AINS-ONBOARDING-SECRET',
-                region: 'us-east-1'
-            };
-
-            state.credentials['aws'] = credentials;
+            const credentials = { authMethod: 'role', roleArn, region: 'us-east-1' };
+            if (externalId) credentials.externalId = externalId;
 
             const fetchFn = (window.AuthUI && window.AuthUI.authFetch) ? window.AuthUI.authFetch : fetch;
-            
-            // 1. Validate connection
-            const valRes = await fetchFn(`${window.COMPLIANCE_API_URL}/api/validate`, {
+            const createRes = await fetchFn(`${window.COMPLIANCE_API_URL}/api/onboarding/cloud-connection`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ provider: 'aws', credentials })
+                body: JSON.stringify({ provider: 'aws', displayName: `AWS Production (${roleArn.split('/').pop() || 'Account'})`, region: 'us-east-1', credentials })
             });
+            const createData = await createRes.json().catch(() => ({}));
+            if (!createRes.ok) throw new Error(createData.message || createData.error || 'Cloud connection could not be created.');
 
-            const valData = await valRes.json();
-            if (!valRes.ok || !valData.success) {
-                throw new Error(valData.error || 'AWS AssumeRole handshake failed. Please verify Role ARN and Trust Policy.');
-            }
+            const verifyRes = await fetchFn(`${window.COMPLIANCE_API_URL}/api/onboarding/cloud-connection/${encodeURIComponent(createData.connectionId)}/verify`, { method: 'POST' });
+            const verifyData = await verifyRes.json().catch(() => ({}));
+            if (!verifyRes.ok || !verifyData.verified) throw new Error(verifyData.message || verifyData.error || 'AWS verification failed.');
 
-            if (window.LiveTerminal) {
-                LiveTerminal.log('output', `Identity verified: ${valData.identity || 'AWS Account'}`);
-            }
+            state.providers.aws = true;
+            state.connectionIds.aws = createData.connectionId;
+            state.activeTenant = { provider: 'aws', id: createData.connectionId, display_name: createData.displayName, status: 'VERIFIED' };
 
-            // 2. Automatically register tenant on server
-            const tenantName = `AWS Production (${roleArn.split('/').pop() || 'Account'})`;
-            const tenantRes = await fetchFn(`${window.COMPLIANCE_API_URL}/api/tenants`, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                    provider: 'aws',
-                    name: tenantName,
-                    email: email || 'admin@compflow.icu',
-                    roleArn,
-                    externalId: externalId || 'CF-AINS-ONBOARDING-SECRET',
-                    scheduleFrequency: 'daily',
-                    autoRemediate: false
-                })
-            });
-
-            if (!tenantRes.ok) {
-                const tData = await tenantRes.json().catch(() => ({}));
-                console.warn('Tenant registration note:', tData.error);
-            }
-
-            state.providers['aws'] = true;
-
-            if (statusEl) {
-                statusEl.className = 'status-line connected';
-                statusEl.textContent = '✓ Connected & verified. Ready to run first scan.';
-            }
-            if (btnTest) {
-                btnTest.disabled = false;
-                btnTest.textContent = '✓ Verified';
-                btnTest.className = 'btn btn-success btn-sm';
-            }
-
-            if (window.showToast) window.showToast('✅ AWS connected & verified. Ready for scan!');
-
-            // Trigger UI transitions
-            updateUIForConnectedState({ provider: 'aws', name: tenantName });
+            if (statusEl) { statusEl.className = 'status-line connected'; statusEl.textContent = '✓ Connected & verified. Ready to run first scan.'; }
+            if (btnTest) { btnTest.disabled = false; btnTest.textContent = '✓ Verified'; btnTest.className = 'btn btn-success btn-sm'; }
+            if (window.showToast) window.showToast('AWS connected & verified. Initial scan queued.');
+            updateUIForConnectedState(state.activeTenant);
             if (window.TenantManager) TenantManager.loadTenants();
-
         } catch (err) {
             console.error('AWS Connect Error:', err);
-            if (statusEl) {
-                statusEl.className = 'status-line failed';
-                statusEl.textContent = `✕ Connection failed: ${err.message}`;
-            }
-            if (btnTest) {
-                btnTest.disabled = false;
-                btnTest.textContent = 'Fix credentials & Retry';
-                btnTest.className = 'btn btn-danger btn-sm';
-            }
+            if (statusEl) { statusEl.className = 'status-line failed'; statusEl.textContent = `✕ Connection failed: ${err.message}`; }
+            if (btnTest) { btnTest.disabled = false; btnTest.textContent = 'Fix credentials & Retry'; btnTest.className = 'btn btn-danger btn-sm'; }
             if (window.showToast) window.showToast(`Connection failed: ${err.message}`);
         }
     }
 
-    function isConnected() {
-        return Object.values(state.providers).some(Boolean) || state.activeTenant !== null;
-    }
-
-    function getProviders() {
-        const active = Object.keys(state.providers).filter(k => state.providers[k]);
-        if (active.length > 0) return active;
-        if (state.activeTenant) return [state.activeTenant.provider];
-        return ['aws'];
-    }
-
-    function getCredentials(provider) {
-        if (state.credentials[provider]) return state.credentials[provider];
-        if (state.activeTenant && state.activeTenant.provider === provider) {
-            return {
-                authMethod: 'role',
-                roleArn: state.activeTenant.roleArn,
-                externalId: state.activeTenant.externalId || 'CF-AINS-ONBOARDING-SECRET',
-                region: 'us-east-1'
-            };
-        }
-        return null;
-    }
-
-    function getSettings() {
-        return {
-            reportEmail: (state.activeTenant && state.activeTenant.email) ? state.activeTenant.email : 'compliance@compflow.icu'
-        };
-    }
+    function isConnected() { return Object.values(state.providers).some(Boolean) || state.activeTenant !== null; }
+    function getProviders() { return Object.keys(state.providers).filter(k => state.providers[k]); }
+    function getConnectionId(provider) { return state.connectionIds[provider] || (state.activeTenant?.provider === provider ? state.activeTenant.id : null); }
+    function getCredentials() { return null; }
+    function getSettings() { return { reportEmail: null }; }
 
     function updateChips() {
         const container = document.getElementById('connection-chips');
         if (!container) return;
-        
         const connected = getProviders();
-        if (connected.length === 0) {
-            container.innerHTML = '';
-            return;
-        }
-
-        container.innerHTML = connected.map(p => `
-            <span class="chip connected" style="font-size:0.75rem; background:rgba(16,185,129,0.15); color:#10b981; border:1px solid rgba(16,185,129,0.3); padding:3px 8px; border-radius:12px; display:inline-flex; align-items:center; gap:4px;">
-                <span class="dot" style="width:6px; height:6px; border-radius:50%; background:#10b981;"></span>
-                ${p.toUpperCase()} Connected
-            </span>
-        `).join('');
+        container.innerHTML = connected.map(p => `<span class="chip connected" style="font-size:0.75rem; background:rgba(16,185,129,0.15); color:#10b981; border:1px solid rgba(16,185,129,0.3); padding:3px 8px; border-radius:12px; display:inline-flex; align-items:center; gap:4px;"><span class="dot" style="width:6px;height:6px;border-radius:50%;background:#10b981"></span>${p.toUpperCase()} Connected</span>`).join('');
     }
 
     document.addEventListener('DOMContentLoaded', init);
-
-    return {
-        init,
-        testAndConnectAWS,
-        isConnected,
-        getProviders,
-        getCredentials,
-        getSettings,
-        updateChips,
-        checkExistingConnections
-    };
+    return { init, testAndConnectAWS, isConnected, getProviders, getConnectionId, getCredentials, getSettings, updateChips, checkExistingConnections };
 })();
