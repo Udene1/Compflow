@@ -1,4 +1,5 @@
 import { validateSessionToken, hasRole } from './auth.js';
+import { getOrganizationEntitlement, evaluateEntitlement } from './access_control.js';
 
 function parseCookies(cookieHeader) {
     const list = {};
@@ -34,7 +35,35 @@ export function requireAuth(allowedRoles = []) {
             return res.status(403).json({ error: 'Forbidden', message: 'Insufficient permissions.' });
         }
         req.user = user;
-        next();
+
+        // Authentication and session-management endpoints must remain reachable so an
+        // authenticated customer can inspect/rotate/logout even when service access is locked.
+        if (req.baseUrl === '/api/auth') return next();
+
+        const organizationId = user.orgId;
+        if (!organizationId) return res.status(403).json({ error: 'ORGANIZATION_CONTEXT_REQUIRED' });
+        try {
+            const entitlement = await getOrganizationEntitlement(organizationId);
+            const decision = evaluateEntitlement(entitlement);
+            if (!decision.allowed) {
+                return res.status(402).json({
+                    error: decision.reason,
+                    message: 'An active Compflow service entitlement is required to use the service.',
+                    access: {
+                        allowed: false,
+                        plan: entitlement?.plan || null,
+                        status: entitlement?.status || 'NONE',
+                        expiresAt: entitlement?.expires_at || null
+                    }
+                });
+            }
+            req.serviceEntitlement = entitlement;
+            return next();
+        } catch {
+            // PostgreSQL is authoritative for entitlements. Never fail open when access
+            // state cannot be determined.
+            return res.status(503).json({ error: 'SERVICE_ENTITLEMENT_AUTHORITY_UNAVAILABLE' });
+        }
     };
 }
 
