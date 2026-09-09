@@ -7,9 +7,11 @@ import { verifyEvidenceIntegrity, getEvidenceFreshness } from './evidence.js';
 import { validateRemediationExecutionContract } from './remediation_execution_contract.js';
 import { withRemediationExecutionLock } from './remediation_execution_lock.js';
 import { runRemediationPostcheck } from './remediation_postcheck.js';
+import { getExecutionExposurePaths } from './exposure_paths.js';
+import { aggregateSecurityRisk } from './security_risk.js';
 
 export const REMEDIATION_STATES = Object.freeze({ PROPOSED: 'PROPOSED', APPROVED: 'APPROVED', REPORTED_APPLIED: 'REPORTED_APPLIED', VERIFICATION_PENDING: 'VERIFICATION_PENDING', VERIFIED: 'VERIFIED', VERIFICATION_FAILED: 'VERIFICATION_FAILED' });
-const EVENT_TYPES = Object.freeze({ PROPOSED: 'REMEDIATION_PROPOSED', APPROVED: 'REMEDIATION_APPROVED', EXECUTION_STARTED: 'REMEDIATION_EXECUTION_STARTED', EXECUTION_FAILED: 'REMEDIATION_EXECUTION_FAILED', APPLIED: 'REMEDIATION_REPORTED_APPLIED', VERIFICATION_PENDING: 'REMEDIATION_VERIFICATION_PENDING', VERIFIED: 'REMEDIATION_VERIFIED', FAILED: 'REMEDIATION_VERIFICATION_FAILED' });
+const EVENT_TYPES = Object.freeze({ PROPOSED: 'REMEDIATION_PROPOSED', APPROVED: 'REMEDIATION_APPROVED', EXECUTION_STARTED: 'REMEDIATION_EXECUTION_STARTED', EXECUTION_FAILED: 'REMEDIATION_EXECUTION_FAILED', APPLIED: 'REMEDIATION_REPORTED_APPLIED', VERIFICATION_PENDING: 'REMEDIATION_VERIFICATION_PENDING', VERIFIED: 'REMEDIATION_VERIFIED', FAILED: 'REMEDIATION_VERIFICATION_FAILED', BASELINE_CAPTURED: 'REMEDIATION_BASELINE_CAPTURED' });
 const EXECUTABLE_TYPES = Object.freeze({ S3_PUBLIC_ACCESS: 'S3 Bucket', S3_VERSIONING_DISABLED: 'S3 Bucket', S3_ENCRYPTION_DISABLED: 'S3 Bucket', S3_LIFECYCLE_MISSING: 'S3 Bucket', SG_OPEN_SSH_WORLD: 'Security Group', SG_OPEN_RDP_WORLD: 'Security Group', SG_OPEN_HTTP_WORLD: 'Security Group', EC2_IMDSV1_ENABLED: 'EC2 Instance', EIP_UNASSOCIATED: 'Elastic IP', RDS_PUBLICLY_ACCESSIBLE: 'RDS Database', RDS_BACKUP_DISABLED: 'RDS Database', KMS_KEY_ROTATION_DISABLED: 'KMS Key', DYNAMODB_PITR_DISABLED: 'DynamoDB Table', AZURE_STORAGE_PUBLIC_BLOB: 'Azure Storage', AZURE_SQL_PUBLIC_ACCESS: 'Azure SQL', AZURE_APPSERVICE_HTTP_ALLOWED: 'Azure App Service', AZURE_NSG_OPEN_INBOUND: 'Azure NSG', DO_DROPLET_BACKUP: 'DO Droplet', HETZNER_BACKUP: 'Hetzner Server' });
 function clean(value, max = 255) { return String(value ?? '').trim().slice(0, max); }
 function idFor({ executionId, findingId, pathId }) { return `remediation_${crypto.createHash('sha256').update(`${executionId}:${pathId}:${findingId}`).digest('hex').slice(0, 32)}`; }
@@ -41,6 +43,16 @@ export async function proposeRemediation({ organizationId, executionId, pathId, 
 async function transition({ organizationId, executionId, remediationId, eventType, state, actorId, result, verification = null, execution = null, actorType = 'USER', idempotencyKey = null }) { const current = (await listRemediations({ organizationId, executionId })).find(item => item.id === remediationId); if (!current) throw new Error('REMEDIATION_NOT_FOUND'); const allowed = { [EVENT_TYPES.APPROVED]: [REMEDIATION_STATES.PROPOSED], [EVENT_TYPES.APPLIED]: [REMEDIATION_STATES.APPROVED], [EVENT_TYPES.VERIFICATION_PENDING]: [REMEDIATION_STATES.REPORTED_APPLIED], [EVENT_TYPES.VERIFIED]: [REMEDIATION_STATES.VERIFICATION_PENDING], [EVENT_TYPES.FAILED]: [REMEDIATION_STATES.VERIFICATION_PENDING] }[eventType] || []; if (!allowed.includes(current.state)) throw new Error('REMEDIATION_TRANSITION_INVALID'); const payload = { remediation: { ...current, state }, ...(verification ? { verification } : {}), ...(execution ? { execution } : {}) }; const event = await appendExecutionEvent({ organizationId, executionId, eventType, actorType, actorId, result, payload, idempotencyKey: idempotencyKey ? `remediation:${eventType}:${remediationId}:${idempotencyKey}` : null }); return { ...payload.remediation, eventId: event.id, verification, execution }; }
 export async function approveRemediation(args) { return transition({ ...args, eventType: EVENT_TYPES.APPROVED, state: REMEDIATION_STATES.APPROVED, result: 'approved' }); }
 
+async function captureBaseline({ organizationId, executionId, remediationId, actorId, scanId }) {
+  const paths = await getExecutionExposurePaths({ organizationId, executionId, limit: 100 });
+  const findings = await pool.query('SELECT id,resource_id,code,severity,control_id,status FROM findings WHERE organization_id=$1 AND scan_id=$2 ORDER BY created_at ASC LIMIT 5000', [organizationId, scanId]);
+  const risk = aggregateSecurityRisk({ findings: findings.rows, paths });
+  if (!Number.isFinite(Number(risk.score))) throw new Error('REMEDIATION_REANALYSIS_BASELINE_RISK_UNAVAILABLE');
+  await pool.query(`UPDATE execution_runs SET metadata=metadata||$1::jsonb,updated_at=NOW() WHERE organization_id=$2 AND id=$3`, [JSON.stringify({ baselineScanId: scanId, baselinePaths: paths, baselineRisk: risk }), organizationId, executionId]);
+  await appendExecutionEvent({ organizationId, executionId, actorType: 'SYSTEM', actorId, eventType: EVENT_TYPES.BASELINE_CAPTURED, result: 'captured', payload: { remediationId, baselineScanId: scanId, baselinePathCount: paths.length, baselineRisk: risk, baselinePaths: paths } });
+  return { paths, risk };
+}
+
 export async function executeApprovedRemediation({ organizationId, executionId, remediationId, actorId, req = null, idempotencyKey = null }) {
   return withRemediationExecutionLock({ organizationId, executionId, remediationId }, async () => {
     const current = (await listRemediations({ organizationId, executionId })).find(item => item.id === remediationId);
@@ -52,7 +64,8 @@ export async function executeApprovedRemediation({ organizationId, executionId, 
     const contract = validateRemediationExecutionContract({ code, resourceType, action: current.action });
     const execution = await pool.query('SELECT metadata FROM execution_runs WHERE organization_id=$1 AND id=$2', [organizationId, executionId]);
     if (!execution.rows[0]) throw new Error('EXECUTION_NOT_FOUND');
-    const scanId = execution.rows[0].metadata?.scanId || execution.rows[0].metadata?.scan_id || null;
+    const metadata = execution.rows[0].metadata || {};
+    const scanId = metadata.scanId || metadata.scan_id || null;
     if (!scanId) throw new Error('REMEDIATION_CONNECTION_UNAVAILABLE');
     const scan = await pool.query(`SELECT c.id,c.provider,c.region FROM scans s JOIN cloud_connections c ON c.id=s.connection_id WHERE s.organization_id=$1 AND s.id=$2`, [organizationId, scanId]);
     if (!scan.rows[0]) throw new Error('REMEDIATION_CONNECTION_UNAVAILABLE');
@@ -60,6 +73,7 @@ export async function executeApprovedRemediation({ organizationId, executionId, 
     const credentials = await defaultSecretStore.getSecret(organizationId, connection.id, 'remediation', actorId, req);
     if (!credentials) throw new Error('REMEDIATION_CREDENTIALS_UNAVAILABLE');
     const providerCredentials = { ...credentials, ...(connection.region ? { region: credentials.region || connection.region } : {}) };
+    await captureBaseline({ organizationId, executionId, remediationId, actorId, scanId });
     await appendExecutionEvent({ organizationId, executionId, eventType: EVENT_TYPES.EXECUTION_STARTED, actorType: 'SYSTEM', actorId, result: 'started', payload: { remediation: current, execution: { provider: connection.provider, connectionId: connection.id, resourceType, resourceId: current.resourceId, findingCode: contract.code, authority: contract.authority } }, idempotencyKey: idempotencyKey ? `remediation:start:${remediationId}:${idempotencyKey}` : null });
     try {
       const result = await runRemediation(connection.provider, providerCredentials, resourceType, current.resourceId, contract.action, false, { findingCode: contract.code, executionScope: { organizationId, executionId, remediationId } });
