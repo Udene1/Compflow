@@ -1,13 +1,11 @@
 // ─── ComplianceFlow AI: Job Manager (PostgreSQL + EventEmitter) ───
 
-import pool, { initDb } from './db.js';
+import pool from './db.js';
 import { EventEmitter } from 'events';
 import { randomUUID } from 'crypto';
 
 export const jobEvents = new EventEmitter();
 jobEvents.setMaxListeners(100);
-
-initDb();
 
 const TTL_DAYS = 7;
 
