@@ -3,10 +3,6 @@ import pool from './db.js';
 
 const MAX_ROWS = 5000;
 
-function clean(value, max = 512) {
-  return String(value ?? '').trim().slice(0, max);
-}
-
 function hash(value) {
   return crypto.createHash('sha256').update(JSON.stringify(value)).digest('hex');
 }
@@ -31,6 +27,7 @@ export async function buildAuditExport({ organizationId, executionId } = {}) {
   );
   if (!execution.rows[0]) throw new Error('EXECUTION_NOT_FOUND');
 
+  const scanId = execution.rows[0].metadata?.scanId || execution.rows[0].metadata?.scan_id || null;
   const [events, evidence, paths, findings] = await Promise.all([
     pool.query(
       `SELECT id, sequence, event_type, actor_type, actor_id, result, payload, occurred_at
@@ -61,14 +58,15 @@ export async function buildAuditExport({ organizationId, executionId } = {}) {
         ORDER BY p.updated_at ASC LIMIT $3`,
       [organizationId, executionId, 1000]
     ),
-    pool.query(
-      `SELECT id, scan_id, resource_id, control_id, severity, status, code, created_at
-         FROM findings
-        WHERE organization_id=$1
-          AND scan_id = COALESCE(NULLIF($2::text,''), scan_id)
-        ORDER BY created_at ASC LIMIT $3`,
-      [organizationId, execution.rows[0].metadata?.scanId || execution.rows[0].metadata?.scan_id || '', MAX_ROWS]
-    )
+    scanId
+      ? pool.query(
+          `SELECT id, scan_id, resource_id, control_id, severity, status, code, created_at
+             FROM findings
+            WHERE organization_id=$1 AND scan_id=$2
+            ORDER BY created_at ASC LIMIT $3`,
+          [organizationId, scanId, MAX_ROWS]
+        )
+      : Promise.resolve({ rows: [] })
   ]);
 
   const packageData = {
@@ -76,25 +74,25 @@ export async function buildAuditExport({ organizationId, executionId } = {}) {
     generatedAt: new Date().toISOString(),
     organizationId,
     execution: execution.rows[0],
+    authoritativeScanId: scanId,
     findings: findings.rows,
     evidence: evidence.rows,
     exposurePaths: paths.rows,
     executionEvents: events.rows
   };
 
-  const evidenceHashes = evidence.rows.map(row => row.evidence_hash).filter(Boolean);
-  const eventHashes = events.rows.map(row => hash({ id: row.id, sequence: row.sequence, event_type: row.event_type, payload: row.payload }));
   const manifest = {
     schemaVersion: packageData.schemaVersion,
     organizationId,
     executionId,
+    authoritativeScanId: scanId,
     executionStatus: execution.rows[0].status,
     findingCount: findings.rows.length,
     evidenceCount: evidence.rows.length,
     pathCount: paths.rows.length,
     eventCount: events.rows.length,
-    evidenceHashes,
-    eventHashes,
+    evidenceHashes: evidence.rows.map(row => row.evidence_hash).filter(Boolean),
+    eventHashes: events.rows.map(row => hash({ id: row.id, sequence: row.sequence, event_type: row.event_type, payload: row.payload })),
     contentHash: hash(packageData)
   };
 
