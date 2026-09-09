@@ -31,11 +31,23 @@ export async function getRemediationSecurityImpact({ organizationId, executionId
     const evidence = await pool.query(`SELECT id,evidence_hash,collected_at,observed_at,source_type,source_ref FROM execution_evidence_records WHERE organization_id=$1 AND execution_id=$2 AND id=$3 LIMIT 1`, [organizationId, executionId, reanalysis.reanalysisEvidenceId]);
     reanalysisEvidence = evidence.rows[0] || null;
   }
+  const controlEvidenceId = freshEvidence?.id || null;
+  const controlEvidenceHash = freshEvidence?.evidence_hash || null;
+  const reanalysisEvidenceId = reanalysisEvidence?.id || null;
+  const reanalysisEvidenceHash = reanalysisEvidence?.evidence_hash || null;
+  const lineageMatchesEvent = Boolean(
+    reanalysisEvidenceId && reanalysisEvidenceHash &&
+    reanalysisEvidenceId === reanalysis?.reanalysisEvidenceId &&
+    reanalysisEvidenceHash === reanalysis?.reanalysisEvidenceHash
+  );
   const proof = deriveRemediationSecurityProof({
     remediationId, executionId, findingId: remediation.findingId,
-    controlEvidenceId: freshEvidence?.id || null, controlEvidenceHash: freshEvidence?.evidence_hash || null,
-    reanalysisEvidenceId: reanalysisEvidence?.id || null, reanalysisEvidenceHash: reanalysisEvidence?.evidence_hash || null,
+    controlEvidenceId, controlEvidenceHash,
+    reanalysisEvidenceId: lineageMatchesEvent ? reanalysisEvidenceId : null,
+    reanalysisEvidenceHash: lineageMatchesEvent ? reanalysisEvidenceHash : null,
     verification: remediation.verification || null,
+    baselineScanId: reanalysis?.baselineScanId || null,
+    freshScanId: reanalysis?.freshScanId || null,
     beforePaths: reanalysis?.beforePaths || [], afterPaths: reanalysis?.afterPaths || [],
     afterComplete: reanalysis?.afterComplete === true, riskBefore: reanalysis?.riskBefore || null,
     riskAfter: reanalysis?.riskAfter || null, reanalysisEventId: event?.id || null
@@ -44,6 +56,6 @@ export async function getRemediationSecurityImpact({ organizationId, executionId
     remediationId, findingId: remediation.findingId, code: remediation.code, state: remediation.state,
     verified: effect.verified, affectedPathCount: affectedPaths.length, affectedPathIds: affectedPaths.map(path => path.id),
     currentRiskObservation: risk, riskDelta: proof.risk.delta, securityEffect: effect, securityProof: proof,
-    claimSafe: proof.claimSafe ? 'Fresh control evidence and complete reanalysis support the recorded security-effect claim.' : 'Compflow does not claim exposure-path or aggregate-risk reduction until fresh control evidence, reanalysis evidence, and complete reanalysis lineage are present.'
+    claimSafe: proof.claimSafe ? 'Fresh control evidence and complete reanalysis support the recorded security-effect claim.' : 'Compflow does not claim exposure-path or aggregate-risk reduction until fresh control evidence, fresh reanalysis evidence, distinct scan lineage, and complete reanalysis lineage are present.'
   };
 }
