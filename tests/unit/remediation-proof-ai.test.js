@@ -33,6 +33,22 @@ describe('deterministic remediation proof boundary', () => {
     })).toThrow('REMEDIATION_REANALYSIS_SCAN_NOT_FRESH');
   });
 
+  it('requires a completed persisted fresh scan', () => {
+    expect(() => validateFreshReanalysis({
+      baselineScanId: 'scan-1', freshScanId: 'scan-2', scanStatus: 'RUNNING', resourcesObserved: 1,
+      freshFindingCount: 0, evidenceId: 'ev1', evidenceHash: 'hash', evidenceCount: 1,
+      afterPaths: [], riskAfter: { score: 1 }
+    })).toThrow('REMEDIATION_REANALYSIS_SCAN_NOT_COMPLETED');
+
+    const result = validateFreshReanalysis({
+      baselineScanId: 'scan-1', freshScanId: 'scan-2', scanStatus: 'COMPLETED', resourcesObserved: 1,
+      freshFindingCount: 0, evidenceId: 'ev1', evidenceHash: 'hash', evidenceCount: 1,
+      afterPaths: [], riskAfter: { score: 1 }
+    });
+    expect(result.complete).toBe(true);
+    expect(result.version).toBe('remediation-reanalysis-v2');
+  });
+
   it('requires actual provider evidence and a complete graph/risk snapshot', () => {
     expect(() => validateFreshReanalysis({
       baselineScanId: 'scan-1', freshScanId: 'scan-2', resourcesObserved: 0,
