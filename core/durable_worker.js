@@ -23,20 +23,21 @@ export async function durableWorkerHandler(payload) {
   const organizationId = data?.organizationId || data?.orgId || 'org_default';
   const provider = data?.provider || 'aws';
   const clientId = data?.clientId || data?.id || 'adhoc_user';
+  const connectionId = data?.connectionId || null;
   const resumeNodeIds = Array.isArray(data?.resumeNodeIds) ? [...new Set(data.resumeNodeIds)].filter(id => typeof id === 'string' && id.length <= 128).slice(0, 100) : [];
   const owner = workerId();
 
-  await createExecutionRun({ organizationId, executionId, metadata: { provider, clientId, jobId: data?.jobId || null, connectionId: data?.connectionId || null, scanId: data?.scanId || null } });
+  await createExecutionRun({ organizationId, executionId, metadata: { provider, clientId, jobId: data?.jobId || null, connectionId, scanId: data?.scanId || null } });
   const lease = await acquireExecutionLease({ organizationId, executionId, workerId: owner });
   let execution;
   try {
-    execution = await beginExecution({ organizationId, executionId, provider, clientId, jobId: data?.jobId || null, connectionId: data?.connectionId || null, scanId: data?.scanId || null });
+    execution = await beginExecution({ organizationId, executionId, provider, clientId, jobId: data?.jobId || null, connectionId, scanId: data?.scanId || null });
   } catch (error) {
     await finishExecutionRun({ organizationId, executionId, workerId: owner, leaseToken: lease.lease_token, status: 'FAILED', errorCode: 'EXECUTION_BEGIN_FAILED', errorMessage: 'Execution initialization failed' }).catch(() => {});
     throw error;
   }
 
-  return withExecutionContext({ organizationId, executionId, provider, resumeNodeIds, executionNodeId: execution.node.id, executionAttemptId: execution.attempt.id }, async () => {
+  return withExecutionContext({ organizationId, executionId, provider, connectionId, scanId: data?.scanId || null, resumeNodeIds, executionNodeId: execution.node.id, executionAttemptId: execution.attempt.id }, async () => {
     let heartbeatTimer; let heartbeatFailure = null; let heartbeatInFlight = false; let leaseLost = false;
     const heartbeat = async () => {
       if (heartbeatInFlight || heartbeatFailure || leaseLost) return;
