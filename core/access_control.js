@@ -27,6 +27,37 @@ export function evaluateEntitlement(entitlement, now = new Date()) {
     return Object.freeze({ allowed: true, reason: null, entitlement });
 }
 
+function pilotExpiry() {
+    const days = Number(process.env.PILOT_ACCESS_DAYS || 30);
+    const bounded = Number.isFinite(days) ? Math.max(1, Math.min(Math.floor(days), 365)) : 30;
+    return new Date(Date.now() + bounded * 24 * 60 * 60 * 1000).toISOString();
+}
+
+async function recoverPilotEntitlement(organizationId) {
+    // Pilot authentication is the explicit product-access grant. The audit event is
+    // durable and written during pilot-login, so a missing entitlement row can be
+    // reconstructed without trusting a browser flag or session metadata.
+    const provider = await pool.query(
+        `SELECT metadata->>'provider' AS provider
+         FROM audit_events
+         WHERE organization_id = $1
+           AND event_type = 'user_authenticated'
+           AND metadata->>'provider' IN ('pilot_code','dev_portal')
+         ORDER BY created_at DESC LIMIT 1`,
+        [organizationId]
+    );
+    const source = provider.rows[0]?.provider;
+    if (!source || (source === 'dev_portal' && process.env.NODE_ENV === 'production')) return null;
+    return grantOrganizationEntitlement({
+        organizationId,
+        plan: PLAN.PILOT,
+        status: ENTITLEMENT_STATUS.PILOT,
+        source,
+        expiresAt: pilotExpiry(),
+        metadata: { accessModel: 'explicit_pilot_authentication' }
+    });
+}
+
 export async function getOrganizationEntitlement(organizationId) {
     if (!organizationId) return null;
     const result = await pool.query(
@@ -34,7 +65,8 @@ export async function getOrganizationEntitlement(organizationId) {
          FROM organization_entitlements WHERE organization_id = $1 LIMIT 1`,
         [organizationId]
     );
-    return result.rows[0] || null;
+    if (result.rows[0]) return result.rows[0];
+    return recoverPilotEntitlement(organizationId);
 }
 
 export async function grantOrganizationEntitlement({ organizationId, plan = PLAN.PILOT, status = ENTITLEMENT_STATUS.PILOT, source = 'pilot_code', expiresAt = null, metadata = {} }) {
