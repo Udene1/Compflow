@@ -16,7 +16,13 @@ function parseCookies(cookieHeader) {
 }
 
 function apiError(res, status, code, message, details = undefined) {
-    const body = { error: code, code, message };
+    const labels = {
+        AUTHENTICATION_REQUIRED: 'Unauthorized',
+        INVALID_SESSION: 'Unauthorized',
+        INSUFFICIENT_PERMISSIONS: 'Forbidden',
+        ORGANIZATION_CONTEXT_REQUIRED: 'Forbidden'
+    };
+    const body = { error: labels[code] || code, code, message };
     if (details !== undefined) body.details = details;
     return res.status(status).json(body);
 }
