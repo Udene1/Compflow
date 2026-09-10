@@ -32,8 +32,8 @@ function errorResponse(error) {
         PILOT_INVITATION_UNAVAILABLE: 'This pilot invitation is no longer available.',
         PILOT_EMAIL_MISMATCH: 'The company email does not match the pilot invitation.',
         PILOT_ACCOUNT_ALREADY_EXISTS: 'An account already exists for this email. Use the existing authentication method.',
-        PILOT_ACCOUNT_MISSING: 'The pilot account could not be found. Contact your Compflow administrator.',
-        PILOT_ACCESS_EXPIRED: 'Pilot access has expired. Contact your Compflow administrator.',
+        PILOT_ACCOUNT_MISSING: 'The pilot account could not be found. Contact team — kenneth@compflow.icu',
+        PILOT_ACCESS_EXPIRED: 'Pilot access has expired. Contact team — kenneth@compflow.icu',
         PILOT_INVITATION_RACE_LOST: 'The pilot invitation changed while activation was in progress. Please try again.'
     };
     return {
