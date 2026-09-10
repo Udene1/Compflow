@@ -38,8 +38,8 @@ async function persistScanResults({ scanId, organizationId, connectionId, execut
         await pool.query(`INSERT INTO findings (id,organization_id,scan_id,resource_id,control_id,severity,status,code) VALUES ($1,$2,$3,$4,$5,$6,$7,$8) ON CONFLICT (id) DO UPDATE SET severity=EXCLUDED.severity, status=EXCLUDED.status, code=EXCLUDED.code`, [finding.id, finding.organizationId, finding.scanId, finding.resourceId, finding.controlId, finding.severity, finding.status, finding.code]);
     }
 
-    // Evidence is persisted by persistScanGraph under the execution context. The
-    // durable worker's executionId is normally the jobId, not the scanId.
+    // persistScanGraph must run before this finalization step. Evidence is
+    // authoritative and tied to the same execution/connection lineage.
     const evidenceRes = await pool.query(`SELECT COUNT(*)::int AS count FROM execution_evidence_records WHERE organization_id=$1 AND execution_id=$2 AND connection_id=$3`, [organizationId, executionId, connectionId]);
     const evidenceCount = evidenceRes.rows[0]?.count || 0;
     await pool.query(`UPDATE scans SET status=$1, resources_discovered=$2, findings_count=$3, evidence_count=$4, completed_at=CURRENT_TIMESTAMP, updated_at=CURRENT_TIMESTAMP, error_code=NULL, error_message=NULL WHERE id=$5`, ['COMPLETED', Array.isArray(resources) ? resources.length : 0, findings.length, evidenceCount, scanId]);
@@ -92,8 +92,12 @@ export async function processCloudScanJob(jobData = {}) {
         await trackProgress('in_progress', 25, 'SYSTEM', `Executing deep ${provider.toUpperCase()} scan...`);
         const { resources } = await runScan(provider, credentials);
         const anomalies = (resources || []).filter(resource => resource.severity !== 'pass');
+
+        // The graph/evidence layer is part of the scan's durable result, not a
+        // side path. Persist it before scan finalization so evidence_count is
+        // measured from the same execution that produced the observations.
+        await persistScanGraph({ organizationId: orgId, executionId, provider, connectionId, resources: resources || [] });
         if (scanId) await persistScanResults({ scanId, organizationId: orgId, connectionId, executionId, resources: resources || [] });
-        else await persistScanGraph({ organizationId: orgId, executionId, provider, connectionId, resources: resources || [] });
 
         const hasErrors = (resources || []).some(resource => resource.severity === 'error' || resource.status === 'ERROR');
         const scanStatus = hasErrors ? 'partial' : 'completed';
