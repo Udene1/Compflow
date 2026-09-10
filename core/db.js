@@ -69,17 +69,24 @@ export async function initDb() {
             id VARCHAR(64) PRIMARY KEY, email VARCHAR(255) UNIQUE NOT NULL, name VARCHAR(255), avatar_url TEXT,
             created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
         );
+        ALTER TABLE users ADD COLUMN IF NOT EXISTS status VARCHAR(16) DEFAULT 'active';
+        ALTER TABLE users ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP;
+        ALTER TABLE users ADD COLUMN IF NOT EXISTS password_hash TEXT;
         CREATE TABLE IF NOT EXISTS org_memberships (
             user_id VARCHAR(64) REFERENCES users(id) ON DELETE CASCADE, org_id VARCHAR(64) REFERENCES organizations(id) ON DELETE CASCADE,
             role VARCHAR(32) DEFAULT 'ENGINEER', joined_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
             PRIMARY KEY (user_id, org_id)
         );
+        ALTER TABLE org_memberships ADD COLUMN IF NOT EXISTS status VARCHAR(16) DEFAULT 'active';
+        ALTER TABLE org_memberships ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP;
         CREATE TABLE IF NOT EXISTS sessions (
             id VARCHAR(64) PRIMARY KEY, user_id VARCHAR(64) REFERENCES users(id) ON DELETE CASCADE,
             org_id VARCHAR(64) REFERENCES organizations(id) ON DELETE CASCADE, token_hash VARCHAR(255) NOT NULL,
             role VARCHAR(32) DEFAULT 'ENGINEER', expires_at TIMESTAMPTZ NOT NULL,
             created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
         );
+        ALTER TABLE sessions ADD COLUMN IF NOT EXISTS is_revoked BOOLEAN DEFAULT false;
+        ALTER TABLE sessions ADD COLUMN IF NOT EXISTS rotated_from VARCHAR(64);
         CREATE TABLE IF NOT EXISTS identities (
             id VARCHAR(64) PRIMARY KEY, user_id VARCHAR(64) REFERENCES users(id) ON DELETE CASCADE,
             provider VARCHAR(32) NOT NULL, provider_subject VARCHAR(255) NOT NULL, provider_email VARCHAR(255),
@@ -133,13 +140,9 @@ export async function initDb() {
         CREATE INDEX IF NOT EXISTS idx_findings_org ON findings(organization_id);
         CREATE TABLE IF NOT EXISTS organization_entitlements (
             organization_id VARCHAR(64) PRIMARY KEY REFERENCES organizations(id) ON DELETE CASCADE,
-            plan VARCHAR(32) NOT NULL,
-            status VARCHAR(32) NOT NULL,
-            source VARCHAR(64) NOT NULL,
-            starts_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
-            expires_at TIMESTAMPTZ,
-            metadata JSONB NOT NULL DEFAULT '{}'::jsonb,
-            updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            plan VARCHAR(32) NOT NULL, status VARCHAR(32) NOT NULL, source VARCHAR(64) NOT NULL,
+            starts_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP, expires_at TIMESTAMPTZ,
+            metadata JSONB NOT NULL DEFAULT '{}'::jsonb, updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
             CHECK (plan IN ('pilot','trial','standard','enterprise')),
             CHECK (status IN ('ACTIVE','TRIAL','PILOT','PAST_DUE','CANCELED'))
         );
@@ -222,17 +225,11 @@ export async function initDb() {
             UNIQUE (path_id, position)
         );
         CREATE INDEX IF NOT EXISTS exposure_path_edges_path_idx ON exposure_path_edges (path_id, position);
-        ALTER TABLE users ADD COLUMN IF NOT EXISTS status VARCHAR(16) DEFAULT 'active';
-        ALTER TABLE users ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP;
         ALTER TABLE organizations ADD COLUMN IF NOT EXISTS website VARCHAR(255);
         ALTER TABLE organizations ADD COLUMN IF NOT EXISTS industry VARCHAR(64);
         ALTER TABLE organizations ADD COLUMN IF NOT EXISTS company_size VARCHAR(32);
         ALTER TABLE organizations ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP;
         ALTER TABLE organizations ADD COLUMN IF NOT EXISTS onboarding_status VARCHAR(32) DEFAULT 'AUTHENTICATED';
-        ALTER TABLE org_memberships ADD COLUMN IF NOT EXISTS status VARCHAR(16) DEFAULT 'active';
-        ALTER TABLE org_memberships ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP;
-        ALTER TABLE sessions ADD COLUMN IF NOT EXISTS is_revoked BOOLEAN DEFAULT false;
-        ALTER TABLE sessions ADD COLUMN IF NOT EXISTS rotated_from VARCHAR(64);
         ALTER TABLE cloud_connections ADD COLUMN IF NOT EXISTS principal VARCHAR(255);
         ALTER TABLE cloud_connections ADD COLUMN IF NOT EXISTS verification_method VARCHAR(255);
     `;
