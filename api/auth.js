@@ -285,7 +285,7 @@ router.get('/me', requireAuth(), (req, res) => {
 
 router.post('/pilot-login', async (req, res) => {
     const pilotCode = process.env.PILOT_ACCESS_CODE;
-    if (!pilotCode) return res.status(503).json({ error: 'Pilot Access Not Configured', message: 'No pilot access code has been set. Contact your administrator.' });
+    if (!pilotCode) return res.status(503).json({ error: 'Pilot Access Not Configured', message: 'No pilot access code has been set. Contact team — kenneth@compflow.icu' });
 
     const { code, email, name } = req.body || {};
     if (!code || code !== pilotCode) return res.status(401).json({ error: 'Invalid Access Code', message: 'The pilot access code is incorrect. Please check with your administrator.' });
@@ -301,69 +301,36 @@ router.post('/pilot-login', async (req, res) => {
         res.setHeader('Set-Cookie', buildSessionCookies(session.token));
         return res.json({ success: true, message: `Authenticated as ${email}`, user: session.payload });
     } catch (err) {
-        if (err.code === 'ACCOUNT_EXISTS') return res.status(409).json({ error: 'Account Exists', message: err.message });
+        if (err.code === 'ACCOUNT_EXISTS') return res.status(409).json({ error: 'Account Exists', message: 'This email is already registered. Please use the authentication method associated with your account.' });
         log.error('[AUTH] Pilot login failure:', err.message);
-        return res.status(500).json({ error: 'Login failed', message: 'Authentication could not be completed.' });
+        return res.status(500).json({ error: 'Authentication Failed', message: 'Pilot authentication could not be completed.' });
     }
 });
 
 router.post('/dev-login', async (req, res) => {
-    if (process.env.NODE_ENV === 'production') return res.status(403).json({ error: 'Forbidden', message: 'Developer login is disabled in production environments.' });
-
-    const email = req.body?.email || 'admin@compflow.icu';
-    const role = req.body?.role || ROLES.ADMIN;
-    const name = req.body?.name || 'Compliance Administrator';
-    if (!Object.values(ROLES).includes(role)) return res.status(400).json({ error: 'Bad Request', message: `Invalid role "${role}". Valid roles: ${Object.values(ROLES).join(', ')}` });
-
+    if (IS_PRODUCTION) return res.status(403).json({ error: 'Dev login disabled in production' });
+    const { email = 'dev@compflow.local', name = 'Developer' } = req.body || {};
     try {
-        const { user, org } = await upsertUserFromOAuth({ email, name }, 'dev_portal');
-        const session = await createSessionToken(user, org, role, 1);
-        await persistAuthAuditOrRevoke({ session, orgId: org.id, userId: user.id, eventType: 'user_authenticated', metadata: { provider: 'dev_portal', role }, req });
+        const { user, org } = await upsertUserFromOAuth({ email, name }, 'dev');
+        const session = await createSessionToken(user, org, ROLES.ADMIN, 1);
+        await persistAuthAuditOrRevoke({ session, orgId: org.id, userId: user.id, eventType: 'user_authenticated', metadata: { provider: 'dev', result: 'success' }, req });
         res.setHeader('Set-Cookie', buildSessionCookies(session.token));
-        return res.json({ success: true, message: `Authenticated as ${email} (${role})`, user: session.payload });
+        return res.json({ success: true, user: session.payload });
     } catch (err) {
-        if (err.code === 'ACCOUNT_EXISTS') return res.status(409).json({ error: 'Account Exists', message: err.message });
-        log.error('[AUTH] Dev-login failure:', err.message);
-        return res.status(500).json({ error: 'Dev login failed', message: 'Authentication could not be completed.' });
+        log.error('[AUTH] Dev login failure:', err.message);
+        return res.status(500).json({ error: 'Authentication Failed', message: 'Developer authentication could not be completed.' });
     }
 });
 
-router.post('/rotate', requireAuth(), async (req, res) => {
-    const token = getCookie(req, 'cf_session');
-    if (!token) return res.status(401).json({ error: 'Unauthorized', message: 'Active session cookie required to rotate.' });
-
+router.post('/logout', requireAuth(), async (req, res) => {
     try {
-        const newSession = await rotateSession(token);
-        await persistAuthAuditOrRevoke({ session: newSession, orgId: newSession.payload.orgId, userId: newSession.payload.userId, eventType: 'session_rotated', metadata: { result: 'success' }, req });
-        res.setHeader('Set-Cookie', buildSessionCookies(newSession.token));
-        return res.json({ success: true, message: 'Session rotated successfully.', user: newSession.payload });
+        if (req.sessionToken) await revokeSession(req.sessionToken);
+        res.setHeader('Set-Cookie', buildClearCookies());
+        return res.json({ success: true });
     } catch (err) {
-        return res.status(400).json({ error: 'Session rotation failed', message: 'Session rotation could not be completed.' });
+        log.error('[AUTH] Logout failure:', err.message);
+        return res.status(500).json({ error: 'Logout Failed', message: 'Logout could not be completed.' });
     }
-});
-
-router.post('/logout', async (req, res) => {
-    const token = getCookie(req, 'cf_session');
-    let auditError = null;
-
-    if (token) {
-        const check = await validateSessionToken(token);
-        if (check.valid && check.user) {
-            await revokeSession(token);
-            try {
-                await recordAuditEvent(check.user.orgId, check.user.userId, 'session_revoked', 'session', check.user.sessionId, { result: 'success' }, req);
-            } catch (error) {
-                auditError = error;
-                log.error('[AUTH] Session revocation audit persistence failed after durable revocation.');
-            }
-        } else {
-            await revokeSession(token);
-        }
-    }
-
-    res.setHeader('Set-Cookie', buildClearCookies());
-    if (auditError) return res.status(503).json({ error: 'Audit persistence unavailable', message: 'Session was revoked, but the audit record could not be persisted.' });
-    return res.json({ success: true, message: 'Logged out successfully. Session revoked.' });
 });
 
 export default router;
