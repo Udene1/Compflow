@@ -97,8 +97,6 @@ function validateEmailDomain(email) {
 }
 
 router.get('/providers', (req, res) => {
-    const isDev = process.env.NODE_ENV !== 'production';
-
     res.json({
         google: {
             enabled: Boolean(process.env.GOOGLE_CLIENT_ID && process.env.GOOGLE_CLIENT_SECRET),
@@ -108,7 +106,6 @@ router.get('/providers', (req, res) => {
             enabled: Boolean(process.env.GITHUB_CLIENT_ID && process.env.GITHUB_CLIENT_SECRET),
             authUrl: `${API_URL}/api/auth/github`
         },
-        devLogin: isDev,
         pilotAccess: Boolean(process.env.PILOT_ACCESS_CODE),
         domainRestrictions: {
             allowedDomains: ALLOWED_DOMAINS.length > 0 ? ALLOWED_DOMAINS : 'all',
@@ -304,27 +301,6 @@ router.post('/pilot-login', async (req, res) => {
         if (err.code === 'ACCOUNT_EXISTS') return res.status(409).json({ error: 'Account Exists', message: err.message });
         log.error('[AUTH] Pilot login failure:', err.message);
         return res.status(500).json({ error: 'Login failed', message: 'Authentication could not be completed.' });
-    }
-});
-
-router.post('/dev-login', async (req, res) => {
-    if (process.env.NODE_ENV === 'production') return res.status(403).json({ error: 'Forbidden', message: 'Developer login is disabled in production environments.' });
-
-    const email = req.body?.email || 'admin@compflow.icu';
-    const role = req.body?.role || ROLES.ADMIN;
-    const name = req.body?.name || 'Compliance Administrator';
-    if (!Object.values(ROLES).includes(role)) return res.status(400).json({ error: 'Bad Request', message: `Invalid role "${role}". Valid roles: ${Object.values(ROLES).join(', ')}` });
-
-    try {
-        const { user, org } = await upsertUserFromOAuth({ email, name }, 'dev_portal');
-        const session = await createSessionToken(user, org, role, 1);
-        await persistAuthAuditOrRevoke({ session, orgId: org.id, userId: user.id, eventType: 'user_authenticated', metadata: { provider: 'dev_portal', role }, req });
-        res.setHeader('Set-Cookie', buildSessionCookies(session.token));
-        return res.json({ success: true, message: `Authenticated as ${email} (${role})`, user: session.payload });
-    } catch (err) {
-        if (err.code === 'ACCOUNT_EXISTS') return res.status(409).json({ error: 'Account Exists', message: err.message });
-        log.error('[AUTH] Dev-login failure:', err.message);
-        return res.status(500).json({ error: 'Dev login failed', message: 'Authentication could not be completed.' });
     }
 });
 
