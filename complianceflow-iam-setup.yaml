@@ -1,0 +1,50 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: >
+  ComplianceFlow AWS onboarding role. Creates a cross-account, read-only
+  IAM role for provider-backed discovery and security/compliance analysis.
+
+Parameters:
+  ComplianceFlowAccountId:
+    Type: String
+    Description: >
+      AWS account ID that operates the ComplianceFlow AssumeRole service.
+      Enter the account ID supplied by your ComplianceFlow administrator.
+    AllowedPattern: '^[0-9]{12}$'
+    ConstraintDescription: Must be a 12-digit AWS account ID.
+
+  ExternalId:
+    Type: String
+    Description: >
+      External ID used by ComplianceFlow when assuming this role.
+    Default: 'CF-AINS-ONBOARDING-SECRET'
+    MinLength: 8
+    NoEcho: true
+
+Resources:
+  ComplianceFlowCrossAccountRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: ComplianceFlow-Role
+      Description: Read-only cross-account role for ComplianceFlow cloud discovery.
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Sid: ComplianceFlowAssumeRole
+            Effect: Allow
+            Principal:
+              AWS: !Sub 'arn:aws:iam::${ComplianceFlowAccountId}:root'
+            Action: sts:AssumeRole
+            Condition:
+              StringEquals:
+                sts:ExternalId: !Ref ExternalId
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/SecurityAudit
+        - arn:aws:iam::aws:policy/job-function/ViewOnlyAccess
+
+Outputs:
+  RoleArn:
+    Description: Paste this Role ARN into the ComplianceFlow AWS connection form.
+    Value: !GetAtt ComplianceFlowCrossAccountRole.Arn
+  ExternalId:
+    Description: External ID configured on the role. Use the same value in ComplianceFlow.
+    Value: !Ref ExternalId
